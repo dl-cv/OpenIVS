@@ -682,6 +682,22 @@ std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json&
         }
         const bool withMask = emitMaskOutput && !mask.empty();
         const float area = static_cast<float>(ComputeFlowArea(entry, mask, bbox, emitMaskOutput));
+        const bool withMean = ReadJsonBool(
+            entry.contains("with_mean") ? entry.at("with_mean") : Json(), false);
+        const double foregroundMean = entry.contains("foreground_mean") && entry.at("foreground_mean").is_null()
+            ? std::numeric_limits<double>::quiet_NaN()
+            : ReadJsonNumber(entry.contains("foreground_mean") ? entry.at("foreground_mean") : Json(), 0.0);
+        const double backgroundMean = entry.contains("background_mean") && entry.at("background_mean").is_null()
+            ? std::numeric_limits<double>::quiet_NaN()
+            : ReadJsonNumber(entry.contains("background_mean") ? entry.at("background_mean") : Json(), 0.0);
+        const bool withMedian = ReadJsonBool(
+            entry.contains("with_median") ? entry.at("with_median") : Json(), false);
+        const double foregroundMedian = entry.contains("foreground_median") && entry.at("foreground_median").is_null()
+            ? std::numeric_limits<double>::quiet_NaN()
+            : ReadJsonNumber(entry.contains("foreground_median") ? entry.at("foreground_median") : Json(), 0.0);
+        const double backgroundMedian = entry.contains("background_median") && entry.at("background_median").is_null()
+            ? std::numeric_limits<double>::quiet_NaN()
+            : ReadJsonNumber(entry.contains("background_median") ? entry.at("background_median") : Json(), 0.0);
 
         out.emplace_back(
             categoryId,
@@ -693,9 +709,14 @@ std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json&
             mask,
             withBbox,
             withAngle,
-            angle
+            angle,
+            withMean,
+            foregroundMean,
+            backgroundMean
         );
-        out.back().ReadStatistics(entry);
+        out.back().withMedian = withMedian;
+        out.back().foregroundMedian = foregroundMedian;
+        out.back().backgroundMedian = backgroundMedian;
     }
     return out;
 }
@@ -758,9 +779,12 @@ Json NormalizeFlowOneOutJson(const Json& flowResultList, bool emitMaskOutput) {
         }
 
         out["area"] = ComputeFlowArea(entry, mask, bbox, emitMaskOutput);
-        for (const char* key : { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" }) {
-            if (entry.contains(key)) out[key] = entry.at(key);
-        }
+        if (entry.contains("with_mean")) out["with_mean"] = entry.at("with_mean");
+        if (entry.contains("foreground_mean")) out["foreground_mean"] = entry.at("foreground_mean");
+        if (entry.contains("background_mean")) out["background_mean"] = entry.at("background_mean");
+        if (entry.contains("with_median")) out["with_median"] = entry.at("with_median");
+        if (entry.contains("foreground_median")) out["foreground_median"] = entry.at("foreground_median");
+        if (entry.contains("background_median")) out["background_median"] = entry.at("background_median");
         if (entry.contains("metadata") && entry.at("metadata").is_object()) {
             const Json& metadata = entry.at("metadata");
             const size_t internalFieldCount = metadata.contains("is_rotated") ? 1u : 0u;
@@ -3019,6 +3043,9 @@ namespace dlcv_infer {
                 bool withMean = false;
                 double foregroundMean = 0.0;
                 double backgroundMean = 0.0;
+                bool withMedian = false;
+                double foregroundMedian = 0.0;
+                double backgroundMedian = 0.0;
 
                 try
                 {
@@ -3057,6 +3084,81 @@ namespace dlcv_infer {
                 catch (...)
                 {
                     angle = -100.0f;
+                }
+
+                try
+                {
+                    if (result.contains("with_mean"))
+                    {
+                        withMean = result["with_mean"].get<bool>();
+                    }
+                }
+                catch (...)
+                {
+                    withMean = false;
+                }
+                try
+                {
+                    if (result.contains("foreground_mean"))
+                    {
+                        foregroundMean = result["foreground_mean"].is_null()
+                            ? std::numeric_limits<double>::quiet_NaN()
+                            : result["foreground_mean"].get<double>();
+                    }
+                }
+                catch (...)
+                {
+                    foregroundMean = 0.0;
+                }
+                try
+                {
+                    if (result.contains("background_mean"))
+                    {
+                        backgroundMean = result["background_mean"].is_null()
+                            ? std::numeric_limits<double>::quiet_NaN()
+                            : result["background_mean"].get<double>();
+                    }
+                }
+                catch (...)
+                {
+                    backgroundMean = 0.0;
+                }
+                try
+                {
+                    if (result.contains("with_median"))
+                    {
+                        withMedian = result["with_median"].get<bool>();
+                    }
+                }
+                catch (...)
+                {
+                    withMedian = false;
+                }
+                try
+                {
+                    if (result.contains("foreground_median"))
+                    {
+                        foregroundMedian = result["foreground_median"].is_null()
+                            ? std::numeric_limits<double>::quiet_NaN()
+                            : result["foreground_median"].get<double>();
+                    }
+                }
+                catch (...)
+                {
+                    foregroundMedian = 0.0;
+                }
+                try
+                {
+                    if (result.contains("background_median"))
+                    {
+                        backgroundMedian = result["background_median"].is_null()
+                            ? std::numeric_limits<double>::quiet_NaN()
+                            : result["background_median"].get<double>();
+                    }
+                }
+                catch (...)
+                {
+                    backgroundMedian = 0.0;
                 }
 
                 // 兼容某些输出直接将 angle 放入 bbox[4]
@@ -3113,7 +3215,9 @@ namespace dlcv_infer {
 
                 results.emplace_back(categoryId, categoryName, score, area, bbox, withMask, mask_img,
                     withBbox, withAngle, angle, withMean, foregroundMean, backgroundMean);
-                results.back().ReadStatistics(result);
+                results.back().withMedian = withMedian;
+                results.back().foregroundMedian = foregroundMedian;
+                results.back().backgroundMedian = backgroundMedian;
             }
 
             sampleResults.emplace_back(results);

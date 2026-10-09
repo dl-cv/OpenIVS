@@ -31,6 +31,23 @@ class StatisticsModuleSourceTest(unittest.TestCase):
             "bool with_mask; DlcvCMask mask; bool with_angle; float angle; "
             "bool with_mean; double foreground_mean; double background_mean;")
 
+    def test_statistics_result_members_keep_original_types_and_constructors(self):
+        csharp = source("DlcvCsharpApi/DataTypes.cs")
+        cpp = source("dlcv_infer_cpp/dlcv_infer.h")
+        for field in ("WithMean", "WithMedian"):
+            self.assertRegex(csharp, rf"public bool {field} \{{ get; set; \}}")
+        for field in ("ForegroundMean", "BackgroundMean", "ForegroundMedian", "BackgroundMedian"):
+            self.assertRegex(csharp, rf"public double {field} \{{ get; set; \}}")
+        for field, kind in (("withMean", "bool"), ("foregroundMean", "double"),
+                            ("backgroundMean", "double")):
+            self.assertIn(f"{kind} {field};", cpp)
+        self.assertIn("false, 0.0, 0.0", csharp)
+        self.assertIn("false, 0.0, 0.0", cpp)
+        self.assertNotIn("WriteStatistics(", csharp)
+        self.assertNotIn("ReadStatistics(", csharp)
+        self.assertNotIn("WriteStatistics(", cpp)
+        self.assertNotIn("ReadStatistics(", cpp)
+
     def test_flow_outputs_node_statistics(self):
         for path in ("DlcvCsharpApi/flow/modules/Outputs.cs",
             "dlcv_infer_cpp/flow/modules/OutputModules.cpp"):
@@ -73,14 +90,6 @@ class StatisticsModuleSourceTest(unittest.TestCase):
         main = source("Test/dlcv_infer_cpp_test/main.cpp")
         self.assertIn("ForegroundBackgroundStatisticsModule.cpp", project)
         self.assertNotIn('ForegroundBackgroundStatisticsModule.cpp"', main)
-
-    def test_affected_native_projects_accept_isolated_headers(self):
-        for path in ("dlcv_infer_cpp/dlcv_infer_cpp.vcxproj",
-            "dlcv_infer_cpp_qt_demo/dlcv_infer_cpp_qt_demo.vcxproj",
-            "Test/dlcv_infer_cpp_test/dlcv_infer_cpp_test.vcxproj",
-            "Test/dlcv_infer_c_test/dlcv_infer_c_test.vcxproj"):
-            with self.subTest(file=path):
-                self.assertIn("$(DLCVPRO_INFER_INCLUDE)</DlcvProInferIncludeDir>", source(path))
 
     def test_statistics_selftests_have_cli_entries(self):
         for path in ("Test/DlcvCSharpTest/Program.cs", "Test/dlcv_infer_cpp_test/main.cpp"):

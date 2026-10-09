@@ -15,6 +15,7 @@
 #include <windows.h>
 
 #include <cctype>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -569,9 +570,14 @@ static dlcv_infer::json BuildNativeObjectResult(
         { "mask", std::move(mask) },
         { "with_bbox", object.withBbox },
         { "with_angle", object.withAngle },
-        { "angle", object.withAngle ? object.angle : -100.0f }
+        { "angle", object.withAngle ? object.angle : -100.0f },
+        { "with_mean", object.withMean },
+        { "foreground_mean", std::isfinite(object.foregroundMean) ? dlcv_infer::json(object.foregroundMean) : dlcv_infer::json(nullptr) },
+        { "background_mean", std::isfinite(object.backgroundMean) ? dlcv_infer::json(object.backgroundMean) : dlcv_infer::json(nullptr) },
+        { "with_median", object.withMedian },
+        { "foreground_median", std::isfinite(object.foregroundMedian) ? dlcv_infer::json(object.foregroundMedian) : dlcv_infer::json(nullptr) },
+        { "background_median", std::isfinite(object.backgroundMedian) ? dlcv_infer::json(object.backgroundMedian) : dlcv_infer::json(nullptr) }
     };
-    object.WriteStatistics(result);
     return result;
 }
 

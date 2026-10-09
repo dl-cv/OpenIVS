@@ -355,7 +355,6 @@ static Json ConvertToLocalSamples(
         o["area"] = obj.area;
         o["bbox"] = obj.bbox;
         o["with_bbox"] = obj.withBbox;
-        obj.WriteStatistics(o);
         const bool withMask = includeMask && obj.withMask;
         o["with_mask"] = withMask;
         o["with_angle"] = obj.withAngle;
@@ -424,7 +423,6 @@ static Json ConvertSampleResultToLocalSamples(
         o["area"] = obj.area;
         o["bbox"] = obj.bbox;
         o["with_bbox"] = obj.withBbox;
-        obj.WriteStatistics(o);
         const bool withMask = includeMask && obj.withMask;
         o["with_mask"] = withMask;
         o["with_angle"] = obj.withAngle;

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -285,16 +284,26 @@ namespace DlcvDemo
                 double score = double.NaN;
                 string category = string.Empty;
                 bool withMask = false;
-                var statistics = default(Utils.CSharpObjectResult);
+                bool withMean = false;
+                double foregroundMean = 0.0;
+                double backgroundMean = 0.0;
+                bool withMedian = false;
+                double foregroundMedian = 0.0;
+                double backgroundMedian = 0.0;
                 if (item != null)
                 {
                     TryReadScore(item["score"], out score);
                     category = item["category_name"] != null ? item["category_name"].ToString() : string.Empty;
                     withMask = item.Value<bool?>("with_mask") ?? false;
-                    statistics.ReadStatistics(item);
+                    withMean = item.Value<bool?>("with_mean") ?? false;
+                    foregroundMean = item["foreground_mean"] == null ? 0.0 : item.Value<double?>("foreground_mean") ?? double.NaN;
+                    backgroundMean = item["background_mean"] == null ? 0.0 : item.Value<double?>("background_mean") ?? double.NaN;
+                    withMedian = item.Value<bool?>("with_median") ?? false;
+                    foregroundMedian = item["foreground_median"] == null ? 0.0 : item.Value<double?>("foreground_median") ?? double.NaN;
+                    backgroundMedian = item["background_median"] == null ? 0.0 : item.Value<double?>("background_median") ?? double.NaN;
                 }
-                summary.Add(score, category, withMask, statistics.WithMean, statistics.ForegroundMean, statistics.BackgroundMean,
-                    statistics.WithMedian, statistics.ForegroundMedian, statistics.BackgroundMedian, threshold);
+                summary.Add(score, category, withMask, withMean, foregroundMean, backgroundMean,
+                    withMedian, foregroundMedian, backgroundMedian, threshold);
             }
             return summary;
         }
@@ -626,16 +635,6 @@ namespace DlcvDemo
             public List<double> BackgroundMedians { get; } = new List<double>();
             public int Count { get { return Scores.Count; } }
             public int BelowThresholdCount { get { return _belowThreshold.Count; } }
-            public bool AllMaskResultsHaveMean
-            {
-                get
-                {
-                    return WithMasks
-                        .Select((withMask, index) => !withMask || WithMeans[index] == true)
-                        .All(value => value);
-                }
-            }
-            public bool AnyHaveMean { get { return WithMeans.Any(value => value == true); } }
 
             public void Add(
                 double score,
@@ -675,46 +674,45 @@ namespace DlcvDemo
             public JObject ToJson()
             {
                 var scores = new JArray();
+                var foregroundMeans = new JArray();
+                var backgroundMeans = new JArray();
+                var foregroundMedians = new JArray();
+                var backgroundMedians = new JArray();
                 foreach (double score in Scores)
                 {
                     scores.Add(IsFinite(score) ? new JValue(score) : JValue.CreateNull());
                 }
-                var statistics = new JArray();
-                for (int i = 0; i < Count; i++)
+                foreach (double foregroundMean in ForegroundMeans)
                 {
-                    var item = new Utils.CSharpObjectResult
-                    {
-                        WithMean = WithMeans[i],
-                        ForegroundMean = ForegroundMeans[i],
-                        BackgroundMean = BackgroundMeans[i],
-                        WithMedian = WithMedians[i], ForegroundMedian = ForegroundMedians[i], BackgroundMedian = BackgroundMedians[i]
-                    };
-                    var fields = new JObject();
-                    item.WriteStatistics(fields);
-                    statistics.Add(fields);
+                    foregroundMeans.Add(IsFinite(foregroundMean) ? new JValue(foregroundMean) : JValue.CreateNull());
                 }
-                var result = new JObject
+                foreach (double backgroundMean in BackgroundMeans)
+                {
+                    backgroundMeans.Add(IsFinite(backgroundMean) ? new JValue(backgroundMean) : JValue.CreateNull());
+                }
+                foreach (double foregroundMedian in ForegroundMedians)
+                {
+                    foregroundMedians.Add(IsFinite(foregroundMedian) ? new JValue(foregroundMedian) : JValue.CreateNull());
+                }
+                foreach (double backgroundMedian in BackgroundMedians)
+                {
+                    backgroundMedians.Add(IsFinite(backgroundMedian) ? new JValue(backgroundMedian) : JValue.CreateNull());
+                }
+
+                return new JObject
                 {
                     ["count"] = Count,
                     ["scores"] = scores,
                     ["categories"] = new JArray(Categories),
                     ["with_mask"] = new JArray(WithMasks),
-                    ["statistics"] = statistics,
+                    ["with_mean"] = new JArray(WithMeans),
+                    ["foreground_mean"] = foregroundMeans,
+                    ["background_mean"] = backgroundMeans,
+                    ["with_median"] = new JArray(WithMedians),
+                    ["foreground_median"] = foregroundMedians,
+                    ["background_median"] = backgroundMedians,
                     ["below_threshold"] = _belowThreshold.DeepClone()
                 };
-                if (WithMeans.Select((value, index) => value || double.IsNaN(ForegroundMeans[index]) || double.IsNaN(BackgroundMeans[index])).Any(value => value))
-                {
-                    result["with_mean"] = new JArray(WithMeans);
-                    result["foreground_mean"] = new JArray(ForegroundMeans.Select(value => IsFinite(value) ? new JValue(value) : JValue.CreateNull()));
-                    result["background_mean"] = new JArray(BackgroundMeans.Select(value => IsFinite(value) ? new JValue(value) : JValue.CreateNull()));
-                }
-                if (WithMedians.Select((value, index) => value || double.IsNaN(ForegroundMedians[index]) || double.IsNaN(BackgroundMedians[index])).Any(value => value))
-                {
-                    result["with_median"] = new JArray(WithMedians);
-                    result["foreground_median"] = new JArray(ForegroundMedians.Select(value => IsFinite(value) ? new JValue(value) : JValue.CreateNull()));
-                    result["background_median"] = new JArray(BackgroundMedians.Select(value => IsFinite(value) ? new JValue(value) : JValue.CreateNull()));
-                }
-                return result;
             }
         }
     }

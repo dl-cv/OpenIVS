@@ -38,14 +38,12 @@ struct ObjectResult {
     bool withAngle;               // 是否含旋转角度
     float angle;                  // 旋转角度（弧度），-100 表示无效
     bool withMean;                // 是否有均值采样
-    double foregroundMean;        // 前景均值，无采样时为 NaN
-    double backgroundMean;        // 背景均值，无采样时为 NaN
+    double foregroundMean;        // 前景均值，开启均值且该侧 JSON 为 null 时为 NaN
+    double backgroundMean;        // 背景均值，开启均值且该侧 JSON 为 null 时为 NaN
     bool withMedian = false;      // 是否有中值采样
     double foregroundMedian = 0.0;
     double backgroundMedian = 0.0;
 
-    void ReadStatistics(const json& source);
-    void WriteStatistics(json& target) const;
 
     ObjectResult(int categoryId, const std::string& categoryName, float score,
                  float area, const std::vector<double>& bbox, bool withMask,
@@ -84,9 +82,9 @@ struct FlowNodeTiming {
 
 `ObjectResult` 是 OpenIVS 的 C++ 包装结果，不是 `DlcvCObjectResult` 原生 C ABI 结构。旧均值成员 `withMean`、`foregroundMean`、`backgroundMean` 分别保留 `bool`、`double`、`double` 类型，原构造函数继续可用。
 
-- `withMean`、`withMedian` 表示是否取得对应统计项的有效采样；关闭的统计项保留 `false` 和数值默认值 `0.0`。
-- 已开启的统计项若某一侧没有像素，该侧值为 `NaN`；写入 JSON 时使用 `null`，不能当作数值 `0`。
-- `ReadStatistics(const json&)` 读取均值和中值；`WriteStatistics(json&) const` 清除旧统计键后写入本次结果。关闭的统计项不写入，无采样的统计项保留 `false/null/null`。
+- `withMean`、`withMedian` 表示是否取得对应统计项的有效采样；统计项未开启或字段缺失时，结构化结果保留 `false/0.0/0.0`。
+- 已开启的统计项若某一侧没有有效采样，原始 JSON 的该侧值为 `null`，结构化结果读取为 `NaN`，不能当作数值 `0`。
+- 结构化结果转 JSON 时固定写出六个统计字段，非有限数值为 `null`。`InferOneOutJson()` 返回原始 JSON，不补统计字段；普通模型的原始 JSON 不输出统计字段，Flow 保留统计节点决定的字段缺失。
 
 ### 2.2 流程图相关数据结构
 
@@ -237,7 +235,7 @@ Result InferBatchPreservingOriginalMask(
 json InferOneOutJson(const cv::Mat& image, const json& params_json = nullptr);
 ```
 - 返回 JSON 数组，每个元素为单个检测结果对象。
-- 字段包含：`category_id`、`category_name`、`score`、`bbox`（`[x,y,w,h]`）、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`、`with_mean`、`foreground_mean`、`background_mean`。
+- 字段包含：`category_id`、`category_name`、`score`、`bbox`（`[x,y,w,h]`）、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`。
 - 普通模式下将底层返回的 `mask_ptr` mask 转换为点数组形式。
 - 普通模型不计算统计值，JSON 不输出均值与中值字段；统计字段由独立统计节点输出。C++ 包装结果的统计标志与空值说明见 2.1，C ABI 布局另见 C API 文档。
 
@@ -383,7 +381,7 @@ public:
 
 `post_process/foreground_background_statistics` 通过独立 Flow 节点更新统计值，不使用模型推理输入开关。均值组仍使用 `with_mean`、`foreground_mean`、`background_mean`；开启项的状态为 JSON 布尔值，前景与背景值为数值或 `null`，关闭项删除对应三键。中值组使用 `with_median`、`foreground_median`、`background_median`，独立选择且默认关闭；完整端口、采样与重复执行语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
 
-C++ 结构化包装结果通过 `withMean`、`withMedian` 及对应 `double` 成员读取统计值，空侧使用 `NaN`，详见 2.1，也可通过 `InferOneOutJson` 读取完整 JSON。普通模型 JSON 不输出统计字段。
+C++ 结构化包装结果通过 `withMean`、`withMedian` 及对应 `double` 成员读取统计值；已开启统计项的空侧 JSON `null` 读取为 `NaN`，未开启或字段缺失时保持旧默认值，详见 2.1。也可通过 `InferOneOutJson` 读取原始 JSON；普通模型 JSON 不输出统计字段。
 
 ---
 

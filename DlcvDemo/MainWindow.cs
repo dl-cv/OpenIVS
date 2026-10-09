@@ -18,7 +18,6 @@ namespace DlcvDemo
     public partial class MainWindow : Form
     {
         private readonly UiTestOptions uiTestOptions;
-        private readonly ToolTip statisticsToolTip;
         private bool environmentCheckRunning;
         internal int UiTestExitCode { get; private set; }
 
@@ -54,7 +53,6 @@ namespace DlcvDemo
             uiTestOptions = options;
             UiTestExitCode = options == null ? 0 : 1;
             InitializeComponent();
-            statisticsToolTip = new ToolTip(components ?? (components = new System.ComponentModel.Container()));
             PressureTestRunner.LocalizeText = I18n.T;
             using (var iconStream = typeof(MainWindow).Assembly.GetManifestResourceStream("DlcvDemo.MainWindow.ico"))
             {
@@ -135,32 +133,6 @@ namespace DlcvDemo
                     : lastSummaryText;
             }
             UpdateResultViewButton();
-        }
-
-        private void UpdateStatisticsToolTip(string summary)
-        {
-            var text = new StringBuilder();
-            int count = 0;
-            foreach (string line in (summary ?? string.Empty).Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (!line.StartsWith("[", StringComparison.Ordinal)) continue;
-                int start = line.IndexOf("前景均值:", StringComparison.Ordinal);
-                if (start < 0) start = line.IndexOf("前景中值:", StringComparison.Ordinal);
-                if (start < 0) continue;
-                if (++count > 5)
-                {
-                    text.Append("完整统计见汇总");
-                    break;
-                }
-                int prefixEnd = line.IndexOf(']');
-                string detail = line.Substring(start);
-                int trailing = detail.IndexOf("  angle=", StringComparison.Ordinal);
-                if (trailing >= 0) detail = detail.Substring(0, trailing);
-                trailing = detail.IndexOf("  extra_info=", StringComparison.Ordinal);
-                if (trailing >= 0) detail = detail.Substring(0, trailing);
-                text.AppendLine((prefixEnd >= 0 ? line.Substring(0, prefixEnd + 1) + " " : string.Empty) + detail);
-            }
-            statisticsToolTip.SetToolTip(richTextBox1, text.ToString().TrimEnd());
         }
 
         // 语言切换后重算不受字典快照控制的动态文本。
@@ -536,7 +508,6 @@ namespace DlcvDemo
             finally
             {
                 model = null;
-                UpdateStatisticsToolTip(string.Empty);
             }
         }
 
@@ -645,20 +616,6 @@ namespace DlcvDemo
 				{
 					var json = model.InferOneOutJson(inferImage, data);
 					lastJsonText = JsonConvert.SerializeObject(json, Formatting.Indented);
-                    var statistics = new StringBuilder();
-                    int index = 0;
-                    JToken jsonToken = json;
-                    var items = jsonToken as JArray ?? ((jsonToken as JObject)?["result_list"] as JArray);
-                    if (items != null)
-                    {
-                        foreach (JObject item in items)
-                        {
-                            var obj = new CSharpObjectResult();
-                            obj.ReadStatistics(item);
-                            statistics.AppendLine($"[{++index}] {obj.StatisticsToString()}");
-                        }
-                    }
-                    UpdateStatisticsToolTip(statistics.ToString());
 					showJsonResult = true;
 					ApplyResultView();
 				}
@@ -687,7 +644,6 @@ namespace DlcvDemo
             string infoText = result.ContainsKey("model_info")
                 ? result["model_info"].ToString()
                 : result.ToString();
-            UpdateStatisticsToolTip(string.Empty);
             richTextBox1.Text = WithLoadedModelPath(infoText);
         }
 
@@ -1054,7 +1010,6 @@ namespace DlcvDemo
                     }
                 }
                 lastSummaryText = sb.ToString();
-                UpdateStatisticsToolTip(lastSummaryText);
                 lastJsonText = result.JsonText;
                 ApplyResultView();
             }
@@ -1072,8 +1027,16 @@ namespace DlcvDemo
             line.Append("  ");
             line.Append(BuildResultLocationText(obj));
             line.AppendFormat("  area={0:F1}", obj.Area);
-            string statistics = obj.StatisticsToString();
-            if (!string.IsNullOrEmpty(statistics)) line.Append("  ").Append(statistics);
+            if (obj.WithMean || double.IsNaN(obj.ForegroundMean) || double.IsNaN(obj.BackgroundMean))
+            {
+                line.AppendFormat("  foreground_mean={0}", FormatStatistic(obj.ForegroundMean));
+                line.AppendFormat("  background_mean={0}", FormatStatistic(obj.BackgroundMean));
+            }
+            if (obj.WithMedian || double.IsNaN(obj.ForegroundMedian) || double.IsNaN(obj.BackgroundMedian))
+            {
+                line.AppendFormat("  foreground_median={0}", FormatStatistic(obj.ForegroundMedian));
+                line.AppendFormat("  background_median={0}", FormatStatistic(obj.BackgroundMedian));
+            }
             string angleText = BuildResultAngleText(obj);
             if (!string.IsNullOrWhiteSpace(angleText))
             {
@@ -1088,6 +1051,13 @@ namespace DlcvDemo
             }
 
             return line.ToString();
+        }
+
+        private static string FormatStatistic(double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value))
+                return I18n.CurrentLanguage == I18n.English ? "No samples" : "无采样";
+            return value.ToString("F4");
         }
 
         private static string BuildResultLocationText(CSharpObjectResult obj)
@@ -1601,7 +1571,6 @@ namespace DlcvDemo
                 disposable.Dispose();
             }
             model = null;
-            UpdateStatisticsToolTip(string.Empty);
             model_path = null;
             Utils.FreeAllModels();
             richTextBox1.Text = I18n.T("所有模型已释放");
@@ -1614,7 +1583,6 @@ namespace DlcvDemo
 		{
 			try
 			{
-				UpdateStatisticsToolTip(string.Empty);
 				richTextBox1.Text = title + "\n" + ex.ToString();
 			}
 			catch { }

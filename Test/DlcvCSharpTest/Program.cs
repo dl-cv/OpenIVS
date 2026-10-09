@@ -3348,8 +3348,15 @@ namespace DlcvCSharpTest
                 {
                     var item = sample.Results[objectIndex];
                     string bbox = item.Bbox == null ? string.Empty : string.Join(", ", item.Bbox.Select(x => x.ToString("F3", CultureInfo.InvariantCulture)));
-                    var statistics = new JObject();
-                    item.WriteStatistics(statistics);
+                    var statistics = new JObject
+                    {
+                        ["with_mean"] = item.WithMean,
+                        ["foreground_mean"] = double.IsNaN(item.ForegroundMean) || double.IsInfinity(item.ForegroundMean) ? JValue.CreateNull() : new JValue(item.ForegroundMean),
+                        ["background_mean"] = double.IsNaN(item.BackgroundMean) || double.IsInfinity(item.BackgroundMean) ? JValue.CreateNull() : new JValue(item.BackgroundMean),
+                        ["with_median"] = item.WithMedian,
+                        ["foreground_median"] = double.IsNaN(item.ForegroundMedian) || double.IsInfinity(item.ForegroundMedian) ? JValue.CreateNull() : new JValue(item.ForegroundMedian),
+                        ["background_median"] = double.IsNaN(item.BackgroundMedian) || double.IsInfinity(item.BackgroundMedian) ? JValue.CreateNull() : new JValue(item.BackgroundMedian)
+                    };
                     string statisticsText = statistics.HasValues ? ", statistics=" + statistics.ToString(Formatting.None) : string.Empty;
                     Console.WriteLine(string.Format(
                         CultureInfo.InvariantCulture,
@@ -9255,9 +9262,14 @@ namespace DlcvCSharpTest
                                 ["with_angle"] = item.WithAngle,
                                 ["angle"] = item.Angle,
                                 ["extra_info"] = CanonicalizeSignatureToken(item.ExtraInfo),
-                                ["mask"] = BuildMaskSignature(item.Mask)
+                                ["mask"] = BuildMaskSignature(item.Mask),
+                                ["with_mean"] = item.WithMean,
+                                ["foreground_mean"] = double.IsNaN(item.ForegroundMean) || double.IsInfinity(item.ForegroundMean) ? JValue.CreateNull() : new JValue(item.ForegroundMean),
+                                ["background_mean"] = double.IsNaN(item.BackgroundMean) || double.IsInfinity(item.BackgroundMean) ? JValue.CreateNull() : new JValue(item.BackgroundMean),
+                                ["with_median"] = item.WithMedian,
+                                ["foreground_median"] = double.IsNaN(item.ForegroundMedian) || double.IsInfinity(item.ForegroundMedian) ? JValue.CreateNull() : new JValue(item.ForegroundMedian),
+                                ["background_median"] = double.IsNaN(item.BackgroundMedian) || double.IsInfinity(item.BackgroundMedian) ? JValue.CreateNull() : new JValue(item.BackgroundMedian)
                             };
-                            item.WriteStatistics(normalizedObject);
                             ((JArray)normalizedSample["results"]).Add(normalizedObject);
                         }
                     }

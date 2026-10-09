@@ -30,7 +30,6 @@
 #include <QScreen>
 #include <QSpinBox>
 #include <QSplitter>
-#include <QStringList>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -46,23 +45,6 @@ using json = nlohmann::json;
 
 QString jsonToQStringPretty(const json& obj, int indent = 2) {
     return QString::fromUtf8(obj.dump(indent).c_str());
-}
-
-QString statisticsToolTip(const QString& summary) {
-    QStringList lines;
-    for (const QString& line : summary.split('\n')) {
-        if (!line.startsWith('[')) continue;
-        qsizetype start = line.indexOf(QStringLiteral("前景均值="));
-        if (start < 0) start = line.indexOf(QStringLiteral("前景中值="));
-        if (start < 0) continue;
-        if (lines.size() == 5) {
-            lines.append(QStringLiteral("完整统计见汇总"));
-            break;
-        }
-        const qsizetype prefixEnd = line.indexOf(']');
-        lines.append((prefixEnd >= 0 ? line.left(prefixEnd + 1) + " " : QString{}) + line.mid(start));
-    }
-    return lines.join('\n');
 }
 
 QString describeOpenCvImageForUi(const cv::Mat& m, bool threeChannelIsRgb = false) {
@@ -434,7 +416,6 @@ bool MainWindow::loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const
 
 void MainWindow::reportError(const QString& title, const QString& detail) {
     outputText_->setPlainText(title + "\n" + detail);
-    outputText_->setToolTip({});
     if (!uiTestMode_) QMessageBox::critical(this, "错误", title + ": " + detail);
 }
 
@@ -534,7 +515,6 @@ void MainWindow::onLoadModel() {
 }
 
 bool MainWindow::loadModelFromPath(const QString& selectedModelPath) {
-    outputText_->setToolTip({});
     model_.reset();
 
     try
@@ -705,7 +685,6 @@ void MainWindow::onInfer() {
         text += formatResultText(output);
     }
     outputText_->setPlainText(text);
-    outputText_->setToolTip(statisticsToolTip(text));
     lastInferSucceeded_ = true;
     if (uiTestMode_) {
         uiTestResult_ = {{"input_width", bgrImage.cols}, {"input_height", bgrImage.rows},
@@ -720,7 +699,6 @@ void MainWindow::onInferJson() {
     if (pressureTestRunning_) {
         return;
     }
-    outputText_->setToolTip({});
     imageViewer_->clearInspectionStatus();
 
     if (!ensureModelLoaded() || !ensureImageSelected()) {
@@ -1092,7 +1070,6 @@ void MainWindow::setUiEnabledForPressureTest(bool enabled) {
 }
 
 void MainWindow::onGetModelInfo() {
-    outputText_->setToolTip({});
     if (!ensureModelLoaded()) {
         return;
     }
@@ -1116,7 +1093,6 @@ void MainWindow::onGetModelInfo() {
 }
 
 void MainWindow::onFreeModel() {
-    outputText_->setToolTip({});
     stopPressureTest();
 
     model_.reset();
@@ -1124,7 +1100,6 @@ void MainWindow::onFreeModel() {
 }
 
 void MainWindow::onFreeAllModels() {
-    outputText_->setToolTip({});
     stopPressureTest();
 
     model_.reset();

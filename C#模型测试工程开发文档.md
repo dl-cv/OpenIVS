@@ -259,11 +259,12 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 ```text
 DlcvCSharpTest.exe foreground-background-statistics-selftest
 dlcv_infer_cpp_test.exe foreground-background-statistics-selftest
+dlcv_infer_cpp_test.exe object-mean-parsing-selftest
 ```
 
 以上为 C# 与 C++ 独立 Flow 统计节点的测试入口。C# 检查包括普通模型 JSON 与模型节点不补统计字段、均值与中值独立开关、原有均值构造函数、公共解析入口、实际 PNG 裁剪／翻转，以及 JSON、可视化格式、结果签名、CLI 输出与两路摘要比较的统计回归；同时覆盖标准 `image_chan/result_chan` 通道的实际节点分支路由。CLI 摘要回归反射调用 DlcvDemo 构建产物，执行前须构建 `DlcvDemo.csproj`。以上范围须在构建后执行自测核验。
 
-包装结果的 `WithMean`、`WithMedian` 均为 `bool`，四个统计数值均为 `double`。数字键缺失时恢复为零，实际 JSON `null` 读取为 `double.NaN`；写回及文字显示按该组开关为 `true` 或任一侧为 `NaN` 决定是否保留。启用但选区完全无采样时必须保留 `false/null/null`，禁用后缺失键必须清除旧统计；普通模型与模型节点不补统计字段，统计值只由独立统计节点输出。全前景、全背景和无采样域的实际节点输出均参加 JSON 往返检查，空侧不能变为零或 `NaN` 字符串。
+包装结果的 `WithMean`、`WithMedian` 均为 `bool`，四个统计数值均为 `double`，原均值成员、构造函数及默认值保持不变。数字键缺失时为零，实际 JSON `null` 为 `double.NaN`；结构体转换直接赋六个统计字段，未计算项为 `false/0.0/0.0`，非有限值写为 `null`。原始 Flow JSON 输出仍由统计节点决定字段是否存在，禁用项删除旧字段；普通模型 JSON 与模型节点不补统计字段。全前景、全背景和无采样域参加结果读取与输出检查，空侧不能变为零或 `NaN` 字符串。
 
 其他验收范围包括默认仅均值、严格布尔值、逐目标统计值更新、重复执行删除旧值、无 mask、全部通道共同参与标量统计、偶数样本的中值、RLE mask 与区域 mapping、source affine 逆映射后的原图采样、前置图像处理及缩放插值不替换统计值来源、mask 最近邻缩放与选区映射、4 元素 XYWH 框和 5 元素弧度旋转框、旋转框候选 `floor(max)+1` 与 mask 缩放 `floor/ceil` 分离，以及图像与结果其他属性不变。C ABI 成员顺序与布局不变。预期语义见 `模块、流程与模型推理标准文档.md` 6.4.1；实际覆盖与结果须在构建运行后核验。
 

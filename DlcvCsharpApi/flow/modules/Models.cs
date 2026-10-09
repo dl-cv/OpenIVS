@@ -449,7 +449,6 @@ namespace DlcvModules
 					["with_angle"] = obj.WithAngle,
 					["angle"] = obj.Angle
 				};
-				obj.WriteStatistics(o);
 				// 将 mask 以 RLE 的形式存储到 JSON（mask_rle），避免直接写入原始像素或多边形点集
 				if (obj.WithMask && obj.Mask != null && !obj.Mask.Empty())
 				{

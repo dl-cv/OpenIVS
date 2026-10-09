@@ -3444,8 +3444,9 @@ int RunObjectMeanParsingSelfTest() {
     const dlcv_infer::ObjectResult defaultResult(
         1, "default", 0.9f, 1.0f,
         std::vector<double>{1.0, 2.0, 3.0, 4.0}, false, cv::Mat());
-    if (defaultResult.withMean || defaultResult.foregroundMean != 0.0 || defaultResult.backgroundMean != 0.0) {
-        return fail("默认均值不符合 false/0.0 语义");
+    if (defaultResult.withMean || defaultResult.foregroundMean != 0.0 || defaultResult.backgroundMean != 0.0
+        || defaultResult.withMedian || defaultResult.foregroundMedian != 0.0 || defaultResult.backgroundMedian != 0.0) {
+        return fail("默认统计不符合 false/0.0/0.0 输出格式");
     }
 
     const dlcv_infer::ObjectResult resultWithMean(
@@ -3454,7 +3455,8 @@ int RunObjectMeanParsingSelfTest() {
         false, false, -100.0f, true, 12.5, 34.75);
     if (!resultWithMean.withMean
         || resultWithMean.foregroundMean != 12.5
-        || resultWithMean.backgroundMean != 34.75) {
+        || resultWithMean.backgroundMean != 34.75
+        || resultWithMean.withMedian || resultWithMean.foregroundMedian != 0.0 || resultWithMean.backgroundMedian != 0.0) {
         return fail("显式均值字段映射错误");
     }
 
@@ -3520,9 +3522,15 @@ int RunObjectMeanParsingSelfTest() {
         {{"with_mean", true}, {"foreground_mean", 7.0}, {"background_mean", nullptr}},
         json::object()
     };
-    dlcv_infer::ObjectResult typed = resultWithMean;
     for (const auto& statistics : statisticsCases) {
-        typed.ReadStatistics(statistics);
+        json typedJson = resultJson;
+        auto& detectionJson = typedJson["sample_results"][0]["results"][0];
+        for (const char* key : {"with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median"}) {
+            detectionJson.erase(key);
+        }
+        for (auto it = statistics.begin(); it != statistics.end(); ++it) detectionJson[it.key()] = it.value();
+        const auto typedParsed = probe.ParseToStructResult(typedJson);
+        const auto& typed = typedParsed.sampleResults[0].results[0];
         if (typed.withMean != statistics.value("with_mean", false)
             || typed.withMedian != statistics.value("with_median", false)) {
             return fail("统计标志解析错误");
@@ -3532,45 +3540,45 @@ int RunObjectMeanParsingSelfTest() {
             std::make_pair("foreground_median", typed.foregroundMedian),
             std::make_pair("background_median", typed.backgroundMedian)}) {
             if (!statistics.contains(field.first)) {
-                if (field.second != 0.0) return fail("未计算的统计值残留旧值");
+                if (field.second != 0.0) return fail("未计算的统计值未恢复默认值");
             } else if (statistics.at(field.first).is_null()) {
-                if (!std::isnan(field.second)) return fail("无采样值被转成了数值");
+                if (!std::isnan(field.second)) return fail("null 统计值未读取为 NaN");
             } else if (field.second != statistics.at(field.first).get<double>()) {
                 return fail("统计值解析错误");
             }
         }
-        json fresh = {{"note", "保留"}};
-        typed.WriteStatistics(fresh);
-        json expected = statistics;
-        for (const std::string name : {"mean", "median"}) {
-            const std::string flag = "with_" + name;
-            const std::string foreground = "foreground_" + name, background = "background_" + name;
-            if (!statistics.value(flag, false)
-                && !statistics.value(foreground, json(0)).is_null()
-                && !statistics.value(background, json(0)).is_null()) {
-                expected.erase(flag);
-                expected.erase(foreground);
-                expected.erase(background);
+    }
+
+    for (const std::string key : {"with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median"}) {
+        const bool isFlag = key == "with_mean" || key == "with_median";
+        const std::vector<json> invalidValues{json(), json("invalid"), json::array(), json::object(), isFlag ? json(1) : json(true)};
+        for (const auto& invalidValue : invalidValues) {
+            json tolerantJson = resultJson;
+            auto& detectionJson = tolerantJson["sample_results"][0]["results"][0];
+            detectionJson["with_median"] = true;
+            detectionJson["foreground_median"] = 19.0;
+            detectionJson["background_median"] = 23.0;
+            detectionJson[key] = invalidValue;
+            const auto tolerantParsed = probe.ParseToStructResult(tolerantJson);
+            const auto& typed = tolerantParsed.sampleResults[0].results[0];
+            if (typed.withMean != (key != "with_mean") || typed.withMedian != (key != "with_median")) {
+                return fail(key + " 无效标志未单独恢复默认值");
+            }
+            for (const auto& field : {std::make_tuple("foreground_mean", typed.foregroundMean, 56.25),
+                std::make_tuple("background_mean", typed.backgroundMean, 78.5),
+                std::make_tuple("foreground_median", typed.foregroundMedian, 19.0),
+                std::make_tuple("background_median", typed.backgroundMedian, 23.0)}) {
+                if (key == std::get<0>(field)) {
+                    if (invalidValue.is_null()) {
+                        if (!std::isnan(std::get<1>(field))) return fail(key + " 的 null 未读取为 NaN");
+                    } else if (std::get<1>(field) != 0.0) {
+                        return fail(key + " 无效数值未单独恢复默认值");
+                    }
+                } else if (std::get<1>(field) != std::get<2>(field)) {
+                    return fail(key + " 解析失败影响其他统计值");
+                }
             }
         }
-        expected["note"] = "保留";
-        if (fresh != expected) return fail("结果字段写入新对象后无法往返");
-        json reused = {{"note", "保留"}, {"with_mean", true}, {"foreground_mean", -1}, {"background_mean", -1},
-            {"with_median", true}, {"foreground_median", -1}, {"background_median", -1}};
-        typed.WriteStatistics(reused);
-        if (reused != expected) return fail("结果字段写入已有对象后残留关闭项");
-
-        json typedJson = resultJson;
-        auto& detectionJson = typedJson["sample_results"][0]["results"][0];
-        for (const char* key : {"with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median"}) {
-            detectionJson.erase(key);
-        }
-        for (auto it = statistics.begin(); it != statistics.end(); ++it) detectionJson[it.key()] = it.value();
-        const auto typedParsed = probe.ParseToStructResult(typedJson);
-        json roundtrip = json::object();
-        typedParsed.sampleResults[0].results[0].WriteStatistics(roundtrip);
-        expected.erase("note");
-        if (roundtrip != expected) return fail("ParseToStructResult 统计字段解析或输出错误");
     }
     PrintUtf8Line("目标均值解析自测通过");
     return 0;

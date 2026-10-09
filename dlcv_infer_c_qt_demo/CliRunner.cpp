@@ -51,7 +51,12 @@ struct PathSummary {
     json scores = json::array();
     json categories = json::array();
     json belowThreshold = json::array();
-    json statistics = json::array();
+    json withMeans = json::array();
+    json foregroundMeans = json::array();
+    json backgroundMeans = json::array();
+    json withMedians = json::array();
+    json foregroundMedians = json::array();
+    json backgroundMedians = json::array();
     std::vector<double> comparableScores;
     std::vector<std::string> comparableCategories;
     std::vector<bool> comparableWithMeans;
@@ -362,14 +367,6 @@ DlcvCImage MakeCImage(const cv::Mat& image) {
     return result;
 }
 
-json ReadStatisticsFields(const json& source) {
-    json fields = json::object();
-    for (const char* key : { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" }) {
-        if (source.contains(key)) fields[key] = source.at(key);
-    }
-    return fields;
-}
-
 void AddSummaryItem(
     PathSummary& summary,
     double score,
@@ -377,19 +374,15 @@ void AddSummaryItem(
     bool withMean,
     double foregroundMean,
     double backgroundMean,
-    double threshold,
-    json statistics = nullptr) {
+    double threshold) {
     const int index = summary.count;
     ++summary.count;
     summary.categories.push_back(category);
     summary.comparableCategories.push_back(category);
     summary.comparableScores.push_back(score);
-    if (statistics.is_null()) {
-        statistics = json{ {"with_mean", withMean},
-            {"foreground_mean", std::isfinite(foregroundMean) ? json(foregroundMean) : json(nullptr)},
-            {"background_mean", std::isfinite(backgroundMean) ? json(backgroundMean) : json(nullptr)} };
-    }
-    summary.statistics.push_back(statistics);
+    summary.withMeans.push_back(withMean);
+    summary.foregroundMeans.push_back(std::isfinite(foregroundMean) ? json(foregroundMean) : json(nullptr));
+    summary.backgroundMeans.push_back(std::isfinite(backgroundMean) ? json(backgroundMean) : json(nullptr));
     summary.comparableWithMeans.push_back(withMean);
     summary.comparableForegroundMeans.push_back(foregroundMean);
     summary.comparableBackgroundMeans.push_back(backgroundMean);
@@ -456,6 +449,10 @@ bool TryReadJsonNumber(const json& token, const char* key, double& value) {
             return false;
         }
         const json& jsonValue = token.at(key);
+        if (jsonValue.is_null()) {
+            value = std::numeric_limits<double>::quiet_NaN();
+            return true;
+        }
         if (jsonValue.is_number()) {
             value = jsonValue.get<double>();
             return std::isfinite(value);
@@ -477,18 +474,6 @@ PathSummary SummarizeJson(const json& result, double threshold) {
 
     PathSummary summary;
     for (const auto& token : *resultList) {
-        if (!token.is_object()) {
-            AddSummaryItem(
-                summary,
-                std::numeric_limits<double>::quiet_NaN(),
-                std::string(),
-                false,
-                std::numeric_limits<double>::quiet_NaN(),
-                std::numeric_limits<double>::quiet_NaN(),
-                threshold);
-            continue;
-        }
-
         std::string category;
         try {
             if (token.contains("category_name") && token.at("category_name").is_string()) {
@@ -500,57 +485,64 @@ PathSummary SummarizeJson(const json& result, double threshold) {
         double score = std::numeric_limits<double>::quiet_NaN();
         (void)TryReadJsonNumber(token, "score", score);
         bool withMean = false;
-        double foregroundMean = std::numeric_limits<double>::quiet_NaN();
-        double backgroundMean = std::numeric_limits<double>::quiet_NaN();
+        double foregroundMean = 0.0;
+        double backgroundMean = 0.0;
+        bool withMedian = false;
+        double foregroundMedian = 0.0;
+        double backgroundMedian = 0.0;
         (void)TryReadJsonBool(token, "with_mean", withMean);
         (void)TryReadJsonNumber(token, "foreground_mean", foregroundMean);
         (void)TryReadJsonNumber(token, "background_mean", backgroundMean);
-        AddSummaryItem(summary, score, category, withMean, foregroundMean, backgroundMean, threshold, ReadStatisticsFields(token));
+        (void)TryReadJsonBool(token, "with_median", withMedian);
+        (void)TryReadJsonNumber(token, "foreground_median", foregroundMedian);
+        (void)TryReadJsonNumber(token, "background_median", backgroundMedian);
+        AddSummaryItem(summary, score, category, withMean, foregroundMean, backgroundMean, threshold);
+        summary.withMedians.push_back(withMedian);
+        summary.foregroundMedians.push_back(std::isfinite(foregroundMedian) ? json(foregroundMedian) : json(nullptr));
+        summary.backgroundMedians.push_back(std::isfinite(backgroundMedian) ? json(backgroundMedian) : json(nullptr));
     }
     return summary;
 }
 
-json PathSummaryToJson(const PathSummary& summary) {
+json PathSummaryToJson(const PathSummary& summary, bool includeMedians) {
     json result = {
-        {"count", summary.count}, {"scores", summary.scores}, {"categories", summary.categories},
-        {"below_threshold", summary.belowThreshold}, {"statistics", summary.statistics}
+        {"count", summary.count},
+        {"scores", summary.scores},
+        {"categories", summary.categories},
+        {"below_threshold", summary.belowThreshold},
+        {"with_mean", summary.withMeans},
+        {"foreground_mean", summary.foregroundMeans},
+        {"background_mean", summary.backgroundMeans}
     };
-    for (const char* kind : { "mean", "median" }) {
-        const std::string flag = std::string("with_") + kind;
-        const std::string fg = std::string("foreground_") + kind;
-        const std::string bg = std::string("background_") + kind;
-        bool present = false;
-        json flags = json::array(), foreground = json::array(), background = json::array();
-        for (const auto& fields : summary.statistics) {
-            present = present || fields.contains(flag);
-            flags.push_back(fields.contains(flag) ? fields.at(flag) : json(nullptr));
-            foreground.push_back(fields.contains(fg) ? fields.at(fg) : json(nullptr));
-            background.push_back(fields.contains(bg) ? fields.at(bg) : json(nullptr));
-        }
-        if (present) {
-            result[flag] = flags; result[fg] = foreground; result[bg] = background;
-        }
+    if (includeMedians) {
+        result["with_median"] = summary.withMedians;
+        result["foreground_median"] = summary.foregroundMedians;
+        result["background_median"] = summary.backgroundMedians;
     }
     return result;
 }
 
 bool AreConsistent(const PathSummary& left, const PathSummary& right) {
-    if (left.count != right.count || left.comparableScores.size() != right.comparableScores.size() ||
-        left.comparableCategories != right.comparableCategories) return false;
+    if (left.count != right.count ||
+        left.comparableScores.size() != right.comparableScores.size() ||
+        left.comparableCategories != right.comparableCategories ||
+        left.comparableWithMeans != right.comparableWithMeans) {
+        return false;
+    }
+    const auto sameStatistic = [](double leftValue, double rightValue) {
+        return (std::isnan(leftValue) && std::isnan(rightValue)) ||
+            (std::isfinite(leftValue) && std::isfinite(rightValue) &&
+             std::abs(leftValue - rightValue) <= 1e-6);
+    };
     for (size_t i = 0; i < left.comparableScores.size(); ++i) {
         if (!std::isfinite(left.comparableScores[i]) || !std::isfinite(right.comparableScores[i]) ||
-            std::abs(left.comparableScores[i] - right.comparableScores[i]) > 1e-6) return false;
-        const auto& fields = right.statistics.at(i);
-        if (fields.contains("with_mean")) {
-            if (left.comparableWithMeans[i] != fields.at("with_mean").get<bool>()) return false;
-            for (const char* key : { "foreground_mean", "background_mean" }) {
-                const double number = std::string(key) == "foreground_mean" ? left.comparableForegroundMeans[i] : left.comparableBackgroundMeans[i];
-                const auto& value = fields.at(key);
-                if (value.is_null()) {
-                    if (!std::isnan(number)) return false;
-                } else if (!value.is_number() || !std::isfinite(number) || std::abs(number - value.get<double>()) > 1e-6) return false;
-            }
-        } else if (left.comparableWithMeans[i]) return false;
+            std::abs(left.comparableScores[i] - right.comparableScores[i]) > 1e-6) {
+            return false;
+        }
+        if (!sameStatistic(left.comparableForegroundMeans[i], right.comparableForegroundMeans[i]) ||
+            !sameStatistic(left.comparableBackgroundMeans[i], right.comparableBackgroundMeans[i])) {
+            return false;
+        }
     }
     return true;
 }
@@ -620,7 +612,6 @@ int RunInferCommand(const InferOptions& options) {
                 throw std::runtime_error(ToUtf8(DecodeApiText(structuredResult.get().message)));
             }
             structuredSummary = SummarizeStructured(structuredResult.get(), options.threshold);
-            for (auto& fields : structuredSummary.statistics) fields = json::object();
 
             CStringGuard jsonResult(api, api.inferJson(modelIndex, &image, paramsText.c_str()));
             if (jsonResult.get() == nullptr) {
@@ -648,10 +639,8 @@ int RunInferCommand(const InferOptions& options) {
         {"threshold", options.threshold},
         {"device", options.device},
         {"with_mask", options.withMask},
-        {"statistics_supported_by_structured", false},
-        {"statistics_consistent", nullptr},
-        {"structured", PathSummaryToJson(structuredSummary)},
-        {"json", PathSummaryToJson(jsonSummary)},
+        {"structured", PathSummaryToJson(structuredSummary, false)},
+        {"json", PathSummaryToJson(jsonSummary, true)},
         {"inspection", json::object({
             {"present", false},
             {"ok", nullptr},

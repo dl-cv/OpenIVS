@@ -337,9 +337,14 @@ namespace dlcv_infer_csharp
                             ["with_angle"] = obj.WithAngle,
                             ["angle"] = obj.Angle,
                             ["with_mask"] = obj.WithMask,
+                            ["with_mean"] = obj.WithMean,
+                            ["foreground_mean"] = double.IsNaN(obj.ForegroundMean) || double.IsInfinity(obj.ForegroundMean) ? JValue.CreateNull() : new JValue(obj.ForegroundMean),
+                            ["background_mean"] = double.IsNaN(obj.BackgroundMean) || double.IsInfinity(obj.BackgroundMean) ? JValue.CreateNull() : new JValue(obj.BackgroundMean),
+                            ["with_median"] = obj.WithMedian,
+                            ["foreground_median"] = double.IsNaN(obj.ForegroundMedian) || double.IsInfinity(obj.ForegroundMedian) ? JValue.CreateNull() : new JValue(obj.ForegroundMedian),
+                            ["background_median"] = double.IsNaN(obj.BackgroundMedian) || double.IsInfinity(obj.BackgroundMedian) ? JValue.CreateNull() : new JValue(obj.BackgroundMedian),
                             ["extra_info"] = obj.ExtraInfo ?? new JObject()
                         };
-                        obj.WriteStatistics(item);
                         // 将 mask 以 RLE 的形式存储到 JSON（mask_rle）
                         if (obj.WithMask && obj.Mask != null && !obj.Mask.Empty())
                         {

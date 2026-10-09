@@ -2495,9 +2495,21 @@ namespace dlcv_infer_csharp
                     }
 
                     var extraInfo = result["extra_info"] as JObject ?? new JObject();
+                    bool withMean = result.Value<bool?>("with_mean") ?? false;
+                    double foregroundMean = result["foreground_mean"] == null ? 0.0 : result.Value<double?>("foreground_mean") ?? double.NaN;
+                    double backgroundMean = result["background_mean"] == null ? 0.0 : result.Value<double?>("background_mean") ?? double.NaN;
+                    bool withMedian = result.Value<bool?>("with_median") ?? false;
+                    double foregroundMedian = result["foreground_median"] == null ? 0.0 : result.Value<double?>("foreground_median") ?? double.NaN;
+                    double backgroundMedian = result["background_median"] == null ? 0.0 : result.Value<double?>("background_median") ?? double.NaN;
+
                     var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox,
-                        withMask, mask_img, withBbox, withAngle, angle, extraInfo);
-                    objectResult.ReadStatistics((JObject)result);
+                        withMask, mask_img, withBbox, withAngle, angle, extraInfo,
+                        withMean, foregroundMean, backgroundMean)
+                    {
+                        WithMedian = withMedian,
+                        ForegroundMedian = foregroundMedian,
+                        BackgroundMedian = backgroundMedian
+                    };
                     results.Add(objectResult);
                 }
 

@@ -7,8 +7,6 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <cmath>
-#include <limits>
 #include <cstddef>
 #include <mutex>
 #include <shared_mutex>
@@ -277,36 +275,6 @@ namespace dlcv_infer {
         bool withMedian = false;
         double foregroundMedian = 0.0;
         double backgroundMedian = 0.0;
-
-        void ReadStatistics(const json& source) {
-            const auto readValue = [&source](const char* key) {
-                if (!source.contains(key)) return 0.0;
-                if (source.at(key).is_null()) return std::numeric_limits<double>::quiet_NaN();
-                return source.at(key).get<double>();
-            };
-            withMean = source.value("with_mean", false);
-            foregroundMean = readValue("foreground_mean");
-            backgroundMean = readValue("background_mean");
-            withMedian = source.value("with_median", false);
-            foregroundMedian = readValue("foreground_median");
-            backgroundMedian = readValue("background_median");
-        }
-
-        void WriteStatistics(json& target) const {
-            for (const char* key : { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" })
-                target.erase(key);
-            // 没有采样时，统计标志为 false，但空值仍需保留。
-            if (withMean || std::isnan(foregroundMean) || std::isnan(backgroundMean)) {
-                target["with_mean"] = withMean;
-                target["foreground_mean"] = std::isfinite(foregroundMean) ? json(foregroundMean) : json(nullptr);
-                target["background_mean"] = std::isfinite(backgroundMean) ? json(backgroundMean) : json(nullptr);
-            }
-            if (withMedian || std::isnan(foregroundMedian) || std::isnan(backgroundMedian)) {
-                target["with_median"] = withMedian;
-                target["foreground_median"] = std::isfinite(foregroundMedian) ? json(foregroundMedian) : json(nullptr);
-                target["background_median"] = std::isfinite(backgroundMedian) ? json(backgroundMedian) : json(nullptr);
-            }
-        }
 
         ObjectResult(int id, const std::string& name, float s, float a,
             const std::vector<double>& b, bool wm, const cv::Mat& m,

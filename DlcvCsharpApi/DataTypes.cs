@@ -94,35 +94,6 @@ namespace dlcv_infer_csharp
             public double ForegroundMedian { get; set; }
             public double BackgroundMedian { get; set; }
 
-            public void ReadStatistics(JObject source)
-            {
-                WithMean = source.Value<bool?>("with_mean") ?? false;
-                WithMedian = source.Value<bool?>("with_median") ?? false;
-                // 空侧用 NaN 保存，输出 JSON 时转为 null，避免与真实零值混淆。
-                ForegroundMean = source["foreground_mean"] == null ? 0.0 : source.Value<double?>("foreground_mean") ?? double.NaN;
-                BackgroundMean = source["background_mean"] == null ? 0.0 : source.Value<double?>("background_mean") ?? double.NaN;
-                ForegroundMedian = source["foreground_median"] == null ? 0.0 : source.Value<double?>("foreground_median") ?? double.NaN;
-                BackgroundMedian = source["background_median"] == null ? 0.0 : source.Value<double?>("background_median") ?? double.NaN;
-            }
-
-            public void WriteStatistics(JObject target)
-            {
-                foreach (string key in new[] { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" })
-                    target.Remove(key);
-                if (WithMean || double.IsNaN(ForegroundMean) || double.IsNaN(BackgroundMean))
-                {
-                    target["with_mean"] = WithMean;
-                    target["foreground_mean"] = double.IsNaN(ForegroundMean) || double.IsInfinity(ForegroundMean) ? JValue.CreateNull() : new JValue(ForegroundMean);
-                    target["background_mean"] = double.IsNaN(BackgroundMean) || double.IsInfinity(BackgroundMean) ? JValue.CreateNull() : new JValue(BackgroundMean);
-                }
-                if (WithMedian || double.IsNaN(ForegroundMedian) || double.IsNaN(BackgroundMedian))
-                {
-                    target["with_median"] = WithMedian;
-                    target["foreground_median"] = double.IsNaN(ForegroundMedian) || double.IsInfinity(ForegroundMedian) ? JValue.CreateNull() : new JValue(ForegroundMedian);
-                    target["background_median"] = double.IsNaN(BackgroundMedian) || double.IsInfinity(BackgroundMedian) ? JValue.CreateNull() : new JValue(BackgroundMedian);
-                }
-            }
-
             public CSharpObjectResult(int categoryId, string categoryName, float score, float area,
                 List<double> bbox, bool withMask, Mat mask,
                 bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null)
@@ -155,21 +126,7 @@ namespace dlcv_infer_csharp
                 BackgroundMedian = 0.0;
             }
 
-            private static string FormatStatistic(double value) => double.IsNaN(value) || double.IsInfinity(value) ? "无采样" : value.ToString("F4");
-
-            public string StatisticsToString()
-            {
-                var sb = new StringBuilder();
-                if (WithMean || double.IsNaN(ForegroundMean) || double.IsNaN(BackgroundMean))
-                {
-                    sb.Append($"前景均值: {FormatStatistic(ForegroundMean)}, 背景均值: {FormatStatistic(BackgroundMean)}, ");
-                }
-                if (WithMedian || double.IsNaN(ForegroundMedian) || double.IsNaN(BackgroundMedian))
-                {
-                    sb.Append($"前景中值: {FormatStatistic(ForegroundMedian)}, 背景中值: {FormatStatistic(BackgroundMedian)}, ");
-                }
-                return sb.ToString().TrimEnd(',', ' ');
-            }
+            private static string FormatStatistic(double value) => double.IsNaN(value) || double.IsInfinity(value) ? "No samples" : value.ToString("F4");
 
             public override String ToString()
             {
@@ -194,8 +151,16 @@ namespace dlcv_infer_csharp
                 {
                     sb.Append($"Mask size: {Mask.Width}x{Mask.Height}, ");
                 }
-                string statistics = StatisticsToString();
-                if (!string.IsNullOrEmpty(statistics)) sb.Append(statistics).Append(", ");
+                if (WithMean || double.IsNaN(ForegroundMean) || double.IsNaN(BackgroundMean))
+                {
+                    sb.Append($"ForegroundMean: {FormatStatistic(ForegroundMean)}, ");
+                    sb.Append($"BackgroundMean: {FormatStatistic(BackgroundMean)}, ");
+                }
+                if (WithMedian || double.IsNaN(ForegroundMedian) || double.IsNaN(BackgroundMedian))
+                {
+                    sb.Append($"ForegroundMedian: {FormatStatistic(ForegroundMedian)}, ");
+                    sb.Append($"BackgroundMedian: {FormatStatistic(BackgroundMedian)}, ");
+                }
                 string extraInfoText = FormatExtraInfoForDisplay(ExtraInfo);
                 if (!string.IsNullOrWhiteSpace(extraInfoText))
                 {

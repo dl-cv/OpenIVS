@@ -49,8 +49,6 @@ public partial class Utils
         public double ForegroundMedian { get; set; }  // JSON null 为 NaN，缺失字段为 0
         public double BackgroundMedian { get; set; }  // JSON null 为 NaN，缺失字段为 0
 
-        public void ReadStatistics(JObject source);
-        public void WriteStatistics(JObject target);
         public JObject ExtraInfo { get; set; }        // 额外信息（polyline 等）
 
         public CSharpObjectResult(
@@ -72,11 +70,11 @@ public partial class Utils
 - `Angle` 有效值范围：`> -99.0f` 视为有效；`-100.0f` 视为无效。
 - `Mask` 为空时（`Mask == null || Mask.Empty()`），`WithMask` 应为 `false`。
 - 均值与中值分别使用 `WithMean`、`WithMedian`（均为 `bool`）和前景、背景数值（均为 `double`）。
-- `ReadStatistics(JObject)` 忠实读取 `with_mean`、`with_median`；开关缺失时为 `false`，数字键缺失时为 `0.0`，实际 JSON `null` 读取为 `double.NaN`。重复读取时不会保留上一次统计值。
+- 开关缺失时为 `false`，数字键缺失时为 `0.0`，实际 JSON `null` 读取为 `double.NaN`。
 - 统计模块禁用某组统计时不输出该组三个键；启用但选区完全没有采样时输出 `with_mean=false` 或 `with_median=false`，对应两个数字为 JSON `null`。仅前景或背景为空时，开关为 `true`，空侧数字为 JSON `null`，另一侧保留实际数值。
-- `WriteStatistics(JObject)` 先清除目标上已有的六个统计键，再按每组开关为 `true` 或任一侧为 `NaN` 保留该组；开关仍输出原布尔值，非有限数值输出 JSON `null`。关闭且数字均为零的未计算结果不输出该组，不输出 `NaN` 字符串。
-- `StatisticsToString()` 使用相同的组显示条件，空侧显示“无采样”，有效零值仍显示数值。
-- 原有 11／14 参数构造函数继续可用：11 参数构造函数初始化均值为 `false/0.0/0.0`，14 参数构造函数接收显式均值；两者初始化中值为 `false/0.0/0.0`。普通模型不计算统计值，JSON 不输出统计字段。
+- 结构化结果转 JSON 时直接写出均值与中值的六个字段；未计算项保留 `false/0.0/0.0`，非有限数值写为 JSON `null`。Flow 原始 JSON 输出仍保留统计节点决定的字段缺失。
+- `ToString()` 保留原有 `ForegroundMean`、`BackgroundMean` 标签，并增加对应中值标签；统计项开启或存在空采样时显示，空侧为 `No samples`，有效零值仍显示数值。
+- 原有 11／14 参数构造函数继续可用：11 参数构造函数初始化均值为 `false/0.0/0.0`，14 参数构造函数接收显式均值；两者初始化中值为 `false/0.0/0.0`。普通模型推理不计算统计值，结构化结果的旧均值成员默认值保持 `false/0.0/0.0`，原始 JSON 不输出统计字段。
 - `ExtraInfo` 可包含 `polyline`（通过 `Utils.GetExtraInfoPolyline` / `Utils.SetExtraInfoPolyline` 读写）。
 
 ### 2.2 CSharpSampleResult
@@ -252,7 +250,7 @@ public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 
 `post_process/foreground_background_statistics` 通过独立 Flow 节点更新统计值，不使用模型推理输入开关。均值组仍使用 `with_mean`、`foreground_mean`、`background_mean`；开启项的状态为 JSON 布尔值，前景与背景值为数值或 `null`，关闭项删除对应三键。中值组使用 `with_median`、`foreground_median`、`background_median`，独立选择且默认关闭；完整端口、采样与重复执行语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
 
-C# 结构化包装结果按 2.1 的布尔开关与 `double` 数值读取统计，JSON `null` 保存为 `double.NaN`；写回时保留无采样的 `false/null/null`，禁用组不输出。`InferOneOutJson` 返回对应 JSON，普通模型 JSON 不输出统计字段。
+C# 结构化包装结果按 2.1 的布尔开关与 `double` 数值读取统计，JSON `null` 保存为 `double.NaN`。结构化结果转换直接写出六个统计字段，非有限数值为 `null`；`InferOneOutJson` 按原始 Flow 结果保留字段与缺失状态。普通模型结构化结果的旧均值成员保持 `false/0.0/0.0`，原始 JSON 不输出统计字段。
 
 ### 4.3 内部推理方法
 
