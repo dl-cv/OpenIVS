@@ -256,7 +256,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 ### `ObjectResult` 字段
 
-| 字段 | 含义 | 典型用途 |
+| 字段 | 含义 | 存储与用途 |
 | --- | --- | --- |
 | `category_id` | 类别编号 | 程序内逻辑判断、分类统计 |
 | `category_name` | 类别名称 | 界面显示、文本输出、模板匹配 |
@@ -268,13 +268,16 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | `angle` | 旋转角度 | 绘制旋转框、旋转裁剪、回正 |
 | `with_mask` | 是否有 mask | 区分检测结果和分割结果 |
 | `mask` | 结构化结果中的局部 mask 图像 | 做进一步图像计算 |
-| `with_mean` | 是否有均值 | 普通推理为 `false`；Flow 包装结果保留统计组存在性与空值 |
-| `foreground_mean` | 前景均值 | 普通推理为 `0.0`；Flow 包装结果保留统计组存在性与空值 |
-| `background_mean` | 背景均值 | 普通推理为 `0.0`；Flow 包装结果保留统计组存在性与空值 |
-| `extra_info` | 扩展信息对象 | 放置折线、业务附加信息 |
-| `metadata` | 元信息对象 | 放置流程来源、模块附加信息 |
+| `with_mean` | 均值采样状态 | C# `WithMean`；C++ `withMean` |
+| `foreground_mean` | 前景均值 | C# `ForegroundMean`；C++ `foregroundMean` |
+| `background_mean` | 背景均值 | C# `BackgroundMean`；C++ `backgroundMean` |
+| `with_median` | 中值采样状态 | C# `WithMedian`；C++ `withMedian` |
+| `foreground_median` | 前景中值 | C# `ForegroundMedian`；C++ `foregroundMedian` |
+| `background_median` | 背景中值 | C# `BackgroundMedian`；C++ `backgroundMedian` |
+| `extra_info` | 扩展信息对象 | C# `Utils.CSharpObjectResult.ExtraInfo`（`JObject`），保存折线及业务扩展信息；C++／C 结构无对应成员，需通过 JSON 读取 |
+| `metadata` | 元信息对象 | 原始 JSON 中的流程来源和模块信息，结构化结果无对应成员 |
 
-### JSON 结果字段
+### 原始 JSON 结果字段
 
 | JSON 字段 | 含义 | 说明 |
 | --- | --- | --- |
@@ -287,15 +290,20 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | `with_angle` | 是否有角度 | 与结构化结果一致 |
 | `angle` | 旋转角度 | 无角度时固定为 `-100` |
 | `with_mask` | 是否有区域结果 | 与结构化结果一致 |
-| `with_mean` | 是否有均值 | 普通推理固定为 `false`，不进行统计 |
-| `foreground_mean` | 前景均值 | 普通推理固定为 `0.0` |
-| `background_mean` | 背景均值 | 普通推理固定为 `0.0` |
+| `with_mean` | 均值采样状态 | 仅开启均值组时存在，布尔值 |
+| `foreground_mean` | 前景均值 | 仅开启均值组时存在，数值或 `null` |
+| `background_mean` | 背景均值 | 仅开启均值组时存在，数值或 `null` |
+| `with_median` | 中值采样状态 | 仅开启中值组时存在，布尔值 |
+| `foreground_median` | 前景中值 | 仅开启中值组时存在，数值或 `null` |
+| `background_median` | 背景中值 | 仅开启中值组时存在，数值或 `null` |
 | `mask_rle` | RLE 编码区域 | 面向 JSON 传输和跨语言交换 |
 | `poly` | 多边形轮廓数组 | 用于前端绘制、边界分析、折线提取 |
 | `extra_info` | 扩展信息 | 例如 `extra_info.polyline` |
 | `metadata` | 元信息 | 记录模块附加信息、运行信息 |
 
-普通推理不再计算前景与背景统计值，结构化结果的旧均值成员及默认值仍为 `false/0.0/0.0`，原始 JSON 不输出统计字段。C ABI 的成员顺序与布局不变；C# 与 C++ 包装结果保留布尔统计标志及 `double` 数值，已开启统计项的空侧使用 `NaN`，转 JSON 时为 `null`。结构化结果转换保留六个统计字段；原始 Flow JSON 的禁用统计组保持缺失。
+均值和中值保存为目标的一级 JSON 字段及 C#／C++ 包装结构的独立成员，不放入 `extra_info`。C# JSON 解析将扩展信息读入 `ExtraInfo`，结构化结果转 JSON 时写回 `extra_info`。
+
+普通推理不再计算前景与背景统计值，C#／C++ 结构化结果的两组统计默认值均为 `false/0.0/0.0`，原始 JSON 不输出统计字段。C ABI 的 `DlcvCObjectResult` 仅保留既有的三个均值成员，成员顺序与布局不变，中值通过 JSON 结果读取。C# 与 C++ 包装结果的统计标志为 `bool`，数值为 `double`；已开启统计项的空侧使用 `NaN`，转 JSON 时为 `null`。结构化结果转换保留六个统计字段；原始 Flow JSON 的禁用统计组保持缺失。
 
 ### 几何语义
 
