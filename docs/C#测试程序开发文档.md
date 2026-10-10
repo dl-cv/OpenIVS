@@ -107,18 +107,7 @@
 
 #### 2.6 UI 自动测试与截图
 
-C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs false`：程序按参数自动加载模型与图片，在真实 WinForms 主窗口中执行模型加载、图片推理与结果文本逻辑，完成或失败后自动关闭窗口。完整命令示例（输出写入系统临时目录）：
-
-```text
-"C# 测试程序.exe" ui-test --model <模型路径> --image <图片路径> --output "%TEMP%\ui-test-result.json" --threshold 0.5 --device 0 --calc-mean false --interactive-dialogs false [--language <zh-CN|en-US>] [--screenshot <pngPath>]
-```
-
-- `--interactive-dialogs false` 时不弹出文件对话框且不激活窗口，模型与图片直接按参数加载；`true` 为人工交互模式，依次打开模型和图片选择对话框，对话框返回后才继续执行并关闭窗口。
-- 判断依据为进程退出码与 `--output` 指定的无 BOM UTF-8 JSON 文件（状态依次为 `started`、`model_loaded`、`passed`/`failed`，含模型、图片、阈值、设备、`ui_framework`、`screenshot`、窗口标题、结果文本与错误信息）；退出码 `0` 通过、`1` 失败、`2` 参数错误。
-- 禁止通过桌面自动化、鼠标键盘模拟或窗口控制验证界面，也不以无参数 GUI 启动代替测试；`infer` 是无界面功能测试，`ui-test` 是界面自动验证，两者用途不同，不互相替代。
-- `--screenshot` 为可选参数，路径必须为 `.png`，通过 `Form.DrawToBitmap` 保存窗口截图，不模拟鼠标键盘，也不抓取整个桌面。
-- `--language` 为可选参数，取值 `zh-CN` 或 `en-US`，指定本次运行界面语言；省略时为中文，且本次运行不写入用户设置。
-- 输出与截图写入系统临时目录，不进入代码仓库；各输出路径不得覆盖模型、图片或彼此。
+GUI 自动验证使用同一个 WinForms 主窗口的 `ui-test` 入口，模型、图片和输出路径由参数传入。完整参数、压力测试、截图、状态 JSON 与退出码见 [C# 测试程序自动化入口](C%23测试程序自动化入口.md)。
 
 ### 3. 功能边界（必须严格一致）
 
@@ -150,7 +139,8 @@ C# GUI 验证经命令行调用 `ui-test` 并固定使用 `--interactive-dialogs
 #### 4.1 主窗体 `MainWindow`
 
 - **窗口标题**：中文模式 `C# 测试程序`，英文模式 `C# Test Program`，其后接 ` v` 与程序集版本号
-- **界面语言**：右侧操作区空位 `En` / `中` 按钮切换，中文模式显示 `En`、英文模式显示 `中`，即时生效并写入用户设置 `UiLanguage`（默认中文）；`ui-test --language` 只影响本次运行
+- **界面语言**：右侧操作区空位 `En` / `中` 按钮切换，中文模式显示 `En`、英文模式显示 `中`，即时生效并保存语言选择（默认中文）；存储位置见第 9 节
+- **结果显示**：结果标题右侧的 `JSON` / `汇总` 按钮切换已缓存的摘要与原始 JSON；摘要模式显示 `JSON`，JSON 模式显示 `汇总`，切换不重新推理。`CSharpResult.JsonText` 保存原始 JSON。
 - **启动位置**：屏幕居中
 - **默认尺寸**：1280 × 820 逻辑像素；最小尺寸为 1040 × 500 逻辑像素
 - **默认字体**：Microsoft YaHei UI，9.75pt
@@ -503,6 +493,8 @@ DlcvDemo 压力测试输出模板（必须一致，含空格、单位与换行�
 - 一致性不一致：`检测到推理结果不一致，测试已停止！`（标题 `结果不一致`）
 
 ### 9. 配置与持久化（必须一致）
+
+界面语言由 `DlcvDemo/I18n.cs` 写入 `%APPDATA%\dlcv\language.txt`，使用 `zh-Hans` 或 `en`；缺失、旧 `zh` 或无效内容规范化为 `zh-Hans`。中文原文作为翻译键，控件与菜单初次应用时通过 `ConditionalWeakTable` 保存原文，语言切换不覆盖结果和数值等运行期内容。压力统计文本通过 `PressureTestRunner.LocalizeText` 复用同一翻译字典。
 
 使用用户范围设置保存最近路径（跨次启动可复用）：
 

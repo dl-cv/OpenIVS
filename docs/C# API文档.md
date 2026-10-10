@@ -684,7 +684,7 @@ using (var model = ModelFactory.CreateFromIndex(existingIndex))
 
 `FlowGraphModel` 是流程图推理封装类，实现了 `IDisposable`。当前实现文件为 `DlcvCsharpApi\flow\FlowGraphModel.cs`。
 
-共享的 Flow 节点分类、统一输入输出字段、模板对象与计时口径见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。
+共享的 Flow 节点分类、统一输入输出字段、模板对象与计时口径见 [模块、流程与模型推理标准文档](%E6%A8%A1%E5%9D%97%E3%80%81%E6%B5%81%E7%A8%8B%E4%B8%8E%E6%A8%A1%E5%9E%8B%E6%8E%A8%E7%90%86%E6%A0%87%E5%87%86%E6%96%87%E6%A1%A3.md)。
 
 C# 侧公开接口为 `Load()`、`GetLoadedModelMeta()`、`GetModelInfo()`、`GetDvsModelInfo()`、`GetRegistrationPipeline()`、`GetModelBindings()`、`Infer()`、`InferBatch()`、`InferOneOutJson()`、`Benchmark()`、`Dispose()`。模型加载阶段记录每个模型节点的执行顺序、原始模型名和普通模型信息；执行时会把前端图像、`device_id`、`return_json_emit_poly` 和当前流程的 index 模型表写入 `ExecutionContext`，并把 `result_list` 转为结构化结果或 JSON 输出。
 

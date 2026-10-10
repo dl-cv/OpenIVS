@@ -12,8 +12,8 @@ class SlidingWindowApiRemovedTest(unittest.TestCase):
     def test_legacy_sliding_window_model_is_absent(self):
         source_files = [
             "AGENTS.md",
-            "C++ API文档.md",
-            "C# API文档.md",
+            "docs/C++ API文档.md",
+            "docs/C# API文档.md",
             "dlcv_infer_cpp/dlcv_infer.h",
             "dlcv_infer_cpp/dlcv_infer.cpp",
             "DlcvCsharpApi/Model.cs",

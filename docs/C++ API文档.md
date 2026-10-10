@@ -594,7 +594,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ## 18. C++ 对外类型
 
-共享结果语义、JSON 字段语义、Flow 模块分类、模板对象语义和计时口径见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。
+共享结果语义、JSON 字段语义、Flow 模块分类、模板对象语义和计时口径见 [模块、流程与模型推理标准文档](%E6%A8%A1%E5%9D%97%E3%80%81%E6%B5%81%E7%A8%8B%E4%B8%8E%E6%A8%A1%E5%9E%8B%E6%8E%A8%E7%90%86%E6%A0%87%E5%87%86%E6%96%87%E6%A1%A3.md)。
 
 ### 18.1 对外类型名
 
@@ -649,7 +649,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 22.1 DVS 归档加载
 
-共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](模块、流程与模型推理标准文档.md)。C++ 侧从 DVS 归档内存读取 `pipeline.json` 和子模型二进制，先清除流程节点中遗留的 `model_index`，再通过 `dlcv_load_model_binary` 加载；推理组件缺少该接口时明确返回不支持。归档直接加载全程使用包内数据，只有共享恢复使用已登记的 index。
+共享的 Flow 与归档语义见 [模块、流程与模型推理标准文档](%E6%A8%A1%E5%9D%97%E3%80%81%E6%B5%81%E7%A8%8B%E4%B8%8E%E6%A8%A1%E5%9E%8B%E6%8E%A8%E7%90%86%E6%A0%87%E5%87%86%E6%96%87%E6%A1%A3.md)。C++ 侧从 DVS 归档内存读取 `pipeline.json` 和子模型二进制，先清除流程节点中遗留的 `model_index`，再通过 `dlcv_load_model_binary` 加载；推理组件缺少该接口时明确返回不支持。归档直接加载全程使用包内数据，只有共享恢复使用已登记的 index。
 
 
 `Model` 只在 `dlcv_load_model_binary` 调用期间读取子模型二进制，不在对象中保存调用方缓冲区。调用方使用匹配版本的头文件和库重新编译。

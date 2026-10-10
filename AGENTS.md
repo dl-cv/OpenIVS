@@ -84,10 +84,14 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | C# 界面语言 | `DlcvDemo/I18n.cs` | 中文字典式翻译与运行时切换 |
 | C# 压力测试 | `PressureTestRunner/PressureTestRunner.cs` | 多线程/一致性测试框架 |
 
+## 文档位置
+
+项目文档统一存放在 `docs/`，目录见 `docs/README.md`；根目录 `README.md` 保留仓库文档入口。
+
 ## 常见修改点
 
 - **API 层修改**：
-  - 新增结果字段 → 同步修改 `C++ API文档.md`、`C# API文档.md`
+  - 新增结果字段 → 同步修改 `docs/C++ API文档.md`、`docs/C# API文档.md`
   - 修改图像预处理逻辑 → 同步检查 C++ `dlcv_infer.cpp` 与 C# `Model.cs` 的 `PrepareInferImages`
   - 新增模型格式支持 → 同步更新格式识别、解析逻辑和 API 文档；DLL 选择仍遵循首次普通模型的模型头
   - 接口审查以模型加速器实际可生成的产物为范围，不使用生成流程无法产生的输入要求新增支持或扩大接口
