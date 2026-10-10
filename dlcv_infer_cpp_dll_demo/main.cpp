@@ -25,6 +25,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "dlcv_infer.h"
+#include "ExtraInfoComparison.h"
 
 void InitGbkConsole() {
     SetConsoleOutputCP(936);
@@ -751,8 +752,7 @@ bool IsSameBenchmarkResult(
                 || candidateObject.withBbox != baselineObject.withBbox
                 || candidateObject.withAngle != baselineObject.withAngle
                 || candidateObject.withMask != baselineObject.withMask
-                || candidateObject.withMean != baselineObject.withMean
-                || candidateObject.withMedian != baselineObject.withMedian) {
+                || !dlcv_demo::ExtraInfoEquals(candidateObject.extraInfo, baselineObject.extraInfo, 1e-4)) {
                 difference = "图片[" + std::to_string(sampleIndex) + "]目标[" + std::to_string(objectIndex)
                     + "]稳定字段不一致";
                 return false;
@@ -789,17 +789,7 @@ bool IsSameBenchmarkResult(
                     + "]数值字段不一致";
                 return false;
             }
-            auto sameStatistic = [](double left, double right) {
-                if (std::isnan(left) || std::isnan(right)) return std::isnan(left) && std::isnan(right);
-                return std::isfinite(left) && std::isfinite(right) && std::abs(left - right) <= 1e-4;
-            };
-            if (!sameStatistic(candidateObject.foregroundMean, baselineObject.foregroundMean) ||
-                !sameStatistic(candidateObject.backgroundMean, baselineObject.backgroundMean) ||
-                !sameStatistic(candidateObject.foregroundMedian, baselineObject.foregroundMedian) ||
-                !sameStatistic(candidateObject.backgroundMedian, baselineObject.backgroundMedian)) {
-                difference = "图片[" + std::to_string(sampleIndex) + "]目标[" + std::to_string(objectIndex) + "]统计数值不一致";
-                return false;
-            }
+
         }
     }
     return true;

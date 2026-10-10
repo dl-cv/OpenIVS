@@ -617,10 +617,8 @@ QString MainWindow::formatResultText(const std::vector<DisplayObjectResult>& res
                         .arg(object.angle, 0, 'f', 3)
                         .arg(degrees, 0, 'f', 1);
         }
-        if (object.withMean || std::isnan(object.foregroundMean) || std::isnan(object.backgroundMean)) {
-            text += QString("  前景均值=%1  背景均值=%2")
-                        .arg(std::isfinite(object.foregroundMean) ? QString::number(object.foregroundMean, 'f', 4) : QStringLiteral("无采样"))
-                        .arg(std::isfinite(object.backgroundMean) ? QString::number(object.backgroundMean, 'f', 4) : QStringLiteral("无采样"));
+        if (object.extraInfo.is_object() && !object.extraInfo.empty()) {
+            text += QString("  extra_info=%1").arg(QString::fromUtf8(object.extraInfo.dump(2).c_str()));
         }
         text += "\n";
     }
@@ -661,9 +659,9 @@ std::vector<DisplayObjectResult> MainWindow::copyFirstSample(const DlcvCResult& 
         target.withAngle = source.with_angle;
         target.angle = source.angle;
         target.area = source.area;
-        target.withMean = source.with_mean;
-        target.foregroundMean = source.foreground_mean;
-        target.backgroundMean = source.background_mean;
+        if (source.extra_info != nullptr) {
+            target.extraInfo = nlohmann::json::parse(source.extra_info);
+        }
         output.push_back(std::move(target));
     }
     return output;

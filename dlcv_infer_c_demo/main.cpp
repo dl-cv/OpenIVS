@@ -1,4 +1,5 @@
 #include "DlcvInferApi.h"
+#include "ExtraInfoComparison.h"
 
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -55,9 +56,7 @@ struct StableObjectResult {
     int maskHeight = 0;
     bool withAngle = false;
     float angle = 0.0F;
-    bool withMean = false;
-    double foregroundMean = 0.0;
-    double backgroundMean = 0.0;
+    nlohmann::json extraInfo;
 };
 
 struct StableResultSummary {
@@ -261,9 +260,19 @@ bool buildStableSummary(
             target.maskHeight = source.mask.height;
             target.withAngle = source.with_angle;
             target.angle = source.angle;
-            target.withMean = source.with_mean;
-            target.foregroundMean = source.foreground_mean;
-            target.backgroundMean = source.background_mean;
+            if (source.extra_info != nullptr) {
+                try {
+                    target.extraInfo = nlohmann::json::parse(source.extra_info);
+                    if (!target.extraInfo.is_null() && !target.extraInfo.is_object()) {
+                        error = std::string("extra_info 必须为对象或 null，实际类型为 ") + target.extraInfo.type_name();
+                        return false;
+                    }
+                    if (target.extraInfo.is_object() && target.extraInfo.empty()) target.extraInfo = nullptr;
+                } catch (const std::exception& ex) {
+                    error = std::string("解析 extra_info 失败：") + ex.what();
+                    return false;
+                }
+            }
             targetSample.push_back(std::move(target));
         }
         summary.samples.push_back(std::move(targetSample));
@@ -279,10 +288,6 @@ bool compareStableSummary(
     const StableResultSummary& baseline,
     const StableResultSummary& current,
     std::string& error) {
-    const auto sameMean = [](double left, double right) {
-        if (std::isnan(left) || std::isnan(right)) return std::isnan(left) && std::isnan(right);
-        return std::isfinite(left) && std::isfinite(right) && nearlyEqual(left, right, 0.000001);
-    };
     if (baseline.samples.size() != current.samples.size()) {
         error = "样本数量变化，基线=" + std::to_string(baseline.samples.size()) +
             "，当前=" + std::to_string(current.samples.size());
@@ -313,8 +318,7 @@ bool compareStableSummary(
             }
             if (expected.withBbox != actual.withBbox ||
                 expected.withMask != actual.withMask ||
-                expected.withAngle != actual.withAngle ||
-                expected.withMean != actual.withMean) {
+                expected.withAngle != actual.withAngle) {
                 error = location + "的结果标志变化";
                 return false;
             }
@@ -337,9 +341,8 @@ bool compareStableSummary(
                 error = location + "的角度变化";
                 return false;
             }
-            if (!sameMean(expected.foregroundMean, actual.foregroundMean) ||
-                !sameMean(expected.backgroundMean, actual.backgroundMean)) {
-                error = location + "的均值变化";
+            if (!dlcv_demo::ExtraInfoEquals(expected.extraInfo, actual.extraInfo, 1e-6)) {
+                error = location + "的扩展信息变化";
                 return false;
             }
         }
@@ -590,9 +593,8 @@ private:
                 if (object.with_mask) {
                     std::cout << "，mask=" << object.mask.width << "x" << object.mask.height;
                 }
-                if (object.with_mean) {
-                    std::cout << "，前景均值=" << object.foreground_mean
-                        << "，背景均值=" << object.background_mean;
+                if (object.extra_info != nullptr) {
+                    std::cout << "，extra_info=" << object.extra_info;
                 }
                 std::cout << "。\n";
             }

@@ -350,7 +350,7 @@ GUI 自动验证使用同一个 WinForms 主窗口的 `ui-test` 入口，模型�
   - 调用：`model.InferOneOutJson(image_rgb, params)`
 - 输出到 `richTextBox1`：`JsonConvert.SerializeObject(json, Formatting.Indented)`；未产生流程判定时为结果数组，产生判定时为包含 `result_list/ok/reason` 的包装对象。
 - **说明**：该功能只输出 JSON 文本，不更新 `imagePanel1` 的图像与可视化结果。
-- **前景背景统计**：在流程内连接“前景背景统计”节点的 `image/results`，通过本按钮查看均值、中值及 `null`；不开启普通推理参数或 GUI 统计开关。节点配置见 `模块、流程与模型推理标准文档.md` 6.4.1。
+- **前景背景统计**：在流程内连接“前景背景统计”节点的 `image/results`，通过本按钮查看目标 `extra_info` 中的均值、中值及 `null`；不开启普通推理参数或 GUI 统计开关。节点配置见 `模块、流程与模型推理标准文档.md` 6.4.1。
 - 异常处理：`ReportError("推理JSON失败", ex)`
 
 #### 7.8 多线程测试（按钮：`多线程测试`）

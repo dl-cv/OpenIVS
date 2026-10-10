@@ -1,5 +1,6 @@
 import argparse
 import ctypes
+from copy import deepcopy
 import json
 import math
 import os
@@ -90,9 +91,7 @@ class DlcvCObjectResult(ctypes.Structure):
         ("mask", DlcvCMask),
         ("with_angle", ctypes.c_bool),
         ("angle", ctypes.c_float),
-        ("with_mean", ctypes.c_bool),
-        ("foreground_mean", ctypes.c_double),
-        ("background_mean", ctypes.c_double),
+        ("extra_info", ctypes.c_void_p),
     ]
 
 
@@ -481,67 +480,35 @@ def normalize_prediction_object(value):
             else -100.0
         ),
     }
-    for kind in ("mean", "median"):
-        flag = f"with_{kind}"
-        if flag not in value:
-            continue
-        result[flag] = bool(value[flag])
-        for side in ("foreground", "background"):
-            key = f"{side}_{kind}"
-            number = value[key]
-            result[key] = None if number is None else normalize_number(number, key)
-    return result
-
-
-def test_statistics_json_presence_and_null():
-    disabled = normalize_prediction_object({"score": 0.9})
-    assert all(key not in disabled for key in (
+    statistics_keys = {
         "with_mean", "foreground_mean", "background_mean",
-        "with_median", "foreground_median", "background_median"))
-    fields = {"with_mean": True, "foreground_mean": 12.5, "background_mean": None,
-              "with_median": True, "foreground_median": 10.0, "background_median": None}
-    actual = normalize_prediction_object({"score": 0.9, **fields})
-    assert {key: actual[key] for key in fields} == fields
-    assert json.loads(json.dumps(actual))["background_median"] is None
-    empty = normalize_prediction_object({"score": 0.9, "with_mean": False,
-        "foreground_mean": None, "background_mean": None, "with_median": False,
-        "foreground_median": None, "background_median": None})
-    assert empty["with_mean"] is False and empty["with_median"] is False
-    assert empty["foreground_mean"] is None and empty["foreground_median"] is None
-    legacy = normalize_prediction_object({"score": 0.9, "with_mean": False,
-        "foreground_mean": 0.0, "background_mean": 0.0})
-    assert legacy["foreground_mean"] == 0.0 and "with_median" not in legacy
-
-
-def test_c_statistics_projection_keeps_json_median():
-    c_fields = {"score": 0.9, "with_mean": True, "foreground_mean": None, "background_mean": 8.0}
-    json_fields = {**c_fields, "with_median": True, "foreground_median": None, "background_median": 7.0}
-    left = [normalize_sample([c_fields])]
-    right = [normalize_sample([json_fields])]
-    assert compare_predictions(left, right) == []
-    assert right[0][0]["background_median"] == 7.0
-    wrong = [normalize_sample([{**json_fields, "foreground_mean": 0.0}])]
-    assert compare_predictions(left, wrong)
-    assert compare_predictions(left, [normalize_sample([{"score": 0.9}])])
-    assert compare_predictions([normalize_sample([{"score": 0.9, "with_mean": False,
-        "foreground_mean": None, "background_mean": None}])], [normalize_sample([{"score": 0.9}])]) == []
-
-
-def test_c_structured_nan_means_are_not_zero():
-    objects = (DlcvCObjectResult * 1)()
-    objects[0].score = 0.9
-    objects[0].with_mean = False
-    objects[0].foreground_mean = math.nan
-    objects[0].background_mean = math.nan
-    samples = (DlcvCSampleResult * 1)()
-    samples[0].n = 1
-    samples[0].results = objects
-    result = DlcvCResult()
-    result.n = 1
-    result.sample_results = samples
-    fields = copy_structured_result(result)[0][0]
-    assert fields["foreground_mean"] is None and fields["background_mean"] is None
-    assert "with_median" not in fields
+        "with_median", "foreground_median", "background_median",
+    }
+    if statistics_keys.intersection(value):
+        raise TestFailure("结果解析", "目标一级不允许统计键，统计必须位于 extra_info")
+    extra = value.get("extra_info", {})
+    if not isinstance(extra, dict):
+        raise TestFailure("结果解析", "extra_info 必须是 JSON 对象")
+    result["extra_info"] = deepcopy(extra)
+    for kind in ("mean", "median"):
+        keys = (f"with_{kind}", f"foreground_{kind}", f"background_{kind}")
+        present = set(keys).intersection(extra)
+        if not present:
+            continue
+        if present != set(keys):
+            raise TestFailure("结果解析", f"extra_info 的 {kind} 组必须包含完整三个键")
+        if not isinstance(extra[keys[0]], bool):
+            raise TestFailure("结果解析", f"extra_info.{keys[0]} 必须是布尔值")
+        for key in keys[1:]:
+            number = extra[key]
+            if number is not None:
+                if isinstance(number, bool) or not isinstance(number, (int, float)):
+                    raise TestFailure("结果解析", f"extra_info.{key} 必须是数值或 null")
+                result["extra_info"][key] = normalize_number(number, f"extra_info.{key}")
+        has_samples = any(extra[key] is not None for key in keys[1:])
+        if extra[keys[0]] != has_samples:
+            raise TestFailure("结果解析", f"extra_info.{keys[0]} 与两侧采样值不一致")
+    return result
 
 
 def prediction_sort_key(value):
@@ -553,7 +520,6 @@ def prediction_sort_key(value):
         round(value["score"], 6),
         value["with_angle"],
         round(value["angle"], 6),
-        bool(value.get("with_mean")),
     )
 
 
@@ -562,6 +528,18 @@ def normalize_sample(objects):
         raise TestFailure("结果解析", "预测结果必须是数组")
     normalized = [normalize_prediction_object(value) for value in objects]
     return sorted(normalized, key=prediction_sort_key)
+
+
+def parse_extra_info(pointer):
+    if not pointer:
+        return {}
+    try:
+        extra = json.loads(ctypes.string_at(pointer).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TestFailure("结果解析", "C extra_info 不是有效 UTF-8 JSON") from exc
+    if not isinstance(extra, dict):
+        raise TestFailure("结果解析", "C extra_info 必须是 JSON 对象")
+    return extra
 
 
 def copy_structured_result(result):
@@ -596,9 +574,7 @@ def copy_structured_result(result):
                     "with_mask": bool(value.with_mask),
                     "with_angle": bool(value.with_angle),
                     "angle": float(value.angle),
-                    "with_mean": bool(value.with_mean),
-                    "foreground_mean": float(value.foreground_mean) if not math.isnan(value.foreground_mean) else None,
-                    "background_mean": float(value.background_mean) if not math.isnan(value.background_mean) else None,
+                    "extra_info": parse_extra_info(value.extra_info),
                 }
             )
         samples.append(normalize_sample(objects))
@@ -623,6 +599,34 @@ def normalize_json_result(value):
     if value and all(isinstance(item, dict) and "result_list" in item for item in value):
         return [normalize_sample(item["result_list"]) for item in value]
     return [normalize_sample(value)]
+
+
+def compare_extra_info(left, right, path, differences):
+    if isinstance(left, dict) and isinstance(right, dict):
+        if left.keys() != right.keys():
+            differences.append(f"{path} 键不一致: 结构化={sorted(left)} JSON={sorted(right)}")
+        for key in left.keys() & right.keys():
+            compare_extra_info(left[key], right[key], f"{path}.{key}", differences)
+        return
+    if isinstance(left, list) and isinstance(right, list):
+        if len(left) != len(right):
+            differences.append(f"{path} 长度不一致")
+        for index, (left_value, right_value) in enumerate(zip(left, right)):
+            compare_extra_info(left_value, right_value, f"{path}[{index}]", differences)
+        return
+    key = path.rsplit(".", 1)[-1]
+    if (key in FLOAT_TOLERANCES and isinstance(left, (int, float))
+            and isinstance(right, (int, float)) and not isinstance(left, bool)
+            and not isinstance(right, bool)):
+        equal = math.isclose(left, right, rel_tol=FLOAT_RELATIVE_TOLERANCE,
+                             abs_tol=FLOAT_TOLERANCES[key])
+    elif (isinstance(left, (int, float)) and isinstance(right, (int, float))
+          and not isinstance(left, bool) and not isinstance(right, bool)):
+        equal = left == right
+    else:
+        equal = type(left) is type(right) and left == right
+    if not equal:
+        differences.append(f"{path} 不一致: 结构化={left!r} JSON={right!r}")
 
 
 def compare_predictions(structured_samples, json_samples):
@@ -674,21 +678,8 @@ def compare_predictions(structured_samples, json_samples):
                         f"结构化={left[field_name]!r} JSON={right[field_name]!r} "
                         f"容差={FLOAT_TOLERANCES[field_name]}"
                     )
-            # C 结构只校验可表达的均值；完整统计保留在 JSON 结果中。
-            if "with_mean" in right:
-                if left.get("with_mean") != right["with_mean"]:
-                    differences.append(f"{prefix} with_mean 不一致")
-                for field_name in ("foreground_mean", "background_mean"):
-                    left_value, right_value = left.get(field_name), right[field_name]
-                    if left_value is None or right_value is None:
-                        equal = left_value is None and right_value is None
-                    else:
-                        equal = math.isclose(left_value, right_value, rel_tol=FLOAT_RELATIVE_TOLERANCE,
-                                             abs_tol=FLOAT_TOLERANCES[field_name])
-                    if not equal:
-                        differences.append(f"{prefix} {field_name} 不一致: 结构化={left_value!r} JSON={right_value!r}")
-            elif left.get("with_mean", False):
-                differences.append(f"{prefix} C 均值标志与 JSON 关闭选项不一致")
+            compare_extra_info(left["extra_info"], right["extra_info"],
+                               f"{prefix} extra_info", differences)
             for coordinate_index, (left_value, right_value) in enumerate(
                 zip(left["bbox"], right["bbox"])
             ):

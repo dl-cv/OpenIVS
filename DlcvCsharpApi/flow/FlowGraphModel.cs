@@ -1446,12 +1446,6 @@ namespace DlcvModules
             string categoryName = entry.Value<string>("category_name") ?? string.Empty;
             float score = entry.Value<float?>("score") ?? 0f;
             float area = entry.Value<float?>("area") ?? 0f;
-            bool withMean = entry.Value<bool?>("with_mean") ?? false;
-            double foregroundMean = entry["foreground_mean"] == null ? 0.0 : entry.Value<double?>("foreground_mean") ?? double.NaN;
-            double backgroundMean = entry["background_mean"] == null ? 0.0 : entry.Value<double?>("background_mean") ?? double.NaN;
-            bool withMedian = entry.Value<bool?>("with_median") ?? false;
-            double foregroundMedian = entry["foreground_median"] == null ? 0.0 : entry.Value<double?>("foreground_median") ?? double.NaN;
-            double backgroundMedian = entry["background_median"] == null ? 0.0 : entry.Value<double?>("background_median") ?? double.NaN;
 
             var bboxArr = entry["bbox"] as JArray;
             var bboxRaw = bboxArr != null ? bboxArr.ToObject<List<double>>() : new List<double>();
@@ -1593,13 +1587,7 @@ namespace DlcvModules
 
             var obj = new Utils.CSharpObjectResult(
                 categoryId, categoryName, score, area, bbox,
-                withMask, mask, withBbox, withAngle, angle, extraInfo,
-                withMean, foregroundMean, backgroundMean)
-            {
-                WithMedian = withMedian,
-                ForegroundMedian = foregroundMedian,
-                BackgroundMedian = backgroundMedian
-            };
+                withMask, mask, withBbox, withAngle, angle, extraInfo);
             objects.Add(obj);
         }
 
@@ -1632,12 +1620,6 @@ namespace DlcvModules
                 string categoryName = so.Value<string>("category_name") ?? string.Empty;
                 float score = so.Value<float?>("score") ?? 0f;
                 float area = so.Value<float?>("area") ?? 0f;
-                bool withMean = so.Value<bool?>("with_mean") ?? false;
-                double foregroundMean = so["foreground_mean"] == null ? 0.0 : so.Value<double?>("foreground_mean") ?? double.NaN;
-                double backgroundMean = so["background_mean"] == null ? 0.0 : so.Value<double?>("background_mean") ?? double.NaN;
-                bool withMedian = so.Value<bool?>("with_median") ?? false;
-                double foregroundMedian = so["foreground_median"] == null ? 0.0 : so.Value<double?>("foreground_median") ?? double.NaN;
-                double backgroundMedian = so["background_median"] == null ? 0.0 : so.Value<double?>("background_median") ?? double.NaN;
                 var bboxArr = so["bbox"] as JArray;
                 var bbox = bboxArr != null ? bboxArr.ToObject<List<double>>() : new List<double>();
                 bool withBbox = so.Value<bool?>("with_bbox") ?? (bbox != null && bbox.Count > 0);
@@ -1750,13 +1732,7 @@ namespace DlcvModules
 
                 var obj = new Utils.CSharpObjectResult(
                     categoryId, categoryName, score, area, bbox,
-                    withMask, mask, withBbox, withAngle, angle, extraInfo,
-                    withMean, foregroundMean, backgroundMean)
-                {
-                    WithMedian = withMedian,
-                    ForegroundMedian = foregroundMedian,
-                    BackgroundMedian = backgroundMedian
-                };
+                    withMask, mask, withBbox, withAngle, angle, extraInfo);
                 objects.Add(obj);
             }
         }

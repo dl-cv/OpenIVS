@@ -259,17 +259,7 @@ namespace DlcvDemo
                 if (sample.Results == null) continue;
                 foreach (var item in sample.Results)
                 {
-                    summary.Add(
-                        item.Score,
-                        item.CategoryName,
-                        item.WithMask,
-                        item.WithMean,
-                        item.ForegroundMean,
-                        item.BackgroundMean,
-                        item.WithMedian,
-                        item.ForegroundMedian,
-                        item.BackgroundMedian,
-                        threshold);
+                    summary.Add(item.Score, item.CategoryName, item.WithMask, item.ExtraInfo, threshold);
                 }
             }
             return summary;
@@ -284,26 +274,15 @@ namespace DlcvDemo
                 double score = double.NaN;
                 string category = string.Empty;
                 bool withMask = false;
-                bool withMean = false;
-                double foregroundMean = 0.0;
-                double backgroundMean = 0.0;
-                bool withMedian = false;
-                double foregroundMedian = 0.0;
-                double backgroundMedian = 0.0;
+                JObject extraInfo = null;
                 if (item != null)
                 {
                     TryReadScore(item["score"], out score);
                     category = item["category_name"] != null ? item["category_name"].ToString() : string.Empty;
                     withMask = item.Value<bool?>("with_mask") ?? false;
-                    withMean = item.Value<bool?>("with_mean") ?? false;
-                    foregroundMean = item["foreground_mean"] == null ? 0.0 : item.Value<double?>("foreground_mean") ?? double.NaN;
-                    backgroundMean = item["background_mean"] == null ? 0.0 : item.Value<double?>("background_mean") ?? double.NaN;
-                    withMedian = item.Value<bool?>("with_median") ?? false;
-                    foregroundMedian = item["foreground_median"] == null ? 0.0 : item.Value<double?>("foreground_median") ?? double.NaN;
-                    backgroundMedian = item["background_median"] == null ? 0.0 : item.Value<double?>("background_median") ?? double.NaN;
+                    extraInfo = item["extra_info"] as JObject;
                 }
-                summary.Add(score, category, withMask, withMean, foregroundMean, backgroundMean,
-                    withMedian, foregroundMedian, backgroundMedian, threshold);
+                summary.Add(score, category, withMask, extraInfo, threshold);
             }
             return summary;
         }
@@ -330,40 +309,10 @@ namespace DlcvDemo
                 if (!IsFinite(leftScore) || !IsFinite(rightScore)) return false;
                 if (Math.Abs(leftScore - rightScore) > ScoreConsistencyTolerance) return false;
                 if (!string.Equals(left.Categories[i], right.Categories[i], StringComparison.Ordinal)) return false;
-                if (left.WithMeans[i] != right.WithMeans[i] || left.WithMedians[i] != right.WithMedians[i]) return false;
-                if (!StatisticsEqual(left.ForegroundMeans[i], right.ForegroundMeans[i]) ||
-                    !StatisticsEqual(left.BackgroundMeans[i], right.BackgroundMeans[i]) ||
-                    !StatisticsEqual(left.ForegroundMedians[i], right.ForegroundMedians[i]) ||
-                    !StatisticsEqual(left.BackgroundMedians[i], right.BackgroundMedians[i])) return false;
+                if (left.WithMasks[i] != right.WithMasks[i]) return false;
+                if (!JToken.DeepEquals(left.ExtraInfos[i], right.ExtraInfos[i])) return false;
             }
             return true;
-        }
-
-        private static bool StatisticsEqual(double left, double right)
-        {
-            if (double.IsNaN(left) || double.IsNaN(right)) return double.IsNaN(left) && double.IsNaN(right);
-            return IsFinite(left) && IsFinite(right) && Math.Abs(left - right) <= MeanConsistencyTolerance;
-        }
-
-        internal static bool IsThresholdCheckPassed(
-            IList<string> structuredCategories,
-            IList<double> structuredScores,
-            int structuredBelowThresholdCount,
-            IList<string> jsonCategories,
-            IList<double> jsonScores,
-            int jsonBelowThresholdCount)
-        {
-            bool anomalyScoreOnly = IsFiniteAnomalyScoreOnly(structuredCategories, structuredScores)
-                && IsFiniteAnomalyScoreOnly(jsonCategories, jsonScores);
-            return anomalyScoreOnly
-                || (structuredBelowThresholdCount == 0 && jsonBelowThresholdCount == 0);
-        }
-
-        internal static bool IsValidationPassed(
-            bool consistent,
-            bool thresholdCheckPassed)
-        {
-            return consistent && thresholdCheckPassed;
         }
 
         private static bool IsFiniteAnomalyScoreOnly(
@@ -400,6 +349,27 @@ namespace DlcvDemo
                     }
                 }
             }
+        }
+
+        internal static bool IsThresholdCheckPassed(
+            IList<string> structuredCategories,
+            IList<double> structuredScores,
+            int structuredBelowThresholdCount,
+            IList<string> jsonCategories,
+            IList<double> jsonScores,
+            int jsonBelowThresholdCount)
+        {
+            bool anomalyScoreOnly = IsFiniteAnomalyScoreOnly(structuredCategories, structuredScores)
+                && IsFiniteAnomalyScoreOnly(jsonCategories, jsonScores);
+            return anomalyScoreOnly
+                || (structuredBelowThresholdCount == 0 && jsonBelowThresholdCount == 0);
+        }
+
+        internal static bool IsValidationPassed(
+            bool consistent,
+            bool thresholdCheckPassed)
+        {
+            return consistent && thresholdCheckPassed;
         }
 
         private static bool TryParseInferOptions(string[] args, out CliOptions options, out string error)
@@ -627,38 +597,18 @@ namespace DlcvDemo
             public List<double> Scores { get; } = new List<double>();
             public List<string> Categories { get; } = new List<string>();
             public List<bool> WithMasks { get; } = new List<bool>();
-            public List<bool> WithMeans { get; } = new List<bool>();
-            public List<double> ForegroundMeans { get; } = new List<double>();
-            public List<double> BackgroundMeans { get; } = new List<double>();
-            public List<bool> WithMedians { get; } = new List<bool>();
-            public List<double> ForegroundMedians { get; } = new List<double>();
-            public List<double> BackgroundMedians { get; } = new List<double>();
+            public List<JToken> ExtraInfos { get; } = new List<JToken>();
             public int Count { get { return Scores.Count; } }
             public int BelowThresholdCount { get { return _belowThreshold.Count; } }
 
-            public void Add(
-                double score,
-                string category,
-                bool withMask,
-                bool withMean,
-                double foregroundMean,
-                double backgroundMean,
-                bool withMedian,
-                double foregroundMedian,
-                double backgroundMedian,
-                double threshold)
+            public void Add(double score, string category, bool withMask, JObject extraInfo, double threshold)
             {
                 int index = Scores.Count;
                 string normalizedCategory = category ?? string.Empty;
                 Scores.Add(score);
                 Categories.Add(normalizedCategory);
                 WithMasks.Add(withMask);
-                WithMeans.Add(withMean);
-                ForegroundMeans.Add(foregroundMean);
-                BackgroundMeans.Add(backgroundMean);
-                WithMedians.Add(withMedian);
-                ForegroundMedians.Add(foregroundMedian);
-                BackgroundMedians.Add(backgroundMedian);
+                ExtraInfos.Add(extraInfo != null && extraInfo.HasValues ? extraInfo.DeepClone() : JValue.CreateNull());
 
                 if (!IsFinite(score) || score < threshold)
                 {
@@ -674,29 +624,9 @@ namespace DlcvDemo
             public JObject ToJson()
             {
                 var scores = new JArray();
-                var foregroundMeans = new JArray();
-                var backgroundMeans = new JArray();
-                var foregroundMedians = new JArray();
-                var backgroundMedians = new JArray();
                 foreach (double score in Scores)
                 {
                     scores.Add(IsFinite(score) ? new JValue(score) : JValue.CreateNull());
-                }
-                foreach (double foregroundMean in ForegroundMeans)
-                {
-                    foregroundMeans.Add(IsFinite(foregroundMean) ? new JValue(foregroundMean) : JValue.CreateNull());
-                }
-                foreach (double backgroundMean in BackgroundMeans)
-                {
-                    backgroundMeans.Add(IsFinite(backgroundMean) ? new JValue(backgroundMean) : JValue.CreateNull());
-                }
-                foreach (double foregroundMedian in ForegroundMedians)
-                {
-                    foregroundMedians.Add(IsFinite(foregroundMedian) ? new JValue(foregroundMedian) : JValue.CreateNull());
-                }
-                foreach (double backgroundMedian in BackgroundMedians)
-                {
-                    backgroundMedians.Add(IsFinite(backgroundMedian) ? new JValue(backgroundMedian) : JValue.CreateNull());
                 }
 
                 return new JObject
@@ -705,12 +635,7 @@ namespace DlcvDemo
                     ["scores"] = scores,
                     ["categories"] = new JArray(Categories),
                     ["with_mask"] = new JArray(WithMasks),
-                    ["with_mean"] = new JArray(WithMeans),
-                    ["foreground_mean"] = foregroundMeans,
-                    ["background_mean"] = backgroundMeans,
-                    ["with_median"] = new JArray(WithMedians),
-                    ["foreground_median"] = foregroundMedians,
-                    ["background_median"] = backgroundMedians,
+                    ["extra_info"] = new JArray(ExtraInfos),
                     ["below_threshold"] = _belowThreshold.DeepClone()
                 };
             }

@@ -81,9 +81,7 @@ class QtDemoRegressionRunnerTest(unittest.TestCase):
             "categories": list(expected["categories"]),
             "scores": list(expected["scores"]),
             "below_threshold": [],
-            "with_mean": [False] * expected["count"],
-            "foreground_mean": [0.0] * expected["count"],
-            "background_mean": [0.0] * expected["count"],
+            "extra_info": [None] * expected["count"],
         }
         value = {
             "language": demo,

@@ -36,11 +36,15 @@ namespace DlcvModules
                 foreach (JToken sample in samples)
                 {
                     if (!(sample is JObject det)) throw new ArgumentException("sample_results 中的目标必须为对象");
+                    JToken extraToken = det["extra_info"];
+                    if (extraToken != null && extraToken.Type != JTokenType.Null && !(extraToken is JObject))
+                        throw new ArgumentException("extra_info 必须为对象");
+                    var extraInfo = extraToken as JObject ?? new JObject();
                     foreach (string name in new[] { "mean", "median" })
+                    foreach (string prefix in new[] { "with_", "foreground_", "background_" })
                     {
-                        det.Remove("with_" + name);
-                        det.Remove("foreground_" + name);
-                        det.Remove("background_" + name);
+                        det.Remove(prefix + name);
+                        extraInfo.Remove(prefix + name);
                     }
                     double?[] values = null;
                     bool sampled = false;
@@ -55,8 +59,10 @@ namespace DlcvModules
                             }
                         }
                     }
-                    if (mean) SetStatistic(det, "mean", sampled, values?[0], values?[1]);
-                    if (median) SetStatistic(det, "median", sampled, values?[2], values?[3]);
+                    if (mean) SetStatistic(extraInfo, "mean", sampled, values?[0], values?[1]);
+                    if (median) SetStatistic(extraInfo, "median", sampled, values?[2], values?[3]);
+                    if (extraInfo.HasValues) det["extra_info"] = extraInfo;
+                    else det.Remove("extra_info");
                 }
             }
             return new ModuleIO(images, results);

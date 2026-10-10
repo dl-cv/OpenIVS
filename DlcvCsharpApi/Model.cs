@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Newtonsoft.Json;
@@ -2494,22 +2494,10 @@ namespace dlcv_infer_csharp
                         angle = (float)bbox[4];
                     }
 
-                    var extraInfo = result["extra_info"] as JObject ?? new JObject();
-                    bool withMean = result.Value<bool?>("with_mean") ?? false;
-                    double foregroundMean = result["foreground_mean"] == null ? 0.0 : result.Value<double?>("foreground_mean") ?? double.NaN;
-                    double backgroundMean = result["background_mean"] == null ? 0.0 : result.Value<double?>("background_mean") ?? double.NaN;
-                    bool withMedian = result.Value<bool?>("with_median") ?? false;
-                    double foregroundMedian = result["foreground_median"] == null ? 0.0 : result.Value<double?>("foreground_median") ?? double.NaN;
-                    double backgroundMedian = result["background_median"] == null ? 0.0 : result.Value<double?>("background_median") ?? double.NaN;
+                    var extraInfo = result["extra_info"] as JObject;
 
                     var objectResult = new Utils.CSharpObjectResult(categoryId, categoryName, score, area, bbox,
-                        withMask, mask_img, withBbox, withAngle, angle, extraInfo,
-                        withMean, foregroundMean, backgroundMean)
-                    {
-                        WithMedian = withMedian,
-                        ForegroundMedian = foregroundMedian,
-                        BackgroundMedian = backgroundMedian
-                    };
+                        withMask, mask_img, withBbox, withAngle, angle, extraInfo);
                     results.Add(objectResult);
                 }
 
@@ -2792,11 +2780,6 @@ namespace dlcv_infer_csharp
             result["category_id"] = item["category_id"] ?? 0;
             result["category_name"] = item["category_name"] ?? "";
             result["score"] = item["score"] ?? 0.0;
-            if (_isDvsMode)
-            {
-                foreach (string key in new[] { "with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median" })
-                    if (item[key] != null) result[key] = item[key].DeepClone();
-            }
 
             // 2. Handle BBox
             var bbox = item["bbox"]?.ToObject<List<double>>() ?? new List<double>();
@@ -2843,8 +2826,8 @@ namespace dlcv_infer_csharp
 
             result["angle"] = angle;
             result["with_angle"] = withAngle;
-            var extraInfo = item["extra_info"] as JObject ?? new JObject();
-            if (extraInfo.HasValues)
+            var extraInfo = item["extra_info"] as JObject;
+            if (extraInfo != null && extraInfo.HasValues)
             {
                 result["extra_info"] = extraInfo;
             }

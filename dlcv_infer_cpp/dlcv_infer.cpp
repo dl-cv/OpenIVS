@@ -682,22 +682,6 @@ std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json&
         }
         const bool withMask = emitMaskOutput && !mask.empty();
         const float area = static_cast<float>(ComputeFlowArea(entry, mask, bbox, emitMaskOutput));
-        const bool withMean = ReadJsonBool(
-            entry.contains("with_mean") ? entry.at("with_mean") : Json(), false);
-        const double foregroundMean = entry.contains("foreground_mean") && entry.at("foreground_mean").is_null()
-            ? std::numeric_limits<double>::quiet_NaN()
-            : ReadJsonNumber(entry.contains("foreground_mean") ? entry.at("foreground_mean") : Json(), 0.0);
-        const double backgroundMean = entry.contains("background_mean") && entry.at("background_mean").is_null()
-            ? std::numeric_limits<double>::quiet_NaN()
-            : ReadJsonNumber(entry.contains("background_mean") ? entry.at("background_mean") : Json(), 0.0);
-        const bool withMedian = ReadJsonBool(
-            entry.contains("with_median") ? entry.at("with_median") : Json(), false);
-        const double foregroundMedian = entry.contains("foreground_median") && entry.at("foreground_median").is_null()
-            ? std::numeric_limits<double>::quiet_NaN()
-            : ReadJsonNumber(entry.contains("foreground_median") ? entry.at("foreground_median") : Json(), 0.0);
-        const double backgroundMedian = entry.contains("background_median") && entry.at("background_median").is_null()
-            ? std::numeric_limits<double>::quiet_NaN()
-            : ReadJsonNumber(entry.contains("background_median") ? entry.at("background_median") : Json(), 0.0);
 
         out.emplace_back(
             categoryId,
@@ -709,14 +693,16 @@ std::vector<dlcv_infer::ObjectResult> ConvertFlowResultListToObjects(const Json&
             mask,
             withBbox,
             withAngle,
-            angle,
-            withMean,
-            foregroundMean,
-            backgroundMean
+            angle
         );
-        out.back().withMedian = withMedian;
-        out.back().foregroundMedian = foregroundMedian;
-        out.back().backgroundMedian = backgroundMedian;
+        if (entry.contains("extra_info") && !entry.at("extra_info").is_null() &&
+            !entry.at("extra_info").is_object()) {
+            throw std::invalid_argument(std::string("extra_info 必须为对象或 null，实际类型为 ") + entry.at("extra_info").type_name());
+        }
+        if (entry.contains("extra_info") && entry.at("extra_info").is_object() &&
+            !entry.at("extra_info").empty()) {
+            out.back().extraInfo = entry.at("extra_info");
+        }
     }
     return out;
 }
@@ -779,12 +765,6 @@ Json NormalizeFlowOneOutJson(const Json& flowResultList, bool emitMaskOutput) {
         }
 
         out["area"] = ComputeFlowArea(entry, mask, bbox, emitMaskOutput);
-        if (entry.contains("with_mean")) out["with_mean"] = entry.at("with_mean");
-        if (entry.contains("foreground_mean")) out["foreground_mean"] = entry.at("foreground_mean");
-        if (entry.contains("background_mean")) out["background_mean"] = entry.at("background_mean");
-        if (entry.contains("with_median")) out["with_median"] = entry.at("with_median");
-        if (entry.contains("foreground_median")) out["foreground_median"] = entry.at("foreground_median");
-        if (entry.contains("background_median")) out["background_median"] = entry.at("background_median");
         if (entry.contains("metadata") && entry.at("metadata").is_object()) {
             const Json& metadata = entry.at("metadata");
             const size_t internalFieldCount = metadata.contains("is_rotated") ? 1u : 0u;
@@ -3040,12 +3020,6 @@ namespace dlcv_infer {
                 bool withBbox = false;
                 bool withAngle = false;
                 float angle = -100.0f;
-                bool withMean = false;
-                double foregroundMean = 0.0;
-                double backgroundMean = 0.0;
-                bool withMedian = false;
-                double foregroundMedian = 0.0;
-                double backgroundMedian = 0.0;
 
                 try
                 {
@@ -3084,81 +3058,6 @@ namespace dlcv_infer {
                 catch (...)
                 {
                     angle = -100.0f;
-                }
-
-                try
-                {
-                    if (result.contains("with_mean"))
-                    {
-                        withMean = result["with_mean"].get<bool>();
-                    }
-                }
-                catch (...)
-                {
-                    withMean = false;
-                }
-                try
-                {
-                    if (result.contains("foreground_mean"))
-                    {
-                        foregroundMean = result["foreground_mean"].is_null()
-                            ? std::numeric_limits<double>::quiet_NaN()
-                            : result["foreground_mean"].get<double>();
-                    }
-                }
-                catch (...)
-                {
-                    foregroundMean = 0.0;
-                }
-                try
-                {
-                    if (result.contains("background_mean"))
-                    {
-                        backgroundMean = result["background_mean"].is_null()
-                            ? std::numeric_limits<double>::quiet_NaN()
-                            : result["background_mean"].get<double>();
-                    }
-                }
-                catch (...)
-                {
-                    backgroundMean = 0.0;
-                }
-                try
-                {
-                    if (result.contains("with_median"))
-                    {
-                        withMedian = result["with_median"].get<bool>();
-                    }
-                }
-                catch (...)
-                {
-                    withMedian = false;
-                }
-                try
-                {
-                    if (result.contains("foreground_median"))
-                    {
-                        foregroundMedian = result["foreground_median"].is_null()
-                            ? std::numeric_limits<double>::quiet_NaN()
-                            : result["foreground_median"].get<double>();
-                    }
-                }
-                catch (...)
-                {
-                    foregroundMedian = 0.0;
-                }
-                try
-                {
-                    if (result.contains("background_median"))
-                    {
-                        backgroundMedian = result["background_median"].is_null()
-                            ? std::numeric_limits<double>::quiet_NaN()
-                            : result["background_median"].get<double>();
-                    }
-                }
-                catch (...)
-                {
-                    backgroundMedian = 0.0;
                 }
 
                 // 兼容某些输出直接将 angle 放入 bbox[4]
@@ -3214,10 +3113,15 @@ namespace dlcv_infer {
                 }
 
                 results.emplace_back(categoryId, categoryName, score, area, bbox, withMask, mask_img,
-                    withBbox, withAngle, angle, withMean, foregroundMean, backgroundMean);
-                results.back().withMedian = withMedian;
-                results.back().foregroundMedian = foregroundMedian;
-                results.back().backgroundMedian = backgroundMedian;
+                    withBbox, withAngle, angle);
+                if (result.contains("extra_info") && !result.at("extra_info").is_null() &&
+                    !result.at("extra_info").is_object()) {
+                    throw std::invalid_argument(std::string("extra_info 必须为对象或 null，实际类型为 ") + result.at("extra_info").type_name());
+                }
+                if (result.contains("extra_info") && result.at("extra_info").is_object() &&
+                    !result.at("extra_info").empty()) {
+                    results.back().extraInfo = result.at("extra_info");
+                }
             }
 
             sampleResults.emplace_back(results);
@@ -3959,12 +3863,65 @@ namespace dlcv_infer {
 
     DlcvCResult NativeApi::InferC(int modelIndex, const DlcvCImageList& imageList) {
         auto& loader = DllLoader::Instance();
-        return RequireNativeApiFunction(loader.GetInferCFunc(), "dlcv_infer_c")(modelIndex, &imageList);
+        const auto releaseNative = RequireNativeApiFunction(loader.GetFreeModelResultCFunc(), "dlcv_free_model_result_c");
+        auto native = RequireNativeApiFunction(loader.GetInferCFunc(), "dlcv_infer_c")(modelIndex, &imageList);
+        DlcvCResult result{};
+        try {
+            const auto copyText = [](const char* source) -> char* {
+                if (source == nullptr) return nullptr;
+                const size_t size = std::strlen(source) + 1;
+                char* copy = new char[size];
+                std::memcpy(copy, source, size);
+                return copy;
+            };
+            result.code = native.code;
+            result.message = copyText(native.message);
+            if (native.n > 0 && native.sample_results != nullptr) {
+                result.sample_results = new DlcvCSampleResult[native.n]{};
+                result.n = native.n;
+                for (int i = 0; i < native.n; ++i) {
+                    const auto& sourceSample = native.sample_results[i];
+                    auto& sample = result.sample_results[i];
+                    if (sourceSample.n <= 0 || sourceSample.results == nullptr) continue;
+                    sample.results = new DlcvCObjectResult[sourceSample.n]{};
+                    sample.n = sourceSample.n;
+                    for (int j = 0; j < sourceSample.n; ++j) {
+                        const auto& source = sourceSample.results[j];
+                        auto& object = sample.results[j];
+                        object.category_id = source.category_id;
+                        object.category_name = copyText(source.category_name);
+                        object.score = source.score;
+                        object.with_bbox = source.with_bbox;
+                        object.area = source.area;
+                        object.x = source.x; object.y = source.y;
+                        object.w = source.w; object.h = source.h;
+                        object.with_mask = source.with_mask;
+                        object.mask.height = source.mask.height;
+                        object.mask.width = source.mask.width;
+                        if (source.mask.mask_ptr != 0 && source.mask.width > 0 && source.mask.height > 0) {
+                            const size_t bytes = static_cast<size_t>(source.mask.width) * source.mask.height;
+                            unsigned char* data = new unsigned char[bytes];
+                            object.mask.mask_ptr = static_cast<long long>(reinterpret_cast<uintptr_t>(data));
+                            std::memcpy(data, reinterpret_cast<const void*>(static_cast<uintptr_t>(source.mask.mask_ptr)), bytes);
+                        }
+                        object.with_angle = source.with_angle;
+                        object.angle = source.angle;
+                    }
+                }
+            }
+        } catch (...) {
+            dlcv_infer_cpp_free_model_result_c(&result);
+            releaseNative(&native);
+            throw;
+        }
+        releaseNative(&native);
+        return result;
     }
 
     void NativeApi::FreeModelResultC(DlcvCResult& result) {
-        auto& loader = DllLoader::Instance();
-        RequireNativeApiFunction(loader.GetFreeModelResultCFunc(), "dlcv_free_model_result_c")(&result);
+        const int code = result.code;
+        dlcv_infer_cpp_free_model_result_c(&result);
+        result.code = code;
     }
 
 }

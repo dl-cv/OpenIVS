@@ -19,7 +19,13 @@
 #include "json/json.hpp"
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/imgproc.hpp"
-#include "dlcv_infer/dlcv_data_type_c.h"
+#ifndef DLCV_NATIVE_C_API_SKIP_INFER_EXPORT
+#define DLCV_NATIVE_C_API_SKIP_INFER_EXPORT
+#include "dlcv_infer_c_api.h"
+#undef DLCV_NATIVE_C_API_SKIP_INFER_EXPORT
+#else
+#include "dlcv_infer_c_api.h"
+#endif
 #include "dlcv_sntl_admin.h"
 
 // DLL 导出/导入宏（用于本项目生成的 dlcv_infer_cpp）
@@ -105,10 +111,38 @@ namespace dlcv_infer {
         int bindBigCores);
     typedef int (DLCV_INFER_NATIVE_CALL *LoadModelCFuncType)(const char* modelPath, int deviceId);
     typedef int (DLCV_INFER_NATIVE_CALL *FreeModelCFuncType)(int modelIndex);
-    typedef DlcvCResult (DLCV_INFER_NATIVE_CALL *InferCFuncType)(
+    namespace detail {
+        // 此结构只解释底层 DLL 的二进制布局，不采用公开 C 结果结构。
+        struct NativeCObjectResult {
+            int category_id;
+            char* category_name;
+            float score;
+            bool with_bbox;
+            float area;
+            float x, y, w, h;
+            bool with_mask;
+            DlcvCMask mask;
+            bool with_angle;
+            float angle;
+            bool with_mean;
+            double foreground_mean;
+            double background_mean;
+        };
+        struct NativeCSampleResult {
+            NativeCObjectResult* results;
+            int n;
+        };
+        struct NativeCResult {
+            int code;
+            char* message;
+            NativeCSampleResult* sample_results;
+            int n;
+        };
+    }
+    typedef detail::NativeCResult (DLCV_INFER_NATIVE_CALL *InferCFuncType)(
         int modelIndex,
         const DlcvCImageList* imageList);
-    typedef void (DLCV_INFER_NATIVE_CALL *FreeModelResultCFuncType)(DlcvCResult* result);
+    typedef void (DLCV_INFER_NATIVE_CALL *FreeModelResultCFuncType)(detail::NativeCResult* result);
     typedef const char* (DLCV_INFER_NATIVE_CALL *GetAllModelsFuncType)();
 
 #ifdef DLCV_INFER_CPP_EXPORTS
@@ -269,26 +303,20 @@ namespace dlcv_infer {
         bool withBbox;
         bool withAngle;
         float angle;
-        bool withMean;
-        double foregroundMean;
-        double backgroundMean;
-        bool withMedian = false;
-        double foregroundMedian = 0.0;
-        double backgroundMedian = 0.0;
+        json extraInfo;
 
         ObjectResult(int id, const std::string& name, float s, float a,
             const std::vector<double>& b, bool wm, const cv::Mat& m,
-            bool wb = true, bool wa = false, float ang = -100.0f)
-            : ObjectResult(id, name, s, a, b, wm, m, wb, wa, ang, false, 0.0, 0.0) {}
-
-        ObjectResult(int id, const std::string& name, float s, float a,
-            const std::vector<double>& b, bool wm, const cv::Mat& m,
-            bool wb, bool wa, float ang,
-            bool wmean, double fgMean, double bgMean)
+            bool wb = true, bool wa = false, float ang = -100.0f,
+            json extra = nullptr)
             : categoryId(id), categoryName(name), score(s), area(a),
             bbox(b), withMask(wm), mask(m),
-            withBbox(wb), withAngle(wa), angle(ang),
-            withMean(wmean), foregroundMean(fgMean), backgroundMean(bgMean) {}
+            withBbox(wb), withAngle(wa), angle(ang), extraInfo(std::move(extra)) {
+            if (!extraInfo.is_null() && !extraInfo.is_object()) {
+                throw std::invalid_argument(std::string("extra_info 必须为对象或 null，实际类型为 ") + extraInfo.type_name());
+            }
+            if (extraInfo.is_object() && extraInfo.empty()) extraInfo = nullptr;
+        }
     };
 
     struct SampleResult {

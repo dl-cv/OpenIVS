@@ -262,11 +262,11 @@ dlcv_infer_cpp_test.exe foreground-background-statistics-selftest
 dlcv_infer_cpp_test.exe object-mean-parsing-selftest
 ```
 
-以上为 C# 与 C++ 独立 Flow 统计节点的测试入口。C# 检查包括普通模型 JSON 与模型节点不补统计字段、均值与中值独立开关、原有均值构造函数、公共解析入口、实际 PNG 裁剪／翻转，以及 JSON、可视化格式、结果签名、CLI 输出与两路摘要比较的统计回归；同时覆盖标准 `image_chan/result_chan` 通道的实际节点分支路由。CLI 摘要回归反射调用 DlcvDemo 构建产物，执行前须构建 `DlcvDemo.csproj`。以上范围须在构建后执行自测核验。
+以上为 C# 与 C++ 独立 Flow 统计节点和公共结果解析的测试入口。检查包括普通模型与无统计节点流程不补统计键、均值与中值两组独立启停、重复执行删除关闭组的三个键、非统计扩展保留，以及 JSON、结构化结果、可视化格式、结果签名、CLI 输出与两路摘要比较。所有统计值必须在目标 `extra_info` 内，目标一级不含统计键；公开结构不含专用统计成员。CLI 摘要回归使用 DlcvDemo 构建产物，执行前须构建 `DlcvDemo.csproj`。
 
-包装结果的 `WithMean`、`WithMedian` 均为 `bool`，四个统计数值均为 `double`，原均值成员、构造函数及默认值保持不变。数字键缺失时为零，实际 JSON `null` 为 `double.NaN`；结构体转换直接赋六个统计字段，未计算项为 `false/0.0/0.0`，非有限值写为 `null`。原始 Flow JSON 输出仍由统计节点决定字段是否存在，禁用项删除旧字段；普通模型 JSON 与模型节点不补统计字段。全前景、全背景和无采样域参加结果读取与输出检查，空侧不能变为零或 `NaN` 字符串。
+全前景、全背景和无采样域参与结果读取与输出检查；空侧保留 JSON `null`，有效零值保留数值，关闭组保持键缺失，不补 `false/0.0/0.0`。C# 的 `JObject ExtraInfo`、C++ 的 `json extraInfo` 和 C 的 UTF-8 JSON 对象指针均须保留均值、中值、折线及其他扩展；C 结果释放覆盖 `extra_info` 内存，ctypes 声明与公开头文件一致。
 
-其他验收范围包括默认仅均值、严格布尔值、逐目标统计值更新、重复执行删除旧值、无 mask、全部通道共同参与标量统计、偶数样本的中值、RLE mask 与区域 mapping、source affine 逆映射后的原图采样、前置图像处理及缩放插值不替换统计值来源、mask 最近邻缩放与选区映射、4 元素 XYWH 框和 5 元素弧度旋转框、旋转框候选 `floor(max)+1` 与 mask 缩放 `floor/ceil` 分离，以及图像与结果其他属性不变。C ABI 成员顺序与布局不变。预期语义见 `模块、流程与模型推理标准文档.md` 6.4.1；实际覆盖与结果须在构建运行后核验。
+其他验收范围包括默认仅均值、严格布尔值、逐目标统计值更新、无 mask、全部通道共同参与标量统计、偶数样本的中值、RLE mask 与区域 mapping、source affine 逆映射后的原图采样、前置图像处理及缩放插值不替换统计来源、mask 最近邻缩放与选区映射、4 元素 XYWH 框和 5 元素弧度旋转框、旋转框候选 `floor(max)+1` 与 mask 缩放 `floor/ceil` 分离、实际 PNG 裁剪／翻转，以及图像和结果其他属性不变。标准 `image_chan/result_chan` 通道须通过实际节点分支路由。预期语义见 `模块、流程与模型推理标准文档.md` 3.3.1、6.4.1；实际覆盖与结果须在构建运行后核验。
 
 ## 7. 文档表述规则
 

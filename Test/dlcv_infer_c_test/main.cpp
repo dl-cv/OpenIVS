@@ -41,8 +41,8 @@ extern "C" int dlcv_infer_pure_c_invalid_input_test(void);
 struct NativeCapi {
     using LoadModel = int(__stdcall*)(const char*, int);
     using FreeModel = int(__stdcall*)(int);
-    using Infer = DlcvCResult(__stdcall*)(int, const DlcvCImageList*);
-    using FreeResult = void(__stdcall*)(DlcvCResult*);
+    using Infer = dlcv_infer::detail::NativeCResult(__stdcall*)(int, const DlcvCImageList*);
+    using FreeResult = void(__stdcall*)(dlcv_infer::detail::NativeCResult*);
 
     HMODULE module = nullptr;
     LoadModel loadModel = nullptr;
@@ -205,10 +205,6 @@ static cv::Mat ReadImageRgb(const std::wstring& path) {
 
 static long long Quantize(double value, double scale) {
     return static_cast<long long>(std::llround(value * scale));
-}
-
-static long long QuantizeStatistic(double value, double scale) {
-    return std::isnan(value) ? (std::numeric_limits<long long>::min)() : Quantize(value, scale);
 }
 
 static bool LoadNativeCapi(NativeCapi& api, std::string& error) {
@@ -483,16 +479,17 @@ static bool RunCapiExportCompletenessCheck() {
     return ok;
 }
 
-static std::string BuildCompleteFingerprint(const DlcvCResult& result) {
+template <typename ResultType>
+static std::string BuildCompleteFingerprint(const ResultType& result) {
     std::ostringstream out;
     out << result.code << '|'
         << (result.message == nullptr ? std::string() : std::string(result.message)) << '|'
         << result.n;
     for (int sampleIndex = 0; sampleIndex < result.n; ++sampleIndex) {
-        const DlcvCSampleResult& sample = result.sample_results[sampleIndex];
+        const auto& sample = result.sample_results[sampleIndex];
         out << ";n=" << sample.n;
         for (int objectIndex = 0; objectIndex < sample.n; ++objectIndex) {
-            const DlcvCObjectResult& object = sample.results[objectIndex];
+            const auto& object = sample.results[objectIndex];
             out << '[' << object.category_id << '|'
                 << (object.category_name == nullptr ? std::string() : std::string(object.category_name)) << '|'
                 << Quantize(object.score, 100000.0) << '|'
@@ -502,16 +499,14 @@ static std::string BuildCompleteFingerprint(const DlcvCResult& result) {
                 << Quantize(object.w, 1000.0) << ',' << Quantize(object.h, 1000.0) << '|'
                 << static_cast<int>(object.with_mask) << '|'
                 << (object.mask.mask_ptr == 0 ? 0 : 1) << ',' << object.mask.height << ',' << object.mask.width << '|'
-                << static_cast<int>(object.with_angle) << '|' << Quantize(object.angle, 1000.0) << '|'
-                << static_cast<int>(object.with_mean) << '|'
-                << QuantizeStatistic(object.foreground_mean, 1000.0) << '|'
-                << QuantizeStatistic(object.background_mean, 1000.0) << ']';
+                << static_cast<int>(object.with_angle) << '|' << Quantize(object.angle, 1000.0) << ']';
         }
     }
     return out.str();
 }
 
-static bool IsReleasedResult(const DlcvCResult& result, int expectedCode) {
+template <typename ResultType>
+static bool IsReleasedResult(const ResultType& result, int expectedCode) {
     return result.code == expectedCode && result.message == nullptr &&
         result.sample_results == nullptr && result.n == 0;
 }
@@ -520,9 +515,12 @@ static bool NearlyEqual(double left, double right, double tolerance = 1e-5) {
     return std::abs(left - right) <= tolerance;
 }
 
-static bool StatisticsEqual(double left, double right) {
-    if (std::isnan(left) || std::isnan(right)) return std::isnan(left) && std::isnan(right);
-    return NearlyEqual(left, right);
+static dlcv_infer::json ReadCExtraInfo(const DlcvCObjectResult& object) {
+    return object.extra_info == nullptr ? dlcv_infer::json(nullptr) : dlcv_infer::json::parse(object.extra_info);
+}
+
+static dlcv_infer::json ReadCExtraInfo(const dlcv_infer::detail::NativeCObjectResult&) {
+    return nullptr;
 }
 
 static bool CompareMask(
@@ -598,7 +596,6 @@ static bool CompareCppAndCResult(
                 cObject.with_bbox != cppObject.withBbox ||
                 cObject.with_mask != cppObject.withMask ||
                 cObject.with_angle != cppObject.withAngle ||
-                cObject.with_mean != cppObject.withMean ||
                 !NearlyEqual(cObject.score, cppObject.score) ||
                 !NearlyEqual(cObject.area, cppObject.area) ||
                 !NearlyEqual(cObject.x, cppX) ||
@@ -606,8 +603,7 @@ static bool CompareCppAndCResult(
                 !NearlyEqual(cObject.w, cppW) ||
                 !NearlyEqual(cObject.h, cppH) ||
                 !NearlyEqual(cObject.angle, cppObject.angle) ||
-                !StatisticsEqual(cObject.foreground_mean, cppObject.foregroundMean) ||
-                !StatisticsEqual(cObject.background_mean, cppObject.backgroundMean)) {
+                ReadCExtraInfo(cObject) != cppObject.extraInfo) {
                 std::ostringstream out;
                 out << "样本 " << sampleIndex << " 目标 " << objectIndex << " 字段不一致";
                 error = out.str();
@@ -624,9 +620,10 @@ static bool CompareCppAndCResult(
     return true;
 }
 
+template <typename LeftResult, typename RightResult>
 static bool CompareCResults(
-    const DlcvCResult& left,
-    const DlcvCResult& right,
+    const LeftResult& left,
+    const RightResult& right,
     std::string& error) {
     if (left.code != right.code ||
         (left.message == nullptr) != (right.message == nullptr) ||
@@ -642,8 +639,8 @@ static bool CompareCResults(
     }
 
     for (int sampleIndex = 0; sampleIndex < left.n; ++sampleIndex) {
-        const DlcvCSampleResult& leftSample = left.sample_results[sampleIndex];
-        const DlcvCSampleResult& rightSample = right.sample_results[sampleIndex];
+        const auto& leftSample = left.sample_results[sampleIndex];
+        const auto& rightSample = right.sample_results[sampleIndex];
         if (leftSample.n != rightSample.n ||
             (leftSample.n > 0 && (leftSample.results == nullptr || rightSample.results == nullptr))) {
             error = "目标数或目标数据不一致";
@@ -651,8 +648,8 @@ static bool CompareCResults(
         }
 
         for (int objectIndex = 0; objectIndex < leftSample.n; ++objectIndex) {
-            const DlcvCObjectResult& leftObject = leftSample.results[objectIndex];
-            const DlcvCObjectResult& rightObject = rightSample.results[objectIndex];
+            const auto& leftObject = leftSample.results[objectIndex];
+            const auto& rightObject = rightSample.results[objectIndex];
             const std::string leftCategory = leftObject.category_name == nullptr
                 ? std::string()
                 : std::string(leftObject.category_name);
@@ -664,7 +661,6 @@ static bool CompareCResults(
                 leftObject.with_bbox != rightObject.with_bbox ||
                 leftObject.with_mask != rightObject.with_mask ||
                 leftObject.with_angle != rightObject.with_angle ||
-                leftObject.with_mean != rightObject.with_mean ||
                 !NearlyEqual(leftObject.score, rightObject.score) ||
                 !NearlyEqual(leftObject.area, rightObject.area) ||
                 !NearlyEqual(leftObject.x, rightObject.x) ||
@@ -672,8 +668,7 @@ static bool CompareCResults(
                 !NearlyEqual(leftObject.w, rightObject.w) ||
                 !NearlyEqual(leftObject.h, rightObject.h) ||
                 !NearlyEqual(leftObject.angle, rightObject.angle) ||
-                !StatisticsEqual(leftObject.foreground_mean, rightObject.foreground_mean) ||
-                !StatisticsEqual(leftObject.background_mean, rightObject.background_mean)) {
+                ReadCExtraInfo(leftObject) != ReadCExtraInfo(rightObject)) {
                 error = "目标字段不一致";
                 return false;
             }
@@ -730,7 +725,7 @@ static bool RunNativeCompatibilityCheck(
     imageList.n = 1;
 
     DlcvCResult wrapperResult = dlcv_infer_c(wrapperIndex, &imageList);
-    DlcvCResult nativeResult = native.infer(nativeIndex, &imageList);
+    auto nativeResult = native.infer(nativeIndex, &imageList);
     const std::string wrapperSuccessFingerprint = BuildCompleteFingerprint(wrapperResult);
     const std::string nativeSuccessFingerprint = BuildCompleteFingerprint(nativeResult);
     std::string successCompareError;
@@ -741,7 +736,7 @@ static bool RunNativeCompatibilityCheck(
     const bool sameSuccessRelease = IsReleasedResult(wrapperResult, 0) && IsReleasedResult(nativeResult, 0);
 
     DlcvCResult wrapperMissing = dlcv_infer_c(INT_MAX, &imageList);
-    DlcvCResult nativeMissing = native.infer(INT_MAX, &imageList);
+    auto nativeMissing = native.infer(INT_MAX, &imageList);
     const std::string wrapperFailureFingerprint = BuildCompleteFingerprint(wrapperMissing);
     const std::string nativeFailureFingerprint = BuildCompleteFingerprint(nativeMissing);
     const bool sameFailureResult = wrapperFailureFingerprint == nativeFailureFingerprint &&
@@ -1824,9 +1819,7 @@ static std::string BuildResultFingerprint(const DlcvCResult& result) {
                  << Quantize(object.h, 1000.0) << '|'
                  << static_cast<int>(object.with_angle) << '|'
                  << Quantize(object.angle, 1000.0) << '|'
-                 << static_cast<int>(object.with_mean) << '|'
-                 << QuantizeStatistic(object.foreground_mean, 1000.0) << '|'
-                 << QuantizeStatistic(object.background_mean, 1000.0);
+                 << ReadCExtraInfo(object).dump();
             objects.push_back(item.str());
         }
         std::sort(objects.begin(), objects.end());
@@ -2421,6 +2414,105 @@ static bool RunFreeAllDuringInferenceCheck(const std::wstring& modelPath, const 
     return true;
 }
 
+static bool RunStatisticsExtraInfoCheck() {
+    using Json = dlcv_infer::json;
+    NativeJsonApi native;
+    std::string error;
+    if (!LoadNativeJsonApi(native, error)) {
+        std::cerr << "FAIL: 统计扩展自测加载失败: " << error << "\n";
+        return false;
+    }
+    const auto registerDvs = reinterpret_cast<NativeJsonApi::StringCall>(
+        GetProcAddress(native.module, "dlcv_register_dvs_model"));
+    if (registerDvs == nullptr) {
+        std::cerr << "FAIL: 缺少流程注册接口\n";
+        return false;
+    }
+    cv::Mat image(2, 3, CV_8UC3, cv::Scalar(10, 20, 30));
+    DlcvCImage cImage{static_cast<long long>(reinterpret_cast<uintptr_t>(image.data)), image.rows, image.cols, image.channels()};
+    DlcvCImageList imageList{&cImage, 1};
+    for (int mode = 0; mode < 5; ++mode) {
+        const bool hasStatistics = mode < 4;
+        const bool mean = hasStatistics && (mode & 1) != 0;
+        const bool median = hasStatistics && (mode & 2) != 0;
+        Json nodes = Json::array({
+            {{"id", 1}, {"type", "input/frontend_image"}, {"outputs", {
+                {{"type", "image_chan"}, {"links", {1}}}, {{"type", "result_chan"}, {"links", {2}}}}}},
+            {{"id", 2}, {"type", "input/build_results"},
+                {"properties", {{"bbox_x", 0}, {"bbox_y", 0}, {"bbox_w", 3}, {"bbox_h", 2}}},
+                {"inputs", {{{"type", "image_chan"}, {"link", 1}}, {{"type", "result_chan"}, {"link", 2}}}},
+                {"outputs", {{{"type", "image_chan"}, {"links", {3}}}, {{"type", "result_chan"}, {"links", {4}}}}}}
+        });
+        if (hasStatistics) nodes.push_back({
+            {"id", 3}, {"type", "post_process/foreground_background_statistics"}, {"properties", {{"mean", mean}, {"median", median}}},
+            {"inputs", {{{"type", "image_chan"}, {"link", 3}}, {{"type", "result_chan"}, {"link", 4}}}},
+            {"outputs", {{{"type", "image_chan"}, {"links", {5}}}, {{"type", "result_chan"}, {"links", {6}}}}}
+        });
+        nodes.push_back({{"id", 4}, {"type", "output/return_json"},
+            {"inputs", {{{"type", "image_chan"}, {"link", hasStatistics ? 5 : 3}},
+                        {{"type", "result_chan"}, {"link", hasStatistics ? 6 : 4}}}}});
+        const Json registration{
+            {"schema_version", 1}, {"dvs_type", "dvst"},
+            {"model_path", WideToUtf8((std::filesystem::temp_directory_path() / L"statistics-extra-info.dvst").wstring())},
+            {"device_id", -1}, {"pipeline", {{"nodes", nodes}}}, {"model_bindings", Json::array()}
+        };
+        std::string registered;
+        int index = -1;
+        if (!CopyJsonCallResult(registerDvs, native.freeResult, registration.dump(), registered, error) ||
+            !ParseSuccessfulModelIndex(registered, index)) {
+            std::cerr << "FAIL: 统计自测流程注册失败: " << registered << error << "\n";
+            return false;
+        }
+        DlcvCResult result{};
+        const char* jsonText = nullptr;
+        try {
+            auto cppModel = dlcv_infer::CreateModelFromIndex(index);
+            const auto cppResult = cppModel.InferBatch({image});
+            result = dlcv_infer_cpp_infer_with_params_c(index, &imageList, "{}");
+            if (result.code != 0 || result.n != 1 || result.sample_results == nullptr ||
+                result.sample_results[0].n != 1 || result.sample_results[0].results == nullptr)
+                throw std::runtime_error("C 结构化结果数量错误");
+            std::string difference;
+            if (!CompareCppAndCResult(cppResult, result, difference)) throw std::runtime_error(difference);
+            const auto& object = result.sample_results[0].results[0];
+            Json expected;
+            if (mean || median) expected = Json::object();
+            for (const char* group : {"mean", "median"}) {
+                if ((std::string(group) == "mean" ? mean : median)) {
+                    expected["with_" + std::string(group)] = false;
+                    expected["foreground_" + std::string(group)] = nullptr;
+                    expected["background_" + std::string(group)] = nullptr;
+                }
+            }
+            if (ReadCExtraInfo(object) != expected || ((object.extra_info == nullptr) != expected.is_null()))
+                throw std::runtime_error("开关、空采样或无统计节点的扩展输出错误");
+            jsonText = dlcv_infer_cpp_infer_json_c(index, &cImage, "{}");
+            if (jsonText == nullptr) throw std::runtime_error("JSON 推理未返回结果");
+            const auto jsonResult = Json::parse(jsonText);
+            if (!jsonResult.is_array() || jsonResult.size() != 1 ||
+                jsonResult[0].value("extra_info", Json(nullptr)) != expected)
+                throw std::runtime_error("结构化与 JSON 扩展不一致");
+            for (const char* key : {"with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median"})
+                if (jsonResult[0].contains(key)) throw std::runtime_error("统计仍出现在目标一级");
+            dlcv_infer_cpp_free_string_c(jsonText);
+            jsonText = nullptr;
+            if (dlcv_infer_cpp_free_model_c(index) != 0) throw std::runtime_error("流程模型释放失败");
+            if (ReadCExtraInfo(object) != expected) throw std::runtime_error("模型释放影响了 C 结果扩展所有权");
+            dlcv_infer_cpp_free_model_result_c(&result);
+            dlcv_infer_cpp_free_model_result_c(&result);
+            if (!IsReleasedResult(result, 0)) throw std::runtime_error("结果重复释放后未清空");
+        } catch (const std::exception& ex) {
+            if (jsonText != nullptr) dlcv_infer_cpp_free_string_c(jsonText);
+            dlcv_infer_cpp_free_model_result_c(&result);
+            dlcv_infer_cpp_free_model_c(index);
+            std::cerr << "FAIL: 统计扩展自测: " << ex.what() << "\n";
+            return false;
+        }
+    }
+    std::cout << "PASS: C/C++/JSON 统计开关、空采样、无统计节点与扩展释放检查通过\n";
+    return true;
+}
+
 static bool RunModelInfoConcurrencyChecks(
     const std::wstring& dvtPath,
     const cv::Mat& dvtImage,
@@ -2565,6 +2657,7 @@ int main(int argc, char** argv) {
     ok = RunExternalSharedIndexRecoveryCheck("流程模型", dvstPath, dvstImage) && ok;
     ok = RunNativeCompatibilityCheck(dvtPath, dvtImage) && ok;
     ok = RunAllCompatibilityFlowChecks() && ok;
+    ok = RunStatisticsExtraInfoCheck() && ok;
     ok = RunModelPoolGenerationCheck(dvstPath, dvstImage) && ok;
     ok = RunFreeAllDuringInferenceCheck(dvstPath, dvstImage) && ok;
 

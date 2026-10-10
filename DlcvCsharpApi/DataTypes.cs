@@ -74,38 +74,9 @@ namespace dlcv_infer_csharp
             /// </summary>
             public float Angle { get; set; }
 
-            /// <summary>
-            /// 是否包含前景与背景均值
-            /// </summary>
-            public bool WithMean { get; set; }
-
-            /// <summary>
-            /// mask 前景区域的像素均值
-            /// </summary>
-            public double ForegroundMean { get; set; }
-
-            /// <summary>
-            /// mask 背景区域的像素均值
-            /// </summary>
-            public double BackgroundMean { get; set; }
-
-            /// <summary>是否包含前景与背景中值。</summary>
-            public bool WithMedian { get; set; }
-            public double ForegroundMedian { get; set; }
-            public double BackgroundMedian { get; set; }
-
             public CSharpObjectResult(int categoryId, string categoryName, float score, float area,
                 List<double> bbox, bool withMask, Mat mask,
                 bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null)
-                : this(categoryId, categoryName, score, area, bbox, withMask, mask,
-                    withBbox, withAngle, angle, extraInfo, false, 0.0, 0.0)
-            {
-            }
-
-            public CSharpObjectResult(int categoryId, string categoryName, float score, float area,
-                List<double> bbox, bool withMask, Mat mask,
-                bool withBbox, bool withAngle, float angle, JObject extraInfo,
-                bool withMean, double foregroundMean, double backgroundMean)
             {
                 CategoryId = categoryId;
                 CategoryName = categoryName;
@@ -114,19 +85,11 @@ namespace dlcv_infer_csharp
                 Bbox = bbox;
                 WithMask = withMask;
                 Mask = mask;
-                ExtraInfo = extraInfo ?? new JObject();
+                ExtraInfo = extraInfo;
                 Angle = angle;
                 WithBbox = withBbox;
                 WithAngle = withAngle;
-                WithMean = withMean;
-                ForegroundMean = foregroundMean;
-                BackgroundMean = backgroundMean;
-                WithMedian = false;
-                ForegroundMedian = 0.0;
-                BackgroundMedian = 0.0;
             }
-
-            private static string FormatStatistic(double value) => double.IsNaN(value) || double.IsInfinity(value) ? "No samples" : value.ToString("F4");
 
             public override String ToString()
             {
@@ -150,16 +113,6 @@ namespace dlcv_infer_csharp
                 if (WithMask)
                 {
                     sb.Append($"Mask size: {Mask.Width}x{Mask.Height}, ");
-                }
-                if (WithMean || double.IsNaN(ForegroundMean) || double.IsNaN(BackgroundMean))
-                {
-                    sb.Append($"ForegroundMean: {FormatStatistic(ForegroundMean)}, ");
-                    sb.Append($"BackgroundMean: {FormatStatistic(BackgroundMean)}, ");
-                }
-                if (WithMedian || double.IsNaN(ForegroundMedian) || double.IsNaN(BackgroundMedian))
-                {
-                    sb.Append($"ForegroundMedian: {FormatStatistic(ForegroundMedian)}, ");
-                    sb.Append($"BackgroundMedian: {FormatStatistic(BackgroundMedian)}, ");
                 }
                 string extraInfoText = FormatExtraInfoForDisplay(ExtraInfo);
                 if (!string.IsNullOrWhiteSpace(extraInfoText))

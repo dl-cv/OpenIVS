@@ -1032,16 +1032,6 @@ namespace DlcvDemo
             line.Append("  ");
             line.Append(BuildResultLocationText(obj));
             line.AppendFormat("  area={0:F1}", obj.Area);
-            if (obj.WithMean || double.IsNaN(obj.ForegroundMean) || double.IsNaN(obj.BackgroundMean))
-            {
-                line.AppendFormat("  foreground_mean={0}", FormatStatistic(obj.ForegroundMean));
-                line.AppendFormat("  background_mean={0}", FormatStatistic(obj.BackgroundMean));
-            }
-            if (obj.WithMedian || double.IsNaN(obj.ForegroundMedian) || double.IsNaN(obj.BackgroundMedian))
-            {
-                line.AppendFormat("  foreground_median={0}", FormatStatistic(obj.ForegroundMedian));
-                line.AppendFormat("  background_median={0}", FormatStatistic(obj.BackgroundMedian));
-            }
             string angleText = BuildResultAngleText(obj);
             if (!string.IsNullOrWhiteSpace(angleText))
             {
@@ -1056,13 +1046,6 @@ namespace DlcvDemo
             }
 
             return line.ToString();
-        }
-
-        private static string FormatStatistic(double value)
-        {
-            if (double.IsNaN(value) || double.IsInfinity(value))
-                return I18n.CurrentLanguage == I18n.English ? "No samples" : "无采样";
-            return value.ToString("F4");
         }
 
         private static string BuildResultLocationText(CSharpObjectResult obj)

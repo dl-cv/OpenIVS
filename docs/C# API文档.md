@@ -28,6 +28,7 @@
 ### 2.1 CSharpObjectResult
 
 ```csharp
+// dlcv_infer_csharp.Utils
 public partial class Utils
 {
     public struct CSharpObjectResult
@@ -42,25 +43,14 @@ public partial class Utils
         public bool WithBbox { get; set; }            // 是否含 bbox
         public bool WithAngle { get; set; }           // 是否含旋转角度
         public float Angle { get; set; }              // 旋转角度（弧度），-100 表示无效
-        public bool WithMean { get; set; }            // 均值采样状态
-        public double ForegroundMean { get; set; }    // JSON null 为 NaN，缺失字段为 0
-        public double BackgroundMean { get; set; }    // JSON null 为 NaN，缺失字段为 0
-        public bool WithMedian { get; set; }          // 中值采样状态
-        public double ForegroundMedian { get; set; }  // JSON null 为 NaN，缺失字段为 0
-        public double BackgroundMedian { get; set; }  // JSON null 为 NaN，缺失字段为 0
 
-        public JObject ExtraInfo { get; set; }        // 额外信息（polyline 等）
+        public JObject ExtraInfo { get; set; }        // 通用扩展信息（统计、polyline、业务扩展）
 
         public CSharpObjectResult(
             int categoryId, string categoryName, float score, float area,
             List<double> bbox, bool withMask, Mat mask,
             bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null);
 
-        public CSharpObjectResult(
-            int categoryId, string categoryName, float score, float area,
-            List<double> bbox, bool withMask, Mat mask,
-            bool withBbox, bool withAngle, float angle, JObject extraInfo,
-            bool withMean, double foregroundMean, double backgroundMean);
     }
 }
 ```
@@ -69,13 +59,27 @@ public partial class Utils
 - `Bbox` 长度约定：水平框 ≥4（`x,y,w,h`），旋转框 ≥4（`cx,cy,w,h`，`angle` 单独字段）。
 - `Angle` 有效值范围：`> -99.0f` 视为有效；`-100.0f` 视为无效。
 - `Mask` 为空时（`Mask == null || Mask.Empty()`），`WithMask` 应为 `false`。
-- 均值与中值分别使用 `WithMean`、`WithMedian`（均为 `bool`）和前景、背景数值（均为 `double`）。
-- 开关缺失时为 `false`，数字键缺失时为 `0.0`，实际 JSON `null` 读取为 `double.NaN`。
-- 统计模块禁用某组统计时不输出该组三个键；启用但选区完全没有采样时输出 `with_mean=false` 或 `with_median=false`，对应两个数字为 JSON `null`。仅前景或背景为空时，开关为 `true`，空侧数字为 JSON `null`，另一侧保留实际数值。
-- 结构化结果转 JSON 时直接写出均值与中值的六个字段；未计算项保留 `false/0.0/0.0`，非有限数值写为 JSON `null`。Flow 原始 JSON 输出仍保留统计节点决定的字段缺失。
-- `ToString()` 保留原有 `ForegroundMean`、`BackgroundMean` 标签，并增加对应中值标签；统计项开启或存在空采样时显示，空侧为 `No samples`，有效零值仍显示数值。
-- 原有 11／14 参数构造函数继续可用：11 参数构造函数初始化均值为 `false/0.0/0.0`，14 参数构造函数接收显式均值；两者初始化中值为 `false/0.0/0.0`。普通模型推理不计算统计值，结构化结果的旧均值成员默认值保持 `false/0.0/0.0`，原始 JSON 不输出统计字段。
+- 统计与业务扩展均通过 `ExtraInfo` 读取，完整字段语义见 [结果标准](模块、流程与模型推理标准文档.md) 3.3.1。
+- `ExtraInfo` 为 `JObject`，没有扩展时可为 `null`；键缺失、JSON `null`、数值 `0` 保持区别，构造与结构化转 JSON 不增加默认统计键。
+- `ToString()` 按通用扩展对象输出均值、中值与其他扩展，空侧显示 `null`，有效零值仍显示数值，未输出的统计组不显示。
+- 公开结果不提供专用统计属性及接收均值参数的构造重载。调用方使用上面的通用构造函数，把扩展数据放入 `extraInfo`，并从 `ExtraInfo` 取值。
+- `ExtraInfo` 是托管 JSON 对象，不调用 C 的释放函数；需要在结果之外修改扩展副本时使用 `DeepClone()`。
 - `ExtraInfo` 可包含 `polyline`（通过 `Utils.GetExtraInfoPolyline` / `Utils.SetExtraInfoPolyline` 读写）。
+
+```csharp
+JObject extra = result.ExtraInfo;
+JToken meanFlag = extra?["with_mean"];
+if (meanFlag != null) // 组缺失时不显示统计
+{
+    bool sampled = meanFlag.Value<bool>();
+    JToken value = extra["foreground_mean"];
+    double? foregroundMean = value.Type == JTokenType.Null
+        ? (double?)null : value.Value<double>();
+    // foregroundMean.HasValue 区分无采样与有效零值
+}
+```
+
+中值以相同方式读取 `with_median`、`foreground_median`、`background_median`；背景均值读取 `background_mean`。
 
 ### 2.2 CSharpSampleResult
 
@@ -248,9 +252,9 @@ public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 
 **前景背景统计结果**
 
-`post_process/foreground_background_statistics` 通过独立 Flow 节点更新统计值，不使用模型推理输入开关。均值组仍使用 `with_mean`、`foreground_mean`、`background_mean`；开启项的状态为 JSON 布尔值，前景与背景值为数值或 `null`，关闭项删除对应三键。中值组使用 `with_median`、`foreground_median`、`background_median`，独立选择且默认关闭；完整端口、采样与重复执行语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
+`post_process/foreground_background_statistics` 通过独立 Flow 节点更新目标 `extra_info`，不使用模型推理输入开关。两组的启停、采样及空值规则统一见 [结果标准](模块、流程与模型推理标准文档.md) 3.3.1、6.4.1。
 
-C# 结构化包装结果按 2.1 的布尔开关与 `double` 数值读取统计，JSON `null` 保存为 `double.NaN`。结构化结果转换直接写出六个统计字段，非有限数值为 `null`；`InferOneOutJson` 按原始 Flow 结果保留字段与缺失状态。普通模型结构化结果的旧均值成员保持 `false/0.0/0.0`，原始 JSON 不输出统计字段。
+C# 结构化结果从 `ExtraInfo` 读取，JSON 结果从目标 `extra_info` 读取；两条路径保留同一扩展内容、统计组缺失状态与 JSON `null`，目标一级没有统计键。普通模型和无统计节点的流程不补统计键，读取示例见 2.1。三套 CLI 摘要均透传按目标排列的 `extra_info`，不固定创建均值和中值数组。
 
 ### 4.3 内部推理方法
 
@@ -541,7 +545,7 @@ using (var model = ModelFactory.CreateFromIndex(existingIndex))
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
 
-`calc_mean` 不参与模型推理，也不读取模型或流程模型节点保存的旧均值配置。
+`calc_mean` 不参与模型推理；统计由独立 Flow 节点按 `mean/median` 配置计算。
 
 ---
 

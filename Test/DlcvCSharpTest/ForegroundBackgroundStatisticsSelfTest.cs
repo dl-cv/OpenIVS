@@ -31,14 +31,15 @@ namespace DlcvCSharpTest
             check("四种独立开关与默认值", TestOptions);
             check("标准流程通道及分支路由", TestFlowPortTypes);
             check("严格布尔类型", TestPropertyTypes);
+            check("扩展对象类型与空结果", TestExtensionTypes);
             check("非有限像素与采样域", TestNonFinite);
             check("有限极大通道值不溢出", TestLargeFinite);
             check("无效变换及定位数值拒绝", TestInvalidTransforms);
             check("数组掩码阈值与非法数组", TestMaskArray);
             check("统计包装类型、独立开关与 null 往返", TestWrapperRoundTrip);
-            check("公共解析入口保留默认值、中值及空侧", TestPublicParserRoundTrip);
+            check("公共解析保留完整扩展信息与空侧", TestPublicParserRoundTrip);
             check("普通模型结果不补统计字段", TestModelOutput);
-            check("统计文字旧格式、英文与空采样", TestWrapperText);
+            check("结构与界面通用扩展文字", TestWrapperText);
             check("彩色全部通道共同统计", TestColor);
             check("全前景、全背景与无采样域", TestEmptySides);
             check("XYWH 位置及完整缩放后裁图", TestClippedMask);
@@ -162,6 +163,23 @@ namespace DlcvCSharpTest
             }
         }
 
+        private static void TestExtensionTypes()
+        {
+            using (var image = Gray(new byte[,] { { 1, 3 } }))
+            using (var mask = Gray(new byte[,] { { 255, 0 } }))
+            {
+                foreach (JToken value in new JToken[] { new JArray(1), new JValue("invalid"), new JValue(7), new JValue(true) })
+                {
+                    var det = Detection(new JArray(0, 0, 2, 1), mask);
+                    det["extra_info"] = value;
+                    Reject(() => Execute(Images(image), Entries(det)), "extra_info 接受了非对象值");
+                }
+                var input = Entries(Detection(new JArray(0, 0, 2, 1), mask));
+                Require(Target(Execute(Images(image), input, Options(false, false)))["extra_info"] == null,
+                    "两组关闭时创建了空扩展对象");
+            }
+        }
+
         private static void TestNonFinite()
         {
             using (var image = new Mat(1, 3, MatType.CV_64FC1))
@@ -198,7 +216,7 @@ namespace DlcvCSharpTest
                         Entries(Detection(new JArray(0, 0, 1, 1), mask)), Options(true, true)));
                     Statistics(target, "mean", true, true, value, null);
                     Statistics(target, "median", true, true, value, null);
-                    Require(target.Value<double>("foreground_mean") == value && target.Value<double>("foreground_median") == value,
+                    Require(target["extra_info"].Value<double>("foreground_mean") == value && target["extra_info"].Value<double>("foreground_median") == value,
                         "有限极值统计发生溢出或下溢");
                 }
             }
@@ -283,261 +301,85 @@ namespace DlcvCSharpTest
 
         private static void TestWrapperRoundTrip()
         {
-            foreach (string property in new[] { "WithMean", "WithMedian" })
-                Require(typeof(Utils.CSharpObjectResult).GetProperty(property).PropertyType == typeof(bool), property + " 类型异常");
-            foreach (string property in new[] { "ForegroundMean", "BackgroundMean", "ForegroundMedian", "BackgroundMedian" })
-                Require(typeof(Utils.CSharpObjectResult).GetProperty(property).PropertyType == typeof(double), property + " 类型异常");
-            var defaults = Wrapper();
-            Require(!defaults.WithMean && !defaults.WithMedian && defaults.ForegroundMean == 0 && defaults.BackgroundMean == 0 &&
-                defaults.ForegroundMedian == 0 && defaults.BackgroundMedian == 0, "原有默认构造函数初始化异常");
-            CheckRoundTrip(defaults, new JObject());
-            var original = new Utils.CSharpObjectResult(2, "目标", 0.9f, 0, new List<double> { 0, 0, 3, 2 }, false, null,
-                true, false, -100, null, true, 2, 13);
-            Require(original.WithMean && original.ForegroundMean == 2 && original.BackgroundMean == 13 &&
-                !original.WithMedian && original.ForegroundMedian == 0 && original.BackgroundMedian == 0,
-                "原有均值构造函数初始化异常");
-            CheckRoundTrip(original, new JObject { ["with_mean"] = true, ["foreground_mean"] = 2.0, ["background_mean"] = 13.0 });
-            var disabled = new Utils.CSharpObjectResult(2, "目标", 0.9f, 0, new List<double> { 0, 0, 3, 2 }, false, null,
-                true, false, -100, null, false, 6.5, -3.0)
-            {
-                WithMedian = false, ForegroundMedian = 1.75, BackgroundMedian = -2.0
-            };
-            CheckRoundTrip(disabled, new JObject
-            {
-                ["with_mean"] = false, ["foreground_mean"] = 6.5, ["background_mean"] = -3.0,
-                ["with_median"] = false, ["foreground_median"] = 1.75, ["background_median"] = -2.0
-            });
-            var nonFinite = new Utils.CSharpObjectResult(2, "目标", 0.9f, 0, new List<double> { 0, 0, 3, 2 }, false, null,
-                true, false, -100, null, false, double.PositiveInfinity, double.NegativeInfinity)
-            {
-                WithMedian = false, ForegroundMedian = double.NaN, BackgroundMedian = double.NaN
-            };
-            var nonFiniteResult = new Utils.CSharpResult(new List<Utils.CSharpSampleResult>
-                { new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult> { nonFinite }) });
-            var nonFiniteLocalMethod = typeof(DetModel).GetMethod("ConvertToLocalSamples", BindingFlags.NonPublic | BindingFlags.Static);
-            var visualOutput = (JObject)Utils.ConvertToVisualizeFormat(nonFiniteResult)[0]["sample_results"][0];
-            var serialized = JObject.Parse(visualOutput.ToString(Newtonsoft.Json.Formatting.None));
-            Require(serialized["with_mean"]?.Type == JTokenType.Boolean && !serialized.Value<bool>("with_mean") &&
-                serialized["with_median"]?.Type == JTokenType.Boolean && !serialized.Value<bool>("with_median"),
-                "非有限数值输出改变统计开关");
-            foreach (string field in new[] { "foreground_mean", "background_mean", "foreground_median", "background_median" })
-                Number(serialized, field, null);
-            var nonFiniteLocal = (JObject)((JArray)nonFiniteLocalMethod.Invoke(null, new object[] { nonFiniteResult.SampleResults[0] }))[0];
-            foreach (string field in Fields)
-                Require(nonFiniteLocal[field] == null, "模型节点输出统计字段: " + field);
+            foreach (string property in new[] { "WithMean", "WithMedian", "ForegroundMean", "BackgroundMean", "ForegroundMedian", "BackgroundMedian" })
+                Require(typeof(Utils.CSharpObjectResult).GetProperty(property) == null, "公开结果仍含专用统计成员: " + property);
+            Require(typeof(Utils.CSharpObjectResult).GetProperty("ExtraInfo").PropertyType == typeof(JObject), "通用扩展信息类型异常");
+            Require(Wrapper().ExtraInfo == null, "未使用扩展信息时不应分配对象");
             using (var image = Gray(new byte[,] { { 1, 3, 9 }, { 5, 7, 31 } }))
             using (var mask = Gray(new byte[,] { { 255, 255, 0 }, { 0, 0, 0 } }))
+            foreach (bool mean in new[] { false, true })
+            foreach (bool median in new[] { false, true })
             {
-                foreach (bool mean in new[] { false, true })
-                foreach (bool median in new[] { false, true })
-                {
-                    var target = Target(Execute(Images(image), Entries(Detection(new JArray(0, 0, 3, 2), mask)), Options(mean, median)));
-                    var wrapper = ParseWrapper(target);
-                    Require(wrapper.WithMean == mean && wrapper.WithMedian == median, "包装均值与中值开关异常");
-                    Require(wrapper.ForegroundMean == (mean ? 2 : 0) && wrapper.BackgroundMean == (mean ? 13 : 0),
-                        "包装均值数值异常");
-                    Require(wrapper.ForegroundMedian == (median ? 2 : 0) && wrapper.BackgroundMedian == (median ? 8 : 0),
-                        "包装中值数值异常");
-                    CheckRoundTrip(wrapper, target);
-                }
+                var target = Target(Execute(Images(image), Entries(Detection(new JArray(0, 0, 3, 2), mask)), Options(mean, median)));
+                var extra = target["extra_info"] as JObject;
+                CheckRoundTrip(ParseWrapper(extra), extra);
             }
-            foreach (var target in new[]
-            {
-                new JObject { ["with_mean"] = false, ["foreground_mean"] = null, ["background_mean"] = null,
-                    ["with_median"] = false, ["foreground_median"] = null, ["background_median"] = null },
-                new JObject { ["with_mean"] = true, ["foreground_mean"] = 0.0, ["background_mean"] = null,
-                    ["with_median"] = true, ["foreground_median"] = 0.0, ["background_median"] = null },
-                new JObject { ["with_mean"] = false, ["foreground_mean"] = 0.0, ["background_mean"] = 0.0 },
-                new JObject()
-            })
-            {
-                var wrapper = ParseWrapper(target);
-                CheckRoundTrip(wrapper, target);
-            }
+            foreach (var extra in ExtensionCases()) CheckRoundTrip(ParseWrapper(extra), extra);
+        }
+
+        private static IEnumerable<JObject> ExtensionCases()
+        {
+            yield return null;
+            yield return new JObject { ["note"] = "保留扩展", ["custom"] = new JObject { ["value"] = 17 }, ["polyline"] = new JArray(new JArray(1, 2), new JArray(3, 4)) };
+            yield return new JObject { ["with_mean"] = true, ["foreground_mean"] = 0.0, ["background_mean"] = null };
+            yield return new JObject { ["with_median"] = true, ["foreground_median"] = 2.5, ["background_median"] = null };
+            yield return new JObject { ["with_mean"] = false, ["foreground_mean"] = null, ["background_mean"] = null,
+                ["with_median"] = false, ["foreground_median"] = null, ["background_median"] = null };
+            yield return new JObject { ["with_mean"] = true, ["foreground_mean"] = 2.0, ["background_mean"] = 13.0,
+                ["with_median"] = true, ["foreground_median"] = 2.0, ["background_median"] = 8.0, ["note"] = "与其它模块共存" };
         }
 
         private static void TestPublicParserRoundTrip()
         {
-            using (var model = new dlcv_infer_csharp.Model())
-            using (var flowModel = new FlowGraphModel())
+            using (var model = new Model())
+            using (var flow = new FlowGraphModel())
             {
                 var normalize = typeof(Model).GetMethod("StandardizeJsonOutput", BindingFlags.NonPublic | BindingFlags.Instance);
-                var dvsMode = typeof(Model).GetField("_isDvsMode", BindingFlags.NonPublic | BindingFlags.Instance);
-                var flowParse = typeof(FlowGraphModel).GetMethod("ParseSingleImageResults", BindingFlags.NonPublic | BindingFlags.Instance);
-                foreach (var statistics in new[]
+                var parse = typeof(FlowGraphModel).GetMethod("ParseSingleImageResults", BindingFlags.NonPublic | BindingFlags.Instance);
+                foreach (var extra in ExtensionCases())
                 {
-                    new JObject(),
-                    new JObject { ["with_mean"] = false, ["foreground_mean"] = 0.0, ["background_mean"] = 0.0 },
-                    new JObject { ["with_median"] = true, ["foreground_median"] = 2.5, ["background_median"] = null },
-                    new JObject { ["with_mean"] = true, ["foreground_mean"] = null, ["background_mean"] = 4.5,
-                        ["with_median"] = true, ["foreground_median"] = null, ["background_median"] = 3.5 },
-                    new JObject { ["with_mean"] = true, ["foreground_mean"] = 0.0, ["background_mean"] = null },
-                    new JObject { ["with_mean"] = true, ["with_median"] = true },
-                    new JObject { ["with_mean"] = false, ["foreground_mean"] = null, ["background_mean"] = 0.0 },
-                    new JObject { ["with_median"] = false, ["foreground_median"] = 0.0, ["background_median"] = null },
-                    new JObject { ["with_mean"] = false, ["foreground_mean"] = null, ["background_mean"] = null,
-                        ["with_median"] = false, ["foreground_median"] = null, ["background_median"] = null }
-                })
-                {
-                    var expected = new JObject
-                    {
-                        ["with_mean"] = false, ["foreground_mean"] = 0.0, ["background_mean"] = 0.0,
-                        ["with_median"] = false, ["foreground_median"] = 0.0, ["background_median"] = 0.0
-                    };
-                    foreach (string field in Fields)
-                        if (statistics[field] != null) expected[field] = statistics[field].DeepClone();
-                    Action<Utils.CSharpObjectResult> checkParsed = actual =>
-                    {
-                        Require(actual.WithMean == expected.Value<bool>("with_mean") &&
-                            actual.WithMedian == expected.Value<bool>("with_median"), "公共解析改变统计开关或缺失默认值");
-                        foreach (var statistic in new[]
-                        {
-                            new KeyValuePair<string, double>("foreground_mean", actual.ForegroundMean),
-                            new KeyValuePair<string, double>("background_mean", actual.BackgroundMean),
-                            new KeyValuePair<string, double>("foreground_median", actual.ForegroundMedian),
-                            new KeyValuePair<string, double>("background_median", actual.BackgroundMedian)
-                        })
-                        {
-                            JToken value = expected[statistic.Key];
-                            Require(value.Type == JTokenType.Null ? double.IsNaN(statistic.Value) :
-                                statistic.Value == value.Value<double>(), "公共解析数值或空侧异常: " + statistic.Key);
-                        }
-                    };
-                    var target = (JObject)statistics.DeepClone();
-                    target["bbox"] = new JArray(0, 0, 1, 1);
-                    target["with_mask"] = false;
-                    var input = new JObject { ["sample_results"] = new JArray(
-                        new JObject { ["results"] = new JArray(target) }) };
-                    var parsed = model.ParseToStructResult(input).SampleResults[0].Results[0];
-                    try
-                    {
-                        checkParsed(parsed);
-                        var normalized = (JObject)normalize.Invoke(model, new object[] { target, false });
-                        foreach (string key in Fields)
-                            Require(normalized[key] == null, "普通模型 JSON 输出统计字段: " + key);
-                        try
-                        {
-                            dvsMode.SetValue(model, true);
-                            var flowJson = (JObject)normalize.Invoke(model, new object[] { target, false });
-                            foreach (string key in Fields)
-                                Require(JToken.DeepEquals(statistics[key], flowJson[key]), "Flow JSON 改变统计字段缺失或空值: " + key);
-                        }
-                        finally { dvsMode.SetValue(model, false); }
-                        foreach (var list in new[]
-                        {
-                            new JArray(target.DeepClone()),
-                            new JArray(new JObject { ["sample_results"] = new JArray(target.DeepClone()) })
-                        })
-                        {
-                            var sample = (Utils.CSharpSampleResult)flowParse.Invoke(flowModel, new object[] { list, false, null });
-                            Require(sample.Results.Count == 1, "Flow 统计解析改变目标数量");
-                            var flowParsed = sample.Results[0];
-                            try { checkParsed(flowParsed); }
-                            finally { flowParsed.Mask?.Dispose(); }
-                        }
-                        CheckRoundTrip(parsed, target);
-                    }
-                    finally { parsed.Mask?.Dispose(); }
+                    var target = new JObject { ["category_id"] = 2, ["category_name"] = "目标", ["score"] = 0.9, ["bbox"] = new JArray(0, 0, 3, 2), ["with_mask"] = false };
+                    if (extra != null) target["extra_info"] = extra.DeepClone();
+                    var normalized = (JObject)normalize.Invoke(model, new object[] { target, false });
+                    Require(JToken.DeepEquals(normalized["extra_info"], extra), "普通公开JSON改变扩展内容");
+                    foreach (string field in Fields) Require(normalized[field] == null, "统计泄漏到目标一级: " + field);
+                    var parsed = (Utils.CSharpSampleResult)parse.Invoke(flow, new object[] { new JArray(target.DeepClone()), false, null });
+                    CheckRoundTrip(parsed.Results[0], extra);
                 }
             }
         }
 
         private static void TestModelOutput()
         {
-            var target = new JObject
-            {
-                ["bbox"] = new JArray(0, 0, 1, 1), ["score"] = 0.75,
-                ["with_mean"] = false, ["foreground_mean"] = 0.0, ["background_mean"] = 0.0
-            };
-            using (var model = new Model())
-            {
-                var normalize = typeof(Model).GetMethod("StandardizeJsonOutput", BindingFlags.NonPublic | BindingFlags.Instance);
-                var result = (JObject)normalize.Invoke(model, new object[] { target, false });
-                foreach (string key in Fields) Require(result[key] == null, "普通模型 JSON 补入统计字段: " + key);
-                Require(result.Value<double>("score") == 0.75, "普通模型结果内容改变");
-            }
-            var sample = new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult> { new Utils.CSharpObjectResult() });
+            var sample = new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult> { Wrapper() });
             var convert = typeof(DetModel).GetMethod("ConvertToLocalSamples", BindingFlags.NonPublic | BindingFlags.Static);
             var local = (JArray)convert.Invoke(null, new object[] { sample });
-            foreach (string key in Fields) Require(local[0][key] == null, "模型节点补入统计字段: " + key);
+            foreach (string key in Fields) Require(local[0][key] == null, "未添加统计模块却出现统计字段: " + key);
+            Require(local[0]["extra_info"] == null, "未使用扩展信息时不应生成对象");
         }
 
         private static void TestWrapperText()
         {
-            var resolveDemo = typeof(Program).GetMethod("ResolveDemoAssemblyPath", BindingFlags.NonPublic | BindingFlags.Static);
-            var demoAssembly = Assembly.LoadFrom((string)resolveDemo.Invoke(null, null));
-            var resultText = demoAssembly.GetType("DlcvDemo.MainWindow", true)
-                .GetMethod("BuildObjectResultText", BindingFlags.NonPublic | BindingFlags.Static);
-            var i18n = demoAssembly.GetType("DlcvDemo.I18n", true);
-            var language = i18n.GetProperty("CurrentLanguage", BindingFlags.NonPublic | BindingFlags.Static);
-            var setLanguage = i18n.GetMethod("SetLanguage", BindingFlags.NonPublic | BindingFlags.Static);
-            string previousLanguage = (string)language.GetValue(null, null);
-            var cases = new[]
+            var resolve = typeof(Program).GetMethod("ResolveDemoAssemblyPath", BindingFlags.NonPublic | BindingFlags.Static);
+            var assembly = Assembly.LoadFrom((string)resolve.Invoke(null, null));
+            var resultText = assembly.GetType("DlcvDemo.MainWindow", true).GetMethod("BuildObjectResultText", BindingFlags.NonPublic | BindingFlags.Static);
+            foreach (var extra in ExtensionCases())
             {
-                new
+                var wrapper = ParseWrapper(extra);
+                string formatted = Utils.FormatExtraInfoForDisplay(extra);
+                string text = wrapper.ToString();
+                string gui = (string)resultText.Invoke(null, new object[] { 1, wrapper });
+                if (extra == null)
                 {
-                    Statistics = new JObject
-                    {
-                        ["with_mean"] = false, ["foreground_mean"] = null, ["background_mean"] = null,
-                        ["with_median"] = false, ["foreground_median"] = null, ["background_median"] = null
-                    },
-                    Sdk = "ForegroundMean: No samples, BackgroundMean: No samples, ForegroundMedian: No samples, BackgroundMedian: No samples, ",
-                    Gui = "  foreground_mean=No samples  background_mean=No samples  foreground_median=No samples  background_median=No samples"
-                },
-                new
+                    Require(!text.Contains("ExtraInfo:") && !gui.Contains("extra_info="), "空扩展信息显示了统计内容");
+                }
+                else
                 {
-                    Statistics = new JObject { ["with_median"] = true, ["foreground_median"] = 2.5, ["background_median"] = null },
-                    Sdk = "ForegroundMedian: " + 2.5.ToString("F4") + ", BackgroundMedian: No samples, ",
-                    Gui = "  foreground_median=" + 2.5.ToString("F4") + "  background_median=No samples"
-                },
-                new
-                {
-                    Statistics = new JObject { ["with_mean"] = true, ["foreground_mean"] = 0.0, ["background_mean"] = null },
-                    Sdk = "ForegroundMean: " + 0.0.ToString("F4") + ", BackgroundMean: No samples, ",
-                    Gui = "  foreground_mean=" + 0.0.ToString("F4") + "  background_mean=No samples"
-                },
-                new
-                {
-                    Statistics = new JObject
-                    {
-                        ["with_mean"] = true, ["foreground_mean"] = 2.0, ["background_mean"] = 13.0,
-                        ["with_median"] = true, ["foreground_median"] = 2.5, ["background_median"] = 8.0
-                    },
-                    Sdk = "ForegroundMean: " + 2.0.ToString("F4") + ", BackgroundMean: " + 13.0.ToString("F4") +
-                        ", ForegroundMedian: " + 2.5.ToString("F4") + ", BackgroundMedian: " + 8.0.ToString("F4") + ", ",
-                    Gui = "  foreground_mean=" + 2.0.ToString("F4") + "  background_mean=" + 13.0.ToString("F4") +
-                        "  foreground_median=" + 2.5.ToString("F4") + "  background_median=" + 8.0.ToString("F4")
-                },
-                new { Statistics = new JObject(), Sdk = string.Empty, Gui = string.Empty }
-            };
-            try
-            {
-                foreach (var test in cases)
-                {
-                    var wrapper = ParseWrapper(test.Statistics);
-                    wrapper.CategoryName = "target";
-                    string text = wrapper.ToString();
-                    Require(text.Contains(test.Sdk), "SDK 统计标签、格式或空采样文字改变");
-                    foreach (string field in new[] { "ForegroundMean", "BackgroundMean", "ForegroundMedian", "BackgroundMedian" })
-                        Require(text.Contains(field + ": ") == test.Sdk.Contains(field + ": "), "SDK 开关改变统计文字: " + field);
-                    Require(text.Contains("No samples") == test.Sdk.Contains("No samples") &&
-                        !text.Contains("无采样") && !text.Contains("前景") && !text.Contains("背景"), "SDK 统计文字不是固定英文");
-                    foreach (string currentLanguage in new[] { "zh-CN", "en-US" })
-                    {
-                        setLanguage.Invoke(null, new object[] { currentLanguage, false });
-                        string gui = (string)resultText.Invoke(null, new object[] { 1, wrapper });
-                        string expected = currentLanguage == "en-US" ? test.Gui : test.Gui.Replace("No samples", "无采样");
-                        Require(gui.Contains(expected), "GUI 统计标签、格式或空采样语言改变: " + currentLanguage);
-                        foreach (string field in new[] { "foreground_mean", "background_mean", "foreground_median", "background_median" })
-                            Require(gui.Contains(field + "=") == test.Gui.Contains(field + "="), "GUI 开关改变统计文字: " + field);
-                        Require(gui.Contains(currentLanguage == "en-US" ? "No samples" : "无采样") == test.Gui.Contains("No samples"),
-                            "GUI 空采样文字改变: " + currentLanguage);
-                        if (currentLanguage == "en-US")
-                            Require(!gui.Contains("无采样") && !gui.Contains("前景") && !gui.Contains("背景"), "英文 GUI 输出中文统计文字");
-                    }
+                    Require(text.Contains(formatted) && gui.Contains(formatted), "结果文本没有使用通用扩展信息格式");
+                    foreach (string field in Fields)
+                        if (extra[field] != null) Require(formatted.Contains(field), "扩展信息显示缺少字段: " + field);
                 }
             }
-            finally { setLanguage.Invoke(null, new object[] { previousLanguage, false }); }
         }
 
         private static Utils.CSharpObjectResult Wrapper()
@@ -545,18 +387,13 @@ namespace DlcvCSharpTest
             return new Utils.CSharpObjectResult(2, "目标", 0.9f, 0, new List<double> { 0, 0, 3, 2 }, false, null);
         }
 
-        private static Utils.CSharpObjectResult ParseWrapper(JObject statistics)
+        private static Utils.CSharpObjectResult ParseWrapper(JObject extra)
         {
-            var target = (JObject)statistics.DeepClone();
-            target["category_id"] = 2;
-            target["category_name"] = "目标";
-            target["score"] = 0.9f;
-            target["bbox"] = new JArray(0, 0, 3, 2);
-            target["with_mask"] = false;
+            var target = new JObject { ["category_id"] = 2, ["category_name"] = "目标", ["score"] = 0.9f, ["bbox"] = new JArray(0, 0, 3, 2), ["with_mask"] = false };
+            if (extra != null) target["extra_info"] = extra.DeepClone();
             using (var model = new Model())
             {
-                var input = new JObject { ["sample_results"] = new JArray(
-                    new JObject { ["results"] = new JArray(target) }) };
+                var input = new JObject { ["sample_results"] = new JArray(new JObject { ["results"] = new JArray(target) }) };
                 var parsed = model.ParseToStructResult(input).SampleResults[0].Results[0];
                 parsed.Mask?.Dispose();
                 parsed.Mask = null;
@@ -564,116 +401,30 @@ namespace DlcvCSharpTest
             }
         }
 
-        private static void CheckRoundTrip(Utils.CSharpObjectResult wrapper, JObject target)
+        private static void CheckRoundTrip(Utils.CSharpObjectResult wrapper, JObject expected)
         {
-            var expected = new JObject
-            {
-                ["with_mean"] = false, ["foreground_mean"] = 0.0, ["background_mean"] = 0.0,
-                ["with_median"] = false, ["foreground_median"] = 0.0, ["background_median"] = 0.0
-            };
-            foreach (string field in Fields)
-                if (target[field] != null) expected[field] = target[field].DeepClone();
-            var result = new Utils.CSharpResult(new List<Utils.CSharpSampleResult>
-                { new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult> { wrapper }) });
+            Require(JToken.DeepEquals(wrapper.ExtraInfo, expected), "公开结构改变扩展信息");
+            var result = new Utils.CSharpResult(new List<Utils.CSharpSampleResult> { new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult> { wrapper }) });
             var visual = (JObject)Utils.ConvertToVisualizeFormat(result)[0]["sample_results"][0];
-            visual = JObject.Parse(visual.ToString(Newtonsoft.Json.Formatting.None));
-            var written = new JObject();
-            foreach (string field in Fields)
-            {
-                Require(visual[field] != null, "可视化格式缺少统计字段: " + field);
-                written[field] = visual[field].DeepClone();
-            }
-            Require(JToken.DeepEquals(expected, written), "可视化格式改变默认值、统计开关或 null");
+            Require(JToken.DeepEquals(visual["extra_info"], expected), "可视化转换改变扩展信息");
+            foreach (string field in Fields) Require(visual[field] == null, "转换补入目标一级统计: " + field);
             var localMethod = typeof(DetModel).GetMethod("ConvertToLocalSamples", BindingFlags.NonPublic | BindingFlags.Static);
             var local = (JObject)((JArray)localMethod.Invoke(null, new object[] { result.SampleResults[0] }))[0];
-            local = JObject.Parse(local.ToString(Newtonsoft.Json.Formatting.None));
-            foreach (string field in Fields)
-                Require(local[field] == null, "模型节点输出统计字段: " + field);
+            Require(JToken.DeepEquals(local["extra_info"], expected), "模型通道丢失扩展信息");
             var signatureMethod = typeof(Program).GetMethod("BuildStructuredResultSignature", BindingFlags.NonPublic | BindingFlags.Static);
             var signature = JArray.Parse((string)signatureMethod.Invoke(null, new object[] { result }));
-            var signatureStatistics = new JObject();
-            foreach (string field in Fields)
-                if (signature[0]["results"][0][field] != null) signatureStatistics[field] = signature[0]["results"][0][field].DeepClone();
-            Require(JToken.DeepEquals(expected, signatureStatistics), "一致性签名改变统计开关或 null");
-            var printMethod = typeof(Program).GetMethod("PrintStructuredResult", BindingFlags.NonPublic | BindingFlags.Static);
-            var previousOut = Console.Out;
-            using (var capture = new StringWriter(CultureInfo.InvariantCulture))
-            {
-                try
-                {
-                    Console.SetOut(capture);
-                    printMethod.Invoke(null, new object[] { result });
-                }
-                finally { Console.SetOut(previousOut); }
-                string printed = capture.ToString();
-                int statisticsStart = printed.IndexOf("statistics=", StringComparison.Ordinal);
-                Require(statisticsStart >= 0, "CLI 统计诊断缺少统计字段");
-                string statisticsText = printed.Substring(statisticsStart + "statistics=".Length)
-                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)[0];
-                Require(JToken.DeepEquals(expected, JObject.Parse(statisticsText)),
-                    "CLI 统计诊断改变默认值、统计开关或 null");
-            }
-            var resolveDemo = typeof(Program).GetMethod("ResolveDemoAssemblyPath", BindingFlags.NonPublic | BindingFlags.Static);
-            var demoAssembly = Assembly.LoadFrom((string)resolveDemo.Invoke(null, null));
-            var cliType = demoAssembly.GetType("DlcvDemo.CliRunner", true);
-            var structuredMethod = cliType.GetMethod("BuildStructuredSummary", BindingFlags.NonPublic | BindingFlags.Static);
-            var jsonMethod = cliType.GetMethod("BuildJsonSummary", BindingFlags.NonPublic | BindingFlags.Static);
-            var consistentMethod = cliType.GetMethod("AreConsistent", BindingFlags.NonPublic | BindingFlags.Static);
-            var jsonTarget = (JObject)target.DeepClone();
-            jsonTarget["score"] = wrapper.Score;
-            jsonTarget["category_name"] = wrapper.CategoryName;
-            jsonTarget["with_mask"] = wrapper.WithMask;
-            var structuredSummary = structuredMethod.Invoke(null, new object[] { result, 0.5 });
-            var jsonSummary = jsonMethod.Invoke(null, new object[] { new JArray(jsonTarget), 0.5 });
-            Require((bool)consistentMethod.Invoke(null, new[] { structuredSummary, jsonSummary }), "CLI 两路统计摘要不一致");
-            foreach (string field in Fields)
-            {
-                var mismatched = (JObject)jsonTarget.DeepClone();
-                if (field.StartsWith("with_", StringComparison.Ordinal))
-                    mismatched[field] = !(jsonTarget.Value<bool?>(field) ?? false);
-                else
-                    mismatched[field] = jsonTarget[field]?.Type == JTokenType.Null ? new JValue(0.0) : JValue.CreateNull();
-                var mismatchSummary = jsonMethod.Invoke(null, new object[] { new JArray(mismatched), 0.5 });
-                Require(!(bool)consistentMethod.Invoke(null, new[] { structuredSummary, mismatchSummary }),
-                    "CLI 未识别统计开关或空值差异: " + field);
-            }
-            if (!wrapper.WithMean && !wrapper.WithMedian && wrapper.ForegroundMean == 0 && wrapper.BackgroundMean == 0 &&
-                wrapper.ForegroundMedian == 0 && wrapper.BackgroundMedian == 0)
-            {
-                var reflectedSummary = Activator.CreateInstance(structuredSummary.GetType());
-                reflectedSummary.GetType().GetMethod("Add").Invoke(reflectedSummary, new object[]
-                {
-                    wrapper.Score, wrapper.CategoryName, wrapper.WithMask, false, 0.0, 0.0, false, 0.0, 0.0, 0.5
-                });
-                Require((bool)consistentMethod.Invoke(null, new[] { structuredSummary, reflectedSummary }),
-                    "十参数反射调用的默认统计值异常");
-            }
-            foreach (var summary in new[] { structuredSummary, jsonSummary })
-            {
-                var summaryJson = (JObject)summary.GetType().GetMethod("ToJson").Invoke(summary, null);
-                summaryJson = JObject.Parse(summaryJson.ToString(Newtonsoft.Json.Formatting.None));
-                foreach (string field in Fields)
-                {
-                    var values = summaryJson[field] as JArray;
-                    Require(values != null && values.Count == 1 && JToken.DeepEquals(expected[field], values[0]),
-                        "CLI 统计数组改变默认值、统计开关或 null: " + field);
-                }
-            }
-            var parsed = ParseWrapper(written);
-            Require(parsed.WithMean == expected.Value<bool>("with_mean") && parsed.WithMedian == expected.Value<bool>("with_median"),
-                "二次读取统计开关改变");
-            foreach (var statistic in new[]
-            {
-                new KeyValuePair<string, double>("foreground_mean", parsed.ForegroundMean),
-                new KeyValuePair<string, double>("background_mean", parsed.BackgroundMean),
-                new KeyValuePair<string, double>("foreground_median", parsed.ForegroundMedian),
-                new KeyValuePair<string, double>("background_median", parsed.BackgroundMedian)
-            })
-            {
-                JToken value = expected[statistic.Key];
-                Require(value.Type == JTokenType.Null ? double.IsNaN(statistic.Value) : statistic.Value == value.Value<double>(),
-                    "二次读取统计字段数值改变: " + statistic.Key);
-            }
+            Require(JToken.DeepEquals(signature[0]["results"][0]["extra_info"], (JToken)expected ?? JValue.CreateNull()), "一致性签名改变扩展信息");
+            var resolve = typeof(Program).GetMethod("ResolveDemoAssemblyPath", BindingFlags.NonPublic | BindingFlags.Static);
+            var assembly = Assembly.LoadFrom((string)resolve.Invoke(null, null));
+            var cli = assembly.GetType("DlcvDemo.CliRunner", true);
+            var structured = cli.GetMethod("BuildStructuredSummary", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, new object[] { result, 0.5 });
+            var json = cli.GetMethod("BuildJsonSummary", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, new object[] { new JArray(visual), 0.5 });
+            Require((bool)cli.GetMethod("AreConsistent", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, new[] { structured, json }), "结构化与JSON统计摘要不一致");
+            var summary = (JObject)structured.GetType().GetMethod("ToJson").Invoke(structured, null);
+            Require(JToken.DeepEquals(summary["extra_info"][0], (JToken)expected ?? JValue.CreateNull()), "CLI通用扩展信息改变内容");
+            foreach (string field in Fields) Require(summary[field] == null, "CLI不应固定创建统计数组: " + field);
+            var parsed = ParseWrapper(visual["extra_info"] as JObject);
+            Require(JToken.DeepEquals(parsed.ExtraInfo, expected), "再次解析改变扩展信息");
         }
 
         private static void TestColor()
@@ -703,13 +454,13 @@ namespace DlcvCSharpTest
                 var foreground = Target(Execute(images, Entries(Detection(box, full)), Options(true, true)));
                 Statistics(foreground, "mean", true, true, 28.0 / 3, null);
                 Statistics(foreground, "median", true, true, 6, null);
-                var foregroundWrapper = ParseWrapper(foreground);
-                CheckRoundTrip(foregroundWrapper, foreground);
+                var foregroundWrapper = ParseWrapper(foreground["extra_info"] as JObject);
+                CheckRoundTrip(foregroundWrapper, foreground["extra_info"] as JObject);
                 var background = Target(Execute(images, Entries(Detection(box, zero)), Options(true, true)));
                 Statistics(background, "mean", true, true, null, 28.0 / 3);
                 Statistics(background, "median", true, true, null, 6);
-                var backgroundWrapper = ParseWrapper(background);
-                CheckRoundTrip(backgroundWrapper, background);
+                var backgroundWrapper = ParseWrapper(background["extra_info"] as JObject);
+                CheckRoundTrip(backgroundWrapper, background["extra_info"] as JObject);
                 foreach (var det in new[]
                 {
                     Detection(box, empty), Detection(box, null),
@@ -720,11 +471,12 @@ namespace DlcvCSharpTest
                     var target = Target(Execute(images, Entries(det), Options(true, true)));
                     Statistics(target, "mean", true, false, null, null);
                     Statistics(target, "median", true, false, null, null);
-                    var wrapper = ParseWrapper(target);
-                    Require(!wrapper.WithMean && !wrapper.WithMedian && double.IsNaN(wrapper.ForegroundMean) &&
-                        double.IsNaN(wrapper.BackgroundMean) && double.IsNaN(wrapper.ForegroundMedian) && double.IsNaN(wrapper.BackgroundMedian),
-                        "无采样结果未保留 false 与 NaN");
-                    CheckRoundTrip(wrapper, target);
+                    var extra = (JObject)target["extra_info"];
+                    var wrapper = ParseWrapper(extra);
+                    Require(!extra.Value<bool>("with_mean") && !extra.Value<bool>("with_median"), "无采样结果状态应为 false");
+                    foreach (string key in new[] { "foreground_mean", "background_mean", "foreground_median", "background_median" })
+                        Require(extra[key].Type == JTokenType.Null, "空采样侧应保留JSON null: " + key);
+                    CheckRoundTrip(wrapper, extra);
                 }
             }
         }
@@ -1005,7 +757,8 @@ namespace DlcvCSharpTest
             {
                 var det = Detection(new JArray(0, 0, 2, 1), mask);
                 foreach (string field in Fields) det[field] = field.StartsWith("with_", StringComparison.Ordinal) ? new JValue(true) : new JValue(999);
-                det["extra_info"] = new JObject { ["note"] = "保留模块结果" };
+                det["extra_info"] = new JObject { ["note"] = "保留模块结果", ["custom"] = new JObject { ["id"] = 5 } };
+                foreach (string field in Fields) det["extra_info"][field] = field.StartsWith("with_", StringComparison.Ordinal) ? new JValue(true) : new JValue(999);
                 var input = Entries(det);
                 input[0]["with_mean"] = "保留 entry 信息";
                 var nonLocal = new JObject { ["type"] = "global", ["sample_results"] = new JArray(det.DeepClone()) };
@@ -1022,6 +775,7 @@ namespace DlcvCSharpTest
                 var third = Execute(images, second, Options(false, false));
                 Statistics(Target(third), "mean", false, false, null, null);
                 Statistics(Target(third), "median", false, false, null, null);
+                Require(Target(third)["extra_info"]["note"].Value<string>() == "保留模块结果", "其它扩展字段被删除");
                 // 缺少 mask 时，旧 true/999 也必须变成 false/null，而不是沿用旧结果。
                 det.Remove("mask_rle");
                 var unavailable = Target(Execute(images, Entries(det), Options(true, true)));
@@ -1104,7 +858,16 @@ namespace DlcvCSharpTest
                 {
                     var oldDet = (JObject)oldTargets[j].DeepClone();
                     var newDet = (JObject)newTargets[j].DeepClone();
-                    foreach (string field in Fields) { oldDet.Remove(field); newDet.Remove(field); }
+                    foreach (var det in new[] { oldDet, newDet })
+                    {
+                        foreach (string field in Fields) det.Remove(field);
+                        var extra = det["extra_info"] as JObject;
+                        if (extra != null)
+                        {
+                            foreach (string field in Fields) extra.Remove(field);
+                            if (!extra.HasValues) det.Remove("extra_info");
+                        }
+                    }
                     Require(JToken.DeepEquals(oldDet, newDet), "统计以外的目标字段被修改");
                 }
             }
@@ -1136,6 +899,8 @@ namespace DlcvCSharpTest
 
         private static void Statistics(JObject target, string name, bool enabled, bool available, double? foreground, double? background)
         {
+            foreach (string field in Fields) Require(target[field] == null, "目标一级仍有统计字段: " + field);
+            target = target["extra_info"] as JObject ?? new JObject();
             string with = "with_" + name;
             string fg = "foreground_" + name;
             string bg = "background_" + name;

@@ -359,6 +359,9 @@ static Json ConvertToLocalSamples(
         o["with_mask"] = withMask;
         o["with_angle"] = obj.withAngle;
         o["angle"] = obj.withAngle ? obj.angle : -100.0;
+        if (obj.extraInfo.is_object() && !obj.extraInfo.empty()) {
+            o["extra_info"] = obj.extraInfo;
+        }
 
         if (withMask && !obj.mask.empty()) {
             if (emitMaskDerivedMeta) {
@@ -427,6 +430,9 @@ static Json ConvertSampleResultToLocalSamples(
         o["with_mask"] = withMask;
         o["with_angle"] = obj.withAngle;
         o["angle"] = obj.withAngle ? obj.angle : -100.0;
+        if (obj.extraInfo.is_object() && !obj.extraInfo.empty()) {
+            o["extra_info"] = obj.extraInfo;
+        }
 
         if (withMask && !obj.mask.empty()) {
             if (emitMaskDerivedMeta) {

@@ -5,8 +5,8 @@
 #include <stdbool.h>
 #endif
 
-#ifndef DLCV_DATA_TYPE_C_H
-#define DLCV_DATA_TYPE_C_H
+#ifndef DLCV_INFER_CPP_DATA_TYPE_C_H
+#define DLCV_INFER_CPP_DATA_TYPE_C_H
 
 typedef struct DlcvCImage {
     long long data_ptr;
@@ -41,9 +41,8 @@ typedef struct DlcvCObjectResult {
     bool with_angle;
     float angle;
 
-    bool with_mean;
-    double foreground_mean;
-    double background_mean;
+    // UTF-8 JSON 对象；无扩展时为空指针，随结果释放。
+    char* extra_info;
 } DlcvCObjectResult;
 
 typedef struct DlcvCSampleResult {

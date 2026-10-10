@@ -179,7 +179,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 **数据结构**：六个 C 数据结构 `DlcvCImage`、`DlcvCImageList`、`DlcvCMask`、`DlcvCObjectResult`、`DlcvCSampleResult`、`DlcvCResult` 已直接定义在 `dlcv_infer_c_api.h` 中，调用端不再需要额外包含 `dlcv_data_type_c.h`。
 
-**内存管理**：`DlcvCResult` 内部所有动态内存（`message`、`category_name`、`mask_ptr`、`results` 数组、`sample_results` 数组）由 DLL 分配，调用方必须通过 `dlcv_infer_cpp_free_model_result_c` 释放。
+**内存管理**：`DlcvCResult` 内部所有动态内存（`message`、`category_name`、`extra_info`、`mask_ptr`、`results` 数组、`sample_results` 数组）由 DLL 分配，调用方必须通过 `dlcv_infer_cpp_free_model_result_c` 释放。
 
 **实现位置**：`dlcv_infer_cpp/dlcv_infer_c_api.h` + `dlcv_infer_cpp/dlcv_infer_c_api.cpp`，基于 `dlcv_infer::Model` 封装，与 C++ API 共同生成 `dlcv_infer_cpp.dll` 和 `dlcv_infer_cpp.lib`。
 
@@ -268,13 +268,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | `angle` | 旋转角度 | 绘制旋转框、旋转裁剪、回正 |
 | `with_mask` | 是否有 mask | 区分检测结果和分割结果 |
 | `mask` | 结构化结果中的局部 mask 图像 | 做进一步图像计算 |
-| `with_mean` | 均值采样状态 | C# `WithMean`；C++ `withMean` |
-| `foreground_mean` | 前景均值 | C# `ForegroundMean`；C++ `foregroundMean` |
-| `background_mean` | 背景均值 | C# `BackgroundMean`；C++ `backgroundMean` |
-| `with_median` | 中值采样状态 | C# `WithMedian`；C++ `withMedian` |
-| `foreground_median` | 前景中值 | C# `ForegroundMedian`；C++ `foregroundMedian` |
-| `background_median` | 背景中值 | C# `BackgroundMedian`；C++ `backgroundMedian` |
-| `extra_info` | 扩展信息对象 | C# `Utils.CSharpObjectResult.ExtraInfo`（`JObject`），保存折线及业务扩展信息；C++／C 结构无对应成员，需通过 JSON 读取 |
+| `extra_info` | 扩展信息对象 | C# `Utils.CSharpObjectResult.ExtraInfo`（`JObject`）、C++ `ObjectResult.extraInfo`（`json`）、C `DlcvCObjectResult.extra_info`（UTF-8 JSON 对象字符串），承载统计、折线及业务扩展 |
 | `metadata` | 元信息对象 | 原始 JSON 中的流程来源和模块信息，结构化结果无对应成员 |
 
 ### 原始 JSON 结果字段
@@ -290,20 +284,14 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | `with_angle` | 是否有角度 | 与结构化结果一致 |
 | `angle` | 旋转角度 | 无角度时固定为 `-100` |
 | `with_mask` | 是否有区域结果 | 与结构化结果一致 |
-| `with_mean` | 均值采样状态 | 仅开启均值组时存在，布尔值 |
-| `foreground_mean` | 前景均值 | 仅开启均值组时存在，数值或 `null` |
-| `background_mean` | 背景均值 | 仅开启均值组时存在，数值或 `null` |
-| `with_median` | 中值采样状态 | 仅开启中值组时存在，布尔值 |
-| `foreground_median` | 前景中值 | 仅开启中值组时存在，数值或 `null` |
-| `background_median` | 背景中值 | 仅开启中值组时存在，数值或 `null` |
 | `mask_rle` | RLE 编码区域 | 面向 JSON 传输和跨语言交换 |
 | `poly` | 多边形轮廓数组 | 用于前端绘制、边界分析、折线提取 |
-| `extra_info` | 扩展信息 | 例如 `extra_info.polyline` |
+| `extra_info` | 扩展信息 | 统计组、`extra_info.polyline` 及业务扩展 |
 | `metadata` | 元信息 | 记录模块附加信息、运行信息 |
 
-均值和中值保存为目标的一级 JSON 字段及 C#／C++ 包装结构的独立成员，不放入 `extra_info`。C# JSON 解析将扩展信息读入 `ExtraInfo`，结构化结果转 JSON 时写回 `extra_info`。
+均值和中值仅存放于目标 `extra_info`，目标一级不输出统计键。公开结构只提供通用扩展字段：C# `Utils.CSharpObjectResult.ExtraInfo`（`JObject`）、C++ `ObjectResult.extraInfo`（`json`）和 C `DlcvCObjectResult.extra_info`（UTF-8 JSON 对象字符串，可为 `nullptr`），不提供专用统计成员。统计组关闭时删除该组三个键，空侧保留 JSON `null`，有效零值保留数值 `0`；折线及其他非统计扩展保持不变。没有统计节点的推理不增加统计字段，结构化与 JSON 转换也不补默认统计值。完整格式见 `docs/模块、流程与模型推理标准文档.md` 3.3、6.4.1，读取方式及释放要求见各语言 API 文档。
 
-普通推理不再计算前景与背景统计值，C#／C++ 结构化结果的两组统计默认值均为 `false/0.0/0.0`，原始 JSON 不输出统计字段。C ABI 的 `DlcvCObjectResult` 仅保留既有的三个均值成员，成员顺序与布局不变，中值通过 JSON 结果读取。C# 与 C++ 包装结果的统计标志为 `bool`，数值为 `double`；已开启统计项的空侧使用 `NaN`，转 JSON 时为 `null`。结构化结果转换保留六个统计字段；原始 Flow JSON 的禁用统计组保持缺失。
+底层 `dlcv_infer.dll` 的内部镜像结构不属于上述公开包装结构，其布局保持不变。公开 C ABI 调用方须使用配套的 `dlcv_infer_c_api.h` 与 DLL，并更新 ctypes／PInvoke 声明；`extra_info` 随整个结果由 `dlcv_infer_cpp_free_model_result_c` 释放，不单独释放。
 
 ### 几何语义
 

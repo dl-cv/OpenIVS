@@ -24,6 +24,7 @@
 #include "ImageViewerWidget.h"
 #include "MainWindow.h"
 #include "dlcv_infer.h"
+#include "ExtraInfoComparison.h"
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -99,20 +100,9 @@ struct PathSummary {
     json scores = json::array();
     json categories = json::array();
     json belowThreshold = json::array();
-    json withMeans = json::array();
-    json foregroundMeans = json::array();
-    json backgroundMeans = json::array();
-    json withMedians = json::array();
-    json foregroundMedians = json::array();
-    json backgroundMedians = json::array();
+    json extraInfos = json::array();
     std::vector<double> comparableScores;
     std::vector<std::string> comparableCategories;
-    std::vector<bool> comparableWithMeans;
-    std::vector<double> comparableForegroundMeans;
-    std::vector<double> comparableBackgroundMeans;
-    std::vector<bool> comparableWithMedians;
-    std::vector<double> comparableForegroundMedians;
-    std::vector<double> comparableBackgroundMedians;
 };
 
 class FreeAllModelsGuard {
@@ -391,30 +381,17 @@ void AddSummaryItem(
     PathSummary& summary,
     double score,
     const std::string& category,
-    bool withMean,
-    double foregroundMean,
-    double backgroundMean,
-    bool withMedian,
-    double foregroundMedian,
-    double backgroundMedian,
+    const json& extraInfo,
     double threshold) {
     const int index = summary.count;
     summary.count += 1;
     summary.categories.push_back(category);
     summary.comparableCategories.push_back(category);
     summary.comparableScores.push_back(score);
-    summary.withMeans.push_back(withMean);
-    summary.foregroundMeans.push_back(std::isfinite(foregroundMean) ? json(foregroundMean) : json(nullptr));
-    summary.backgroundMeans.push_back(std::isfinite(backgroundMean) ? json(backgroundMean) : json(nullptr));
-    summary.withMedians.push_back(withMedian);
-    summary.foregroundMedians.push_back(std::isfinite(foregroundMedian) ? json(foregroundMedian) : json(nullptr));
-    summary.backgroundMedians.push_back(std::isfinite(backgroundMedian) ? json(backgroundMedian) : json(nullptr));
-    summary.comparableWithMeans.push_back(withMean);
-    summary.comparableForegroundMeans.push_back(foregroundMean);
-    summary.comparableBackgroundMeans.push_back(backgroundMean);
-    summary.comparableWithMedians.push_back(withMedian);
-    summary.comparableForegroundMedians.push_back(foregroundMedian);
-    summary.comparableBackgroundMedians.push_back(backgroundMedian);
+    if (!extraInfo.is_null() && !extraInfo.is_object()) {
+        throw std::invalid_argument(std::string("extra_info 必须为对象或 null，实际类型为 ") + extraInfo.type_name());
+    }
+    summary.extraInfos.push_back(extraInfo.empty() ? json(nullptr) : extraInfo);
 
     if (!std::isfinite(score)) {
         summary.scores.push_back(nullptr);
@@ -444,47 +421,11 @@ PathSummary SummarizeStructured(const dlcv_infer::Result& result, double thresho
                 summary,
                 static_cast<double>(object.score),
                 dlcv_infer::convertGbkToUtf8(object.categoryName),
-                object.withMean,
-                static_cast<double>(object.foregroundMean),
-                static_cast<double>(object.backgroundMean),
-                object.withMedian,
-                static_cast<double>(object.foregroundMedian),
-                static_cast<double>(object.backgroundMedian),
+                object.extraInfo,
                 threshold);
         }
     }
     return summary;
-}
-
-bool TryReadJsonBool(const json& token, const char* key, bool& value) {
-    try {
-        if (token.is_object() && token.contains(key) && token.at(key).is_boolean()) {
-            value = token.at(key).get<bool>();
-            return true;
-        }
-    } catch (...) {
-    }
-    return false;
-}
-
-bool TryReadJsonNumber(const json& token, const char* key, double& value) {
-    try {
-        if (!token.is_object() || !token.contains(key)) {
-            return false;
-        }
-        const json& jsonValue = token.at(key);
-        if (jsonValue.is_null()) {
-            value = std::numeric_limits<double>::quiet_NaN();
-            return true;
-        }
-        if (jsonValue.is_number()) {
-            value = jsonValue.get<double>();
-            return std::isfinite(value);
-        }
-
-    } catch (...) {
-    }
-    return false;
 }
 
 bool TryReadJsonScore(const json& token, double& score) {
@@ -529,20 +470,7 @@ PathSummary SummarizeJson(const json& result, double threshold) {
 
         double score = std::numeric_limits<double>::quiet_NaN();
         (void)TryReadJsonScore(token, score);
-        bool withMean = false;
-        double foregroundMean = 0.0;
-        double backgroundMean = 0.0;
-        bool withMedian = false;
-        double foregroundMedian = 0.0;
-        double backgroundMedian = 0.0;
-        (void)TryReadJsonBool(token, "with_mean", withMean);
-        (void)TryReadJsonNumber(token, "foreground_mean", foregroundMean);
-        (void)TryReadJsonNumber(token, "background_mean", backgroundMean);
-        (void)TryReadJsonBool(token, "with_median", withMedian);
-        (void)TryReadJsonNumber(token, "foreground_median", foregroundMedian);
-        (void)TryReadJsonNumber(token, "background_median", backgroundMedian);
-        AddSummaryItem(summary, score, category, withMean, foregroundMean, backgroundMean,
-            withMedian, foregroundMedian, backgroundMedian, threshold);
+        AddSummaryItem(summary, score, category, token.value("extra_info", json(nullptr)), threshold);
     }
     return summary;
 }
@@ -553,12 +481,7 @@ json PathSummaryToJson(const PathSummary& summary) {
         {"scores", summary.scores},
         {"categories", summary.categories},
         {"below_threshold", summary.belowThreshold},
-        {"with_mean", summary.withMeans},
-        {"foreground_mean", summary.foregroundMeans},
-        {"background_mean", summary.backgroundMeans},
-        {"with_median", summary.withMedians},
-        {"foreground_median", summary.foregroundMedians},
-        {"background_median", summary.backgroundMedians}
+        {"extra_info", summary.extraInfos}
     };
 }
 
@@ -568,26 +491,14 @@ bool AreConsistent(const PathSummary& left, const PathSummary& right) {
     }
     if (left.comparableScores.size() != right.comparableScores.size() ||
         left.comparableCategories != right.comparableCategories ||
-        left.comparableWithMeans != right.comparableWithMeans ||
-        left.comparableWithMedians != right.comparableWithMedians) {
+        !dlcv_demo::ExtraInfoEquals(left.extraInfos, right.extraInfos, 1e-6)) {
         return false;
     }
-    const auto sameStatistic = [](double leftValue, double rightValue) {
-        return (std::isnan(leftValue) && std::isnan(rightValue)) ||
-            (std::isfinite(leftValue) && std::isfinite(rightValue) &&
-             std::abs(leftValue - rightValue) <= 1e-6);
-    };
     for (size_t i = 0; i < left.comparableScores.size(); ++i) {
         if (!std::isfinite(left.comparableScores[i]) || !std::isfinite(right.comparableScores[i])) {
             return false;
         }
         if (std::abs(left.comparableScores[i] - right.comparableScores[i]) > 1e-6) {
-            return false;
-        }
-        if (!sameStatistic(left.comparableForegroundMeans[i], right.comparableForegroundMeans[i]) ||
-            !sameStatistic(left.comparableBackgroundMeans[i], right.comparableBackgroundMeans[i]) ||
-            !sameStatistic(left.comparableForegroundMedians[i], right.comparableForegroundMedians[i]) ||
-            !sameStatistic(left.comparableBackgroundMedians[i], right.comparableBackgroundMedians[i])) {
             return false;
         }
     }

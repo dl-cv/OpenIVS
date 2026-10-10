@@ -44,11 +44,23 @@ dlcv_infer_cpp/dlcv_infer_c_api.h
 - `DlcvCSampleResult`
 - `DlcvCResult`
 
-`DlcvCObjectResult` 的 `with_mean` 为 `bool`，`foreground_mean`、`background_mean` 为 `double`；成员顺序与 ABI 布局不变，不加入中值成员。普通模型不计算统计值，JSON 不输出统计字段；结构化结果中的统计成员保持默认值。
+`DlcvCObjectResult` 只提供通用扩展字段 `char* extra_info`，不提供专用均值或中值成员。该指针为以零字节结尾的 UTF-8 JSON 对象字符串，可为 `nullptr`；统计键、折线和业务扩展均在此对象内。完整语义见 [结果标准](模块、流程与模型推理标准文档.md) 3.3.1。
 
-独立 Flow 统计节点的均值经 C++ 包装结果转换到 C ABI 时，沿用上述三个成员。前景或背景无采样值时，对应 `double` 可为非有限值；调用方使用 `isfinite` 检查，不能把缺侧当作 `0.0`。C ABI 不完整表达统计组字段缺失、中值与空值，完整语义通过 `dlcv_infer_cpp_infer_json_c` 的 JSON 路径读取。节点公共格式见 `模块、流程与模型推理标准文档.md` 6.4.1。
+调用方在结果释放前用现有 JSON 解析库读取 `extra_info`：先判断指针是否为空，再解析为对象；分别检查 `with_mean/with_median` 是否存在，读取对应两侧值并区分 JSON `null` 与有效数值 `0`。结构化结果已携带完整扩展内容，不需要再次调用 JSON 推理接口获取中值。
 
-`DlcvCResult` 及其内部 `message`、`sample_results`、`results`、`category_name`、mask 数据均由 DLL 分配。调用完成后必须执行：
+公开 `DlcvCObjectResult` 的尾部为：
+
+```c
+bool with_angle;
+float angle;
+char* extra_info;
+```
+
+调用方须使用配套的新头文件与 DLL 重新编译，ctypes／PInvoke 声明同步删除专用统计字段，并按头文件顺序声明 `extra_info` 指针；不能继续使用原结构大小或偏移。底层 `dlcv_infer.dll` 的内部镜像结构与布局不变，不使用此公开结构代替内部镜像。
+
+`extra_info` 是结果内部借用指针，有效期截止到 `dlcv_infer_cpp_free_model_result_c`。若需保留到释放后，先复制字符串或解析为调用方拥有的 JSON 对象。不要单独调用 `free` 或 `dlcv_infer_cpp_free_string_c` 释放它。
+
+`DlcvCResult` 及其内部 `message`、`sample_results`、`results`、`category_name`、`extra_info`、mask 数据均由 DLL 分配。调用完成后必须执行：
 
 ```c
 DlcvCResult result = dlcv_infer_cpp_infer_c(model_index, &images);

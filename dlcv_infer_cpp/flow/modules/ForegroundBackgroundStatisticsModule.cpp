@@ -312,9 +312,28 @@ public:
             const ModuleImage* selected = nullptr;
             for (auto& detection : entry["sample_results"]) {
                 if (!detection.is_object()) throw std::invalid_argument("sample_results 中的目标必须为对象");
+                if (detection.contains("extra_info") && !detection.at("extra_info").is_null() &&
+                    !detection.at("extra_info").is_object()) {
+                    throw std::invalid_argument(std::string("extra_info 必须为对象或 null，实际类型为 ") +
+                        detection.at("extra_info").type_name());
+                }
                 for (const char* name : {"with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median"}) {
                     detection.erase(name);
+                    if (detection.contains("extra_info") && detection.at("extra_info").is_object()) {
+                        detection["extra_info"].erase(name);
+                    }
                 }
+                if (!mean && !median) {
+                    if (detection.contains("extra_info") &&
+                        (detection.at("extra_info").is_null() || detection.at("extra_info").empty())) {
+                        detection.erase("extra_info");
+                    }
+                    continue;
+                }
+                if (!detection.contains("extra_info") || detection.at("extra_info").is_null()) {
+                    detection["extra_info"] = Json::object();
+                }
+                Json& extraInfo = detection["extra_info"];
                 std::array<std::vector<double>, 2> pixels;
                 if (mean || median) {
                     const cv::Mat mask = StatisticsMask(detection);
@@ -324,23 +343,23 @@ public:
                     }
                 }
                 const bool sampled = !pixels[0].empty() || !pixels[1].empty();
-                if (mean) detection["with_mean"] = sampled;
-                if (median) detection["with_median"] = sampled;
+                if (mean) extraInfo["with_mean"] = sampled;
+                if (median) extraInfo["with_median"] = sampled;
                 for (size_t i = 0; i < pixels.size(); ++i) {
                     auto& values = pixels[i];
                     const std::string prefix = i == 0 ? "foreground_" : "background_";
                     if (mean) {
-                        if (values.empty()) detection[prefix + "mean"] = nullptr;
+                        if (values.empty()) extraInfo[prefix + "mean"] = nullptr;
                         else {
                             double scale = 0;
                             for (double value : values) scale = std::max(scale, std::abs(value));
                             double sum = 0;
                             if (scale > 0) for (double value : values) sum += value / scale;
-                            detection[prefix + "mean"] = std::max(-1.0, std::min(1.0, sum / values.size())) * scale;
+                            extraInfo[prefix + "mean"] = std::max(-1.0, std::min(1.0, sum / values.size())) * scale;
                         }
                     }
                     if (median) {
-                        if (values.empty()) detection[prefix + "median"] = nullptr;
+                        if (values.empty()) extraInfo[prefix + "median"] = nullptr;
                         else {
                             std::sort(values.begin(), values.end());
                             const size_t mid = values.size() / 2;
@@ -349,7 +368,7 @@ public:
                                 const double scale = std::max(std::abs(values[mid - 1]), std::abs(values[mid]));
                                 medianValue = scale == 0 ? 0 : (values[mid - 1] / scale + values[mid] / scale) / 2 * scale;
                             }
-                            detection[prefix + "median"] = medianValue;
+                            extraInfo[prefix + "median"] = medianValue;
                         }
                     }
                 }

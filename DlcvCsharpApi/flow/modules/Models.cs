@@ -461,8 +461,8 @@ namespace DlcvModules
 					{
 					}
 				}
-				var extraInfo = obj.ExtraInfo ?? new JObject();
-				if (extraInfo.HasValues)
+				var extraInfo = obj.ExtraInfo;
+				if (extraInfo != null && extraInfo.HasValues)
 				{
 					o["extra_info"] = extraInfo;
 				}

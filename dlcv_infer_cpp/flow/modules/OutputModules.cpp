@@ -334,8 +334,9 @@ static void InitializeByImageEntry(const ModuleImage& wrap, FlowByImageEntry& ou
 }
 
 static Json MapExtraInfoToGlobal(const Json& detection, const std::vector<double>& T_c2o) {
-    if (!detection.contains("extra_info") || !detection.at("extra_info").is_object()) {
-        return Json();
+    if (!detection.contains("extra_info") || detection.at("extra_info").is_null()) return Json();
+    if (!detection.at("extra_info").is_object()) {
+        throw std::invalid_argument(std::string("extra_info 必须为对象或 null，实际类型为 ") + detection.at("extra_info").type_name());
     }
 
     Json extraInfo = detection.at("extra_info");
@@ -407,12 +408,6 @@ static void AppendOutResultItemTyped(
     if (extraInfo.is_object() && !extraInfo.empty()) {
         item.Extra["extra_info"] = extraInfo;
     }
-    if (d.contains("with_mean")) item.Extra["with_mean"] = d.at("with_mean");
-    if (d.contains("foreground_mean")) item.Extra["foreground_mean"] = d.at("foreground_mean");
-    if (d.contains("background_mean")) item.Extra["background_mean"] = d.at("background_mean");
-    if (d.contains("with_median")) item.Extra["with_median"] = d.at("with_median");
-    if (d.contains("foreground_median")) item.Extra["foreground_median"] = d.at("foreground_median");
-    if (d.contains("background_median")) item.Extra["background_median"] = d.at("background_median");
 
     outResults.push_back(std::move(item));
 }

@@ -38,6 +38,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "../../dlcv_infer_cpp/ImageInputUtils.h"
+#include "../../dlcv_infer_cpp/ExtraInfoComparison.h"
 #include "../../dlcv_infer_cpp/flow/FlowGraphModel.h"
 #include "../../dlcv_infer_cpp/flow/ModuleRegistry.h"
 #include "../../dlcv_infer_cpp/flow/modules/ModelModules.h"
@@ -224,9 +225,7 @@ std::string BuildResultSignature(const dlcv_infer::Result& result, const json& j
                 << ",with_bbox=" << object.withBbox
                 << ",with_angle=" << object.withAngle
                 << ",angle=" << object.angle
-                << ",with_mean=" << object.withMean
-                << ",foreground_mean=" << object.foregroundMean
-                << ",background_mean=" << object.backgroundMean
+                << ",extra_info=" << object.extraInfo.dump()
                 << ",bbox_count=" << object.bbox.size() << ",bbox=";
             for (size_t bboxIndex = 0; bboxIndex < object.bbox.size(); bboxIndex++) {
                 oss << object.bbox[bboxIndex] << ",";
@@ -3015,13 +3014,13 @@ int RunForegroundBackgroundStatisticsSelfTest() {
                 inputResults[0]["transform"] = image.TransformState.ToJson();
                 const auto output = run(current.ImageList, inputResults, both);
                 const auto& item = output.ResultList[0]["sample_results"][0];
-                number(item.at("foreground_mean"), mixed ? 8.25 : 55.5, "实际翻转前景均值错误");
-                number(item.at("foreground_median"), mixed ? 6 : 15, "实际翻转前景中值错误");
+                number(item.at("extra_info").at("foreground_mean"), mixed ? 8.25 : 55.5, "实际翻转前景均值错误");
+                number(item.at("extra_info").at("foreground_median"), mixed ? 6 : 15, "实际翻转前景中值错误");
                 if (mixed) {
-                    number(item.at("background_mean"), 150, "实际翻转背景均值错误");
-                    number(item.at("background_median"), 150, "实际翻转背景中值错误");
+                    number(item.at("extra_info").at("background_mean"), 150, "实际翻转背景均值错误");
+                    number(item.at("extra_info").at("background_median"), 150, "实际翻转背景中值错误");
                 } else {
-                    check(item.at("background_mean").is_null() && item.at("background_median").is_null(),
+                    check(item.at("extra_info").at("background_mean").is_null() && item.at("extra_info").at("background_median").is_null(),
                         "空背景未返回 null");
                 }
             }
@@ -3058,9 +3057,9 @@ int RunForegroundBackgroundStatisticsSelfTest() {
         const auto& targets = output.at("result_list");
         check(targets.size() == 1, ports.second + " 结果路由丢失");
         const auto& item = targets[0];
-        check(item.at("with_mean") == false && item.at("with_median") == false &&
-            item.at("foreground_mean").is_null() && item.at("background_mean").is_null() &&
-            item.at("foreground_median").is_null() && item.at("background_median").is_null(),
+        check(item.at("extra_info").at("with_mean") == false && item.at("extra_info").at("with_median") == false &&
+            item.at("extra_info").at("foreground_mean").is_null() && item.at("extra_info").at("background_mean").is_null() &&
+            item.at("extra_info").at("foreground_median").is_null() && item.at("extra_info").at("background_median").is_null(),
             "缺掩码目标的统计路由或 null 输出错误");
         std::remove(path.c_str());
         const cv::Mat savedImage = gray.clone();
@@ -3073,25 +3072,36 @@ int RunForegroundBackgroundStatisticsSelfTest() {
         for (const char* key : {"with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median"}) {
             input[0]["sample_results"][0][key] = 999;
         }
+        input[0]["sample_results"][0]["extra_info"] = {
+            {"custom", {{"note", "保留"}}}, {"polyline", {{0, 0}, {2, 1}}}
+        };
+        for (const char* key : {"with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median"}) {
+            input[0]["sample_results"][0]["extra_info"][key] = 999;
+        }
         const json savedInput = input;
         for (bool mean : {false, true}) {
             for (bool median : {false, true}) {
                 const ModuleIO out = run(images, input, {{"mean", mean}, {"median", median}});
                 const auto& item = out.ResultList[0]["sample_results"][0];
+                const auto& extraInfo = item.at("extra_info");
+                check(extraInfo.at("custom") == input[0]["sample_results"][0]["extra_info"]["custom"] &&
+                    extraInfo.at("polyline") == input[0]["sample_results"][0]["extra_info"]["polyline"], "非统计扩展改变");
                 for (const char* name : {"mean", "median"}) {
                     const bool enabled = std::string(name) == "mean" ? mean : median;
                     const std::string flag = "with_" + std::string(name);
-                    check(item.contains(flag) == enabled, flag + " 开关错误");
+                    check(extraInfo.contains(flag) == enabled, flag + " 开关错误");
                     for (const char* region : {"foreground_", "background_"}) {
                         const std::string field = std::string(region) + name;
-                        check(item.contains(field) == enabled, field + " 关闭后未删除");
-                        if (enabled) number(item.at(field), std::string(region) == "foreground_" ? 5 : 40, field);
+                        check(extraInfo.contains(field) == enabled, field + " 关闭后未删除");
+                        if (enabled) number(extraInfo.at(field), std::string(region) == "foreground_" ? 5 : 40, field);
                     }
-                    if (enabled) check(item.at(flag) == true, flag + " 有采样时未置 true");
+                    if (enabled) check(extraInfo.at(flag) == true, flag + " 有采样时未置 true");
                 }
                 json restored = out.ResultList;
                 for (const char* key : {"with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median"}) {
+                    check(!item.contains(key), "统计字段仍在目标一级");
                     restored[0]["sample_results"][0][key] = 999;
+                    restored[0]["sample_results"][0]["extra_info"][key] = 999;
                 }
                 check(restored == input, "目标或 entry 其他属性改变");
                 check(out.ImageList.size() == 1 && out.ImageList[0].ToMeta() == images[0].ToMeta() &&
@@ -3100,16 +3110,36 @@ int RunForegroundBackgroundStatisticsSelfTest() {
                     "图像及包装属性改变");
             }
         }
+        for (const json& initial : std::vector<json>{json(nullptr), json::object()}) {
+            auto emptyExtra = entries(detection(mask, {0, 0, 3, 2}));
+            emptyExtra[0]["sample_results"][0]["extra_info"] = initial;
+            const auto disabled = run(images, emptyExtra, {{"mean", false}, {"median", false}});
+            check(!disabled.ResultList[0]["sample_results"][0].contains("extra_info"), "关闭统计未删除空扩展");
+        }
+        const auto withoutExtensions = run(images, entries(detection(mask, {0, 0, 3, 2})), {{"mean", false}, {"median", false}});
+        check(!withoutExtensions.ResultList[0]["sample_results"][0].contains("extra_info"), "关闭统计创建了扩展对象");
+        for (const json& invalid : std::vector<json>{json(1), json(true), json("文本"), json::array()}) {
+            auto invalidInput = entries(detection(mask, {0, 0, 3, 2}));
+            invalidInput[0]["sample_results"][0]["extra_info"] = invalid;
+            for (const json& properties : std::vector<json>{both, {{"mean", false}, {"median", false}}}) {
+                bool rejected = false;
+                try { run(images, invalidInput, properties); }
+                catch (const std::invalid_argument& error) {
+                    rejected = std::string(error.what()).find(invalid.type_name()) != std::string::npos;
+                }
+                check(rejected, "无效扩展未按实际类型报错");
+            }
+        }
         const auto defaults = run(images, input, json::object()).ResultList[0]["sample_results"][0];
-        number(defaults.at("foreground_mean"), 5, "默认均值");
-        check(!defaults.contains("with_median"), "默认中值未关闭");
+        number(defaults.at("extra_info").at("foreground_mean"), 5, "默认均值");
+        check(!defaults.value("extra_info", json::object()).contains("with_median"), "默认中值未关闭");
         const auto enabled = run(images, input, both);
         const auto disabled = run(images, enabled.ResultList, {{"mean", false}, {"median", false}});
         const auto repeated = run(images, disabled.ResultList, {{"mean", false}, {"median", true}});
         const auto& repeatedItem = repeated.ResultList[0]["sample_results"][0];
-        check(!repeatedItem.contains("with_mean") && !repeatedItem.contains("foreground_mean") &&
-            !repeatedItem.contains("background_mean"), "重复执行残留旧均值");
-        number(repeatedItem.at("foreground_median"), 5, "重复执行中值");
+        check(!repeatedItem.value("extra_info", json::object()).contains("with_mean") && !repeatedItem.value("extra_info", json::object()).contains("foreground_mean") &&
+            !repeatedItem.value("extra_info", json::object()).contains("background_mean"), "重复执行残留旧均值");
+        number(repeatedItem.at("extra_info").at("foreground_median"), 5, "重复执行中值");
         check(input == savedInput && cv::norm(gray, savedImage, cv::NORM_INF) == 0, "输入被修改");
 
         cv::Mat color(1, 2, CV_8UC3);
@@ -3118,10 +3148,10 @@ int RunForegroundBackgroundStatisticsSelfTest() {
         const cv::Mat twoMask = (cv::Mat_<unsigned char>(1, 2) << 255, 0);
         const auto colorOut = run({makeImage(color)}, entries(detection(twoMask, {0, 0, 2, 1})), both);
         const auto& colorItem = colorOut.ResultList[0]["sample_results"][0];
-        number(colorItem.at("foreground_mean"), 5, "彩色前景均值不是共同标量");
-        number(colorItem.at("foreground_median"), 5, "彩色前景中值");
-        number(colorItem.at("background_mean"), 10, "彩色背景均值");
-        number(colorItem.at("background_median"), 8, "彩色背景中值");
+        number(colorItem.at("extra_info").at("foreground_mean"), 5, "彩色前景均值不是共同标量");
+        number(colorItem.at("extra_info").at("foreground_median"), 5, "彩色前景中值");
+        number(colorItem.at("extra_info").at("background_mean"), 10, "彩色背景均值");
+        number(colorItem.at("extra_info").at("background_median"), 8, "彩色背景中值");
 
         for (const auto& invalidMask : {json(), json::object(), json{{"width", 0}, {"height", 1}, {"runs", {0}}},
             json{{"width", 3}, {"height", 2}, {"runs", {1}}}, json{{"width", 3}, {"height", 2}, {"runs", {-1, 7}}},
@@ -3130,43 +3160,44 @@ int RunForegroundBackgroundStatisticsSelfTest() {
             invalid[0]["sample_results"][0]["mask_rle"] = invalidMask;
             const auto out = run(images, invalid, both);
             const auto& item = out.ResultList[0]["sample_results"][0];
-            check(item.at("with_mean") == false && item.at("with_median") == false &&
-                item.at("foreground_mean").is_null() && item.at("background_mean").is_null() &&
-                item.at("foreground_median").is_null() && item.at("background_median").is_null(), "无效 mask 未置 false/null");
+            check(item.at("extra_info").at("with_mean") == false && item.at("extra_info").at("with_median") == false &&
+                item.at("extra_info").at("foreground_mean").is_null() && item.at("extra_info").at("background_mean").is_null() &&
+                item.at("extra_info").at("foreground_median").is_null() && item.at("extra_info").at("background_median").is_null(), "无效 mask 未置 false/null");
         }
         for (bool foreground : {false, true}) {
             const cv::Mat fullMask(gray.size(), CV_8UC1, cv::Scalar(foreground ? 255 : 0));
             const auto out = run(images, entries(detection(fullMask, {0, 0, 3, 2})), both);
             const auto& item = out.ResultList[0]["sample_results"][0];
+            const auto& extraInfo = item.at("extra_info");
             const std::string populated = foreground ? "foreground_" : "background_";
             const std::string empty = foreground ? "background_" : "foreground_";
-            check(item.at("with_mean") == true && item.at("with_median") == true, "单侧采样标志错误");
-            number(item.at(populated + "mean"), 50.0 / 3, "单侧均值");
-            number(item.at(populated + "median"), 7, "偶数中值应为 6 和 8 的平均");
-            check(item.at(empty + "mean").is_null() && item.at(empty + "median").is_null(), "空一侧未写 null");
+            check(extraInfo.at("with_mean") == true && extraInfo.at("with_median") == true, "单侧采样标志错误");
+            number(extraInfo.at(populated + "mean"), 50.0 / 3, "单侧均值");
+            number(extraInfo.at(populated + "median"), 7, "偶数中值应为 6 和 8 的平均");
+            check(extraInfo.at(empty + "mean").is_null() && extraInfo.at(empty + "median").is_null(), "空一侧未写 null");
         }
         for (const auto& bbox : {json{0, 0, 0, 2}, json{10, 10, 1, 1}, json::array(), json{0, 0, -1, 2}}) {
             const auto out = run(images, entries(detection(mask, bbox)), both);
             const auto& item = out.ResultList[0]["sample_results"][0];
-            check(item.at("with_mean") == false && item.at("with_median") == false && item.at("foreground_mean").is_null(),
+            check(item.at("extra_info").at("with_mean") == false && item.at("extra_info").at("with_median") == false && item.at("extra_info").at("foreground_mean").is_null(),
                 "无效区域统计标志错误");
         }
         const cv::Mat localMask = (cv::Mat_<unsigned char>(2, 2) << 255, 0, 255, 0);
         const auto xywh = run(images, entries(detection(localMask, {1, 0, 2, 2})), both);
-        number(xywh.ResultList[0]["sample_results"][0]["foreground_mean"], 6, "XYWH 前景定位错误");
-        number(xywh.ResultList[0]["sample_results"][0]["background_mean"], 40, "XYWH 被当作 XYXY");
+        number(xywh.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], 6, "XYWH 前景定位错误");
+        number(xywh.ResultList[0]["sample_results"][0]["extra_info"]["background_mean"], 40, "XYWH 被当作 XYXY");
         const cv::Mat fullSourceMask = (cv::Mat_<unsigned char>(2, 3) << 0, 0, 255, 0, 0, 255);
         const auto fullSource = run(images, entries(detection(fullSourceMask, {1, 0, 2, 2})), both);
-        number(fullSource.ResultList[0]["sample_results"][0]["foreground_mean"], 40, "全图 mask 未按 bbox 裁剪");
-        number(fullSource.ResultList[0]["sample_results"][0]["background_mean"], 6, "全图 mask 背景错误");
+        number(fullSource.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], 40, "全图 mask 未按 bbox 裁剪");
+        number(fullSource.ResultList[0]["sample_results"][0]["extra_info"]["background_mean"], 6, "全图 mask 背景错误");
         const cv::Mat rowImage = (cv::Mat_<unsigned char>(1, 3) << 10, 20, 30);
         json arrayInput = entries(detection(cv::Mat(1, 3, CV_8UC1, cv::Scalar(255)), {0, 0, 3, 1}));
         arrayInput[0]["sample_results"][0]["mask_array"] = {{1, 127, 128}};
         const json savedArray = arrayInput;
         const auto arrayOut = run({makeImage(rowImage)}, arrayInput, both);
-        number(arrayOut.ResultList[0]["sample_results"][0]["foreground_mean"], 30, "mask_array 128 未作为前景或优先级错误");
-        number(arrayOut.ResultList[0]["sample_results"][0]["background_mean"], 15, "mask_array 1/127 未作为背景");
-        number(arrayOut.ResultList[0]["sample_results"][0]["background_median"], 15, "mask_array 偶数中值");
+        number(arrayOut.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], 30, "mask_array 128 未作为前景或优先级错误");
+        number(arrayOut.ResultList[0]["sample_results"][0]["extra_info"]["background_mean"], 15, "mask_array 1/127 未作为背景");
+        number(arrayOut.ResultList[0]["sample_results"][0]["extra_info"]["background_median"], 15, "mask_array 偶数中值");
         check(arrayInput == savedArray, "mask_array 输入改变");
         for (const auto& array : {json(), json::object(), json::array(), json::array({json::array()}),
             json{{0, 255}, {1}}, json{{-1}}, json{{256}}, json{{128.0}}, json{{true}}, json{{"128"}}, json{128}}) {
@@ -3174,44 +3205,44 @@ int RunForegroundBackgroundStatisticsSelfTest() {
             invalidArray[0]["sample_results"][0]["mask_array"] = array;
             const auto out = run({makeImage(rowImage)}, invalidArray, both);
             const auto& item = out.ResultList[0]["sample_results"][0];
-            check(item.at("with_mean") == false && item.at("with_median") == false &&
-                item.at("foreground_mean").is_null() && item.at("background_mean").is_null() &&
-                item.at("foreground_median").is_null() && item.at("background_median").is_null(), "非法 mask_array 未返回空 mask 或转用了 RLE");
+            check(item.at("extra_info").at("with_mean") == false && item.at("extra_info").at("with_median") == false &&
+                item.at("extra_info").at("foreground_mean").is_null() && item.at("extra_info").at("background_mean").is_null() &&
+                item.at("extra_info").at("foreground_median").is_null() && item.at("extra_info").at("background_median").is_null(), "非法 mask_array 未返回空 mask 或转用了 RLE");
         }
         const auto enormous = run({makeImage(rowImage)}, entries(detection(twoMask, {-1e12, 0, 2e12, 1})), both);
         const auto& enormousItem = enormous.ResultList[0]["sample_results"][0];
-        check(enormousItem.at("with_mean") == true && enormousItem.at("foreground_mean").is_null(), "巨大图外 bbox 前景错误");
-        number(enormousItem.at("background_mean"), 20, "巨大图外 bbox ROI 采样错误");
+        check(enormousItem.at("extra_info").at("with_mean") == true && enormousItem.at("extra_info").at("foreground_mean").is_null(), "巨大图外 bbox 前景错误");
+        number(enormousItem.at("extra_info").at("background_mean"), 20, "巨大图外 bbox ROI 采样错误");
         cv::Mat indexedMask = cv::Mat::zeros(1, 90, CV_8UC1);
         indexedMask.at<unsigned char>(0, 62) = 255;
         const auto integerIndex = run({makeImage(rowImage)}, entries(detection(indexedMask, {-7, 0, 10, 1})), both);
-        check(integerIndex.ResultList[0]["sample_results"][0]["foreground_mean"].is_null(), "最近邻索引 7*90/10 被算为 62");
-        number(integerIndex.ResultList[0]["sample_results"][0]["background_mean"], 20, "完整 bbox 最近邻索引错误");
+        check(integerIndex.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"].is_null(), "最近邻索引 7*90/10 被算为 62");
+        number(integerIndex.ResultList[0]["sample_results"][0]["extra_info"]["background_mean"], 20, "完整 bbox 最近邻索引错误");
         cv::Mat wideMask = cv::Mat::zeros(1, 90, CV_8UC1);
         wideMask(cv::Rect(0, 0, 45, 1)).setTo(255);
         const auto hugeCoordinate = run({makeImage(rowImage)}, entries(detection(wideMask, {-1e307, 0, 2e307, 1})), both);
-        check(hugeCoordinate.ResultList[0]["sample_results"][0]["foreground_mean"].is_null(), "巨大坐标乘法溢出后采样错误");
-        number(hugeCoordinate.ResultList[0]["sample_results"][0]["background_mean"], 20, "巨大坐标 ROI 采样错误");
+        check(hugeCoordinate.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"].is_null(), "巨大坐标乘法溢出后采样错误");
+        number(hugeCoordinate.ResultList[0]["sample_results"][0]["extra_info"]["background_mean"], 20, "巨大坐标 ROI 采样错误");
         const auto outside = run({makeImage(rowImage)}, entries(detection(twoMask, {-2, 0, 4, 1})), both);
         const auto& outsideItem = outside.ResultList[0]["sample_results"][0];
-        check(outsideItem.at("with_mean") == true && outsideItem.at("foreground_mean").is_null(), "图外前景挤入图内");
-        number(outsideItem.at("background_mean"), 15, "图外 bbox 完整缩放后裁剪错误");
+        check(outsideItem.at("extra_info").at("with_mean") == true && outsideItem.at("extra_info").at("foreground_mean").is_null(), "图外前景挤入图内");
+        number(outsideItem.at("extra_info").at("background_mean"), 15, "图外 bbox 完整缩放后裁剪错误");
         const auto fractional = run({makeImage(rowImage)}, entries(detection(twoMask, {-0.25, 0, 2.5, 1})), both);
-        number(fractional.ResultList[0]["sample_results"][0]["foreground_mean"], 10, "非整数 bbox 下界错误");
-        number(fractional.ResultList[0]["sample_results"][0]["background_mean"], 25, "非整数 bbox 上界错误");
+        number(fractional.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], 10, "非整数 bbox 下界错误");
+        number(fractional.ResultList[0]["sample_results"][0]["extra_info"]["background_mean"], 25, "非整数 bbox 上界错误");
 
         const cv::Mat rotatedImage = (cv::Mat_<unsigned char>(3, 3) << 100, 2, 100, 4, 10, 8, 100, 20, 100);
         cv::Mat rotatedMask = cv::Mat::zeros(3, 3, CV_8UC1);
         rotatedMask.at<unsigned char>(1, 1) = 255;
         const auto rotation = run({makeImage(rotatedImage)}, entries(detection(rotatedMask, {1, 1, 2, 2, CV_PI / 4})), both);
         const auto& rotationItem = rotation.ResultList[0]["sample_results"][0];
-        number(rotationItem.at("foreground_mean"), 10, "旋转框前景");
-        number(rotationItem.at("background_mean"), 8.5, "旋转框域包含框外像素");
-        number(rotationItem.at("background_median"), 6, "旋转框背景偶数中值");
+        number(rotationItem.at("extra_info").at("foreground_mean"), 10, "旋转框前景");
+        number(rotationItem.at("extra_info").at("background_mean"), 8.5, "旋转框域包含框外像素");
+        number(rotationItem.at("extra_info").at("background_median"), 6, "旋转框背景偶数中值");
         const cv::Mat ones(3, 3, CV_8UC1, cv::Scalar(255));
         const auto halfOpen = run({makeImage(rotatedImage)}, entries(detection(ones, {1, 1, 2, 2, 0})), both);
-        number(halfOpen.ResultList[0]["sample_results"][0]["foreground_mean"], 29, "旋转框域半开区间错误");
-        number(halfOpen.ResultList[0]["sample_results"][0]["foreground_median"], 7, "旋转框域中值");
+        number(halfOpen.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], 29, "旋转框域半开区间错误");
+        number(halfOpen.ResultList[0]["sample_results"][0]["extra_info"]["foreground_median"], 7, "旋转框域中值");
 
         struct RightAngleCase {
             double angle;
@@ -3236,9 +3267,9 @@ int RunForegroundBackgroundStatisticsSelfTest() {
             for (const cv::Mat& shape : {localOnes, fullOnes}) {
                 const auto out = run({makeImage(pixelIds)}, entries(detection(shape, bbox)), both);
                 const auto& item = out.ResultList[0]["sample_results"][0];
-                number(item.at("foreground_mean"), angle.mean, "直角旋转像素集合均值错误");
-                number(item.at("foreground_median"), angle.median, "直角旋转像素集合中值错误");
-                check(item.at("background_mean").is_null(), "全前景旋转域背景不为空");
+                number(item.at("extra_info").at("foreground_mean"), angle.mean, "直角旋转像素集合均值错误");
+                number(item.at("extra_info").at("foreground_median"), angle.median, "直角旋转像素集合中值错误");
+                check(item.at("extra_info").at("background_mean").is_null(), "全前景旋转域背景不为空");
             }
             // 单像素亮点逐一核查成员关系，四个直角方向各包含明确的四个像素。
             for (int y = 0; y < 4; ++y) {
@@ -3247,7 +3278,7 @@ int RunForegroundBackgroundStatisticsSelfTest() {
                     onePixel.at<unsigned char>(y, x) = 1;
                     const auto out = run({makeImage(onePixel)}, entries(detection(localOnes, bbox)), both);
                     const bool inside = std::find(angle.pixels.begin(), angle.pixels.end(), cv::Point(x, y)) != angle.pixels.end();
-                    number(out.ResultList[0]["sample_results"][0]["foreground_mean"], inside ? 0.25 : 0,
+                    number(out.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], inside ? 0.25 : 0,
                         "直角旋转域像素成员错误，坐标=" + std::to_string(x) + "," + std::to_string(y));
                 }
             }
@@ -3255,18 +3286,18 @@ int RunForegroundBackgroundStatisticsSelfTest() {
         cv::Mat edgeMask = cv::Mat::zeros(4, 4, CV_8UC1);
         edgeMask.at<unsigned char>(1, 3) = edgeMask.at<unsigned char>(2, 3) = 255;
         const auto rotatedEdge = run({makeImage(pixelIds)}, entries(detection(edgeMask, {2, 2, 2, 2, CV_PI / 2})), both);
-        number(rotatedEdge.ResultList[0]["sample_results"][0]["foreground_mean"], 1088, "全图 mask 的 x=3 端点未直接索引");
-        number(rotatedEdge.ResultList[0]["sample_results"][0]["background_mean"], 544, "直角旋转域混入 x=1 像素");
+        number(rotatedEdge.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], 1088, "全图 mask 的 x=3 端点未直接索引");
+        number(rotatedEdge.ResultList[0]["sample_results"][0]["extra_info"]["background_mean"], 544, "直角旋转域混入 x=1 像素");
 
         cv::Mat resizeImage(1, 17, CV_8UC1, cv::Scalar(100));
         resizeImage.at<unsigned char>(0, 0) = 10;
         const cv::Mat resizeMask = (cv::Mat_<unsigned char>(1, 6) << 0, 0, 0, 255, 255, 255);
         const auto resizeOrder = run({makeImage(resizeImage)}, entries(detection(resizeMask, {-17, 0, 34, 1})), both);
         const auto& resizeItem = resizeOrder.ResultList[0]["sample_results"][0];
-        number(resizeItem.at("foreground_mean"), 100, "最近邻浮点顺序导致首个背景进入前景");
-        number(resizeItem.at("foreground_median"), 100, "最近邻前景中值错误");
-        number(resizeItem.at("background_mean"), 10, "最近邻缩放后裁剪首个背景缺失");
-        number(resizeItem.at("background_median"), 10, "最近邻背景中值错误");
+        number(resizeItem.at("extra_info").at("foreground_mean"), 100, "最近邻浮点顺序导致首个背景进入前景");
+        number(resizeItem.at("extra_info").at("foreground_median"), 100, "最近邻前景中值错误");
+        number(resizeItem.at("extra_info").at("background_mean"), 10, "最近邻缩放后裁剪首个背景缺失");
+        number(resizeItem.at("extra_info").at("background_median"), 10, "最近邻背景中值错误");
 
         const cv::Mat original = (cv::Mat_<unsigned char>(1, 4) << 3, 10, 30, 90);
         TransformationState cropState(4, 1);
@@ -3276,8 +3307,8 @@ int RunForegroundBackgroundStatisticsSelfTest() {
         const ModuleImage cropped(original(cv::Rect(1, 0, 3, 1)), original, cropState);
         const cv::Mat originalMask = (cv::Mat_<unsigned char>(1, 4) << 0, 255, 0, 255);
         const auto fromOriginal = run({cropped}, entries(detection(originalMask, {0, 0, 4, 1})), both);
-        number(fromOriginal.ResultList[0]["sample_results"][0]["foreground_mean"], 50, "缺少源 transform 时未使用原图 identity");
-        number(fromOriginal.ResultList[0]["sample_results"][0]["background_mean"], 16.5, "原图背景遗漏当前裁图之外的像素");
+        number(fromOriginal.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], 50, "缺少源 transform 时未使用原图 identity");
+        number(fromOriginal.ResultList[0]["sample_results"][0]["extra_info"]["background_mean"], 16.5, "原图背景遗漏当前裁图之外的像素");
         TransformationState targetState = cropState;
         targetState.CropBox = {2, 0, 2, 1};
         targetState.AffineMatrix2x3 = {1, 0, -2, 0, 1, 0};
@@ -3287,8 +3318,8 @@ int RunForegroundBackgroundStatisticsSelfTest() {
         json source = entries(detection(sourceMask, {0, 0, 3, 1}));
         source[0]["transform"] = cropState.ToJson();
         const auto transformed = run({target}, source, both);
-        number(transformed.ResultList[0]["sample_results"][0]["foreground_mean"], 50, "inverse(source) 未映射到完整原图前景");
-        number(transformed.ResultList[0]["sample_results"][0]["background_mean"], 30, "不同 transform 背景错误");
+        number(transformed.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], 50, "inverse(source) 未映射到完整原图前景");
+        number(transformed.ResultList[0]["sample_results"][0]["extra_info"]["background_mean"], 30, "不同 transform 背景错误");
         const cv::Mat scaleOriginal = (cv::Mat_<unsigned char>(1, 2) << 10, 20);
         const cv::Mat scaleCurrent = (cv::Mat_<unsigned char>(1, 4) << 10, 20, 20, 0);
         TransformationState scaleState(2, 1);
@@ -3296,9 +3327,9 @@ int RunForegroundBackgroundStatisticsSelfTest() {
         scaleState.OutputSize = {4, 1};
         const auto scaled = run({ModuleImage(scaleCurrent, scaleOriginal, scaleState)},
             entries(detection(twoMask, {0, 0, 2, 1})), both);
-        number(scaled.ResultList[0]["sample_results"][0]["foreground_mean"], 10, "最近邻前景映射错误");
-        number(scaled.ResultList[0]["sample_results"][0]["background_mean"], 20, "0.5 像素边缘或域外背景错误");
-        number(scaled.ResultList[0]["sample_results"][0]["background_median"], 20, "映射后背景中值错误");
+        number(scaled.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], 10, "最近邻前景映射错误");
+        number(scaled.ResultList[0]["sample_results"][0]["extra_info"]["background_mean"], 20, "0.5 像素边缘或域外背景错误");
+        number(scaled.ResultList[0]["sample_results"][0]["extra_info"]["background_median"], 20, "映射后背景中值错误");
         // 原图前两列为前景 [2,10,4,14,6,18]，后两列为背景 [30,90,50,110,70,130]。
         // 结果坐标横向放大 2 倍、纵向放大 3 倍；插值和前置改色均不能改变原图统计。
         const cv::Mat rawPixels = (cv::Mat_<unsigned char>(3, 4) <<
@@ -3323,11 +3354,11 @@ int RunForegroundBackgroundStatisticsSelfTest() {
             const json savedMeta = originalOnlyImages[0].ToMeta();
             const auto originalOnly = run(originalOnlyImages, nonuniformInput, both);
             const auto& item = originalOnly.ResultList[0]["sample_results"][0];
-            check(item.at("with_mean") == true && item.at("with_median") == true, "原图采样统计标记错误");
-            number(item.at("foreground_mean"), 9, "插值或改色影响原图前景均值");
-            number(item.at("foreground_median"), 8, "插值或改色影响原图前景中值");
-            number(item.at("background_mean"), 80, "插值或改色影响原图背景均值");
-            number(item.at("background_median"), 80, "插值或改色影响原图背景中值");
+            check(item.at("extra_info").at("with_mean") == true && item.at("extra_info").at("with_median") == true, "原图采样统计标记错误");
+            number(item.at("extra_info").at("foreground_mean"), 9, "插值或改色影响原图前景均值");
+            number(item.at("extra_info").at("foreground_median"), 8, "插值或改色影响原图前景中值");
+            number(item.at("extra_info").at("background_mean"), 80, "插值或改色影响原图背景均值");
+            number(item.at("extra_info").at("background_median"), 80, "插值或改色影响原图背景中值");
             check(nonuniformInput == savedNonuniformInput &&
                 cv::norm(rawPixels, savedRawPixels, cv::NORM_INF) == 0 &&
                 cv::norm(sourceRegionMask, savedRegionMask, cv::NORM_INF) == 0,
@@ -3351,25 +3382,25 @@ int RunForegroundBackgroundStatisticsSelfTest() {
         select[0]["transform"] = images[0].TransformState.ToJson();
         const cv::Mat dark = cv::Mat::zeros(gray.size(), CV_8UC1);
         const auto byOrigin = run({makeImage(dark, 1), images[0]}, select, both);
-        number(byOrigin.ResultList[0]["sample_results"][0]["foreground_mean"], 5, "index 越过 origin 限定");
+        number(byOrigin.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], 5, "index 越过 origin 限定");
         json chooseTransform = entries(detection(sourceMask, {0, 0, 3, 1}));
         chooseTransform[0]["transform"] = targetState.ToJson();
         chooseTransform[0]["sample_results"][0]["bbox"] = {0, 0, 2, 1};
         chooseTransform[0]["sample_results"][0]["mask_rle"] = MatToMaskInfo(twoMask);
         const auto byTransform = run({cropped, target}, chooseTransform, both);
-        number(byTransform.ResultList[0]["sample_results"][0]["foreground_mean"], 30, "transform 未优先于 index");
-        number(byTransform.ResultList[0]["sample_results"][0]["background_mean"], 90, "transform 选择背景错误");
+        number(byTransform.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], 30, "transform 未优先于 index");
+        number(byTransform.ResultList[0]["sample_results"][0]["extra_info"]["background_mean"], 90, "transform 选择背景错误");
         select[0].erase("transform");
         select[0]["index"] = 1;
         const auto byIndex = run({makeImage(dark), images[0]}, select, both);
-        number(byIndex.ResultList[0]["sample_results"][0]["foreground_mean"], 5, "同 origin 下 index 定位错误");
+        number(byIndex.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], 5, "同 origin 下 index 定位错误");
         chooseTransform[0].erase("origin_index");
         const auto byTransformOnly = run({cropped, target}, chooseTransform, both);
-        number(byTransformOnly.ResultList[0]["sample_results"][0]["foreground_mean"], 30, "没有 origin 时未按 index 选择图像并转换坐标");
+        number(byTransformOnly.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], 30, "没有 origin 时未按 index 选择图像并转换坐标");
         ModuleImage deferred = target;
         deferred.ImageObject.release();
         const auto deferredOut = run({deferred}, source, both);
-        number(deferredOut.ResultList[0]["sample_results"][0]["foreground_mean"], 50, "当前图像为空时未直接统计原图");
+        number(deferredOut.ResultList[0]["sample_results"][0]["extra_info"]["foreground_mean"], 50, "当前图像为空时未直接统计原图");
         check(deferred.ImageObject.empty() && deferredOut.ImageList[0].ImageObject.empty(), "统计改写延迟图像");
 
         auto rejects = [&](const std::vector<ModuleImage>& list, const json& result, const json& properties, const std::string& message) {
@@ -3412,9 +3443,9 @@ int RunForegroundBackgroundStatisticsSelfTest() {
             const cv::Mat full(1, 1, CV_8UC1, cv::Scalar(255));
             const auto largeOut = run({makeImage(large)}, entries(detection(full, {0, 0, 1, 1})), both);
             const auto& largeItem = largeOut.ResultList[0]["sample_results"][0];
-            check(largeItem["foreground_mean"].get<double>() == value && largeItem["foreground_median"].get<double>() == value,
+            check(largeItem["extra_info"]["foreground_mean"].get<double>() == value && largeItem["extra_info"]["foreground_median"].get<double>() == value,
                 "有限极值统计发生溢出或下溢");
-            check(largeItem["background_mean"].is_null() && largeItem["background_median"].is_null(), "极值空背景不为 null");
+            check(largeItem["extra_info"]["background_mean"].is_null() && largeItem["extra_info"]["background_median"].is_null(), "极值空背景不为 null");
         }
         cv::Mat nonFinite(2, 3, CV_64FC1, cv::Scalar(1));
         nonFinite.at<double>(0, 0) = std::numeric_limits<double>::quiet_NaN();
@@ -3437,150 +3468,90 @@ int RunForegroundBackgroundStatisticsSelfTest() {
 
 int RunObjectMeanParsingSelfTest() {
     auto fail = [](const std::string& message) -> int {
-        PrintUtf8Line("目标均值解析自测失败：" + message);
+        PrintUtf8Line("目标扩展解析自测失败：" + message);
         return 1;
     };
-
     const dlcv_infer::ObjectResult defaultResult(
-        1, "default", 0.9f, 1.0f,
-        std::vector<double>{1.0, 2.0, 3.0, 4.0}, false, cv::Mat());
-    if (defaultResult.withMean || defaultResult.foregroundMean != 0.0 || defaultResult.backgroundMean != 0.0
-        || defaultResult.withMedian || defaultResult.foregroundMedian != 0.0 || defaultResult.backgroundMedian != 0.0) {
-        return fail("默认统计不符合 false/0.0/0.0 输出格式");
-    }
-
-    const dlcv_infer::ObjectResult resultWithMean(
-        2, "explicit", 0.8f, 2.0f,
-        std::vector<double>{5.0, 6.0, 7.0, 8.0}, false, cv::Mat(),
-        false, false, -100.0f, true, 12.5, 34.75);
-    if (!resultWithMean.withMean
-        || resultWithMean.foregroundMean != 12.5
-        || resultWithMean.backgroundMean != 34.75
-        || resultWithMean.withMedian || resultWithMean.foregroundMedian != 0.0 || resultWithMean.backgroundMedian != 0.0) {
-        return fail("显式均值字段映射错误");
-    }
-
+        1, "default", 0.9f, 1.0f, {1.0, 2.0, 3.0, 4.0}, false, cv::Mat());
+    if (!defaultResult.extraInfo.is_null()) return fail("无扩展目标分配了扩展对象");
     class ParseProbe final : public dlcv_infer::Model {
     public:
         using dlcv_infer::Model::ParseToStructResult;
     };
-
-    const json resultJson = {
-        {"sample_results", json::array({
-            {
-                {"results", json::array({
-                    {
-                        {"category_id", 3},
-                        {"category_name", "mean"},
-                        {"score", 0.7},
-                        {"area", 4.0},
-                        {"bbox", json::array({0.0, 0.0, 2.0, 2.0})},
-                        {"with_mask", false},
-                        {"mask", {{"width", 0}, {"height", 0}, {"mask_ptr", 0}}},
-                        {"with_mean", true},
-                        {"foreground_mean", 56.25},
-                        {"background_mean", 78.5}
-                    }
-                })}
-            }
-        })}
+    const json detection{
+        {"category_id", 3}, {"category_name", "目标"}, {"score", 0.7}, {"area", 4.0},
+        {"bbox", {0.0, 0.0, 2.0, 2.0}}, {"with_mask", false},
+        {"mask", {{"width", 0}, {"height", 0}, {"mask_ptr", 0}}}
     };
-    ParseProbe probe;
-    const dlcv_infer::Result parsed = probe.ParseToStructResult(resultJson);
-    if (parsed.sampleResults.size() != 1 || parsed.sampleResults[0].results.size() != 1) {
-        return fail("结构化结果数量错误");
-    }
-    const auto& parsedObject = parsed.sampleResults[0].results[0];
-    if (!parsedObject.withMean
-        || parsedObject.foregroundMean != 56.25
-        || parsedObject.backgroundMean != 78.5) {
-        return fail("结构化均值解析错误");
-    }
-
-    json missingMeanJson = resultJson;
-    json& missingMeanObject = missingMeanJson["sample_results"][0]["results"][0];
-    missingMeanObject.erase("with_mean");
-    missingMeanObject.erase("foreground_mean");
-    missingMeanObject.erase("background_mean");
-    const dlcv_infer::Result parsedWithoutMean = probe.ParseToStructResult(missingMeanJson);
-    const auto& objectWithoutMean = parsedWithoutMean.sampleResults[0].results[0];
-    if (objectWithoutMean.withMean || objectWithoutMean.withMedian
-        || objectWithoutMean.foregroundMean != 0.0 || objectWithoutMean.backgroundMean != 0.0
-        || objectWithoutMean.foregroundMedian != 0.0 || objectWithoutMean.backgroundMedian != 0.0) {
-        return fail("未计算统计时未恢复默认值");
-    }
-
-    const std::vector<json> statisticsCases{
-        {{"with_mean", false}, {"foreground_mean", 0.0}, {"background_mean", 0.0}},
-        {{"with_mean", true}, {"foreground_mean", 5.0}, {"background_mean", 40.0},
-            {"with_median", true}, {"foreground_median", 5.0}, {"background_median", 40.0}},
+    const std::vector<json> cases{
+        json(nullptr), json::object(),
+        {{"with_mean", true}, {"foreground_mean", 5.0}, {"background_mean", 40.0}},
+        {{"with_median", true}, {"foreground_median", 5.0}, {"background_median", 40.0}},
         {{"with_mean", true}, {"foreground_mean", nullptr}, {"background_mean", 20.0},
             {"with_median", true}, {"foreground_median", nullptr}, {"background_median", 18.0}},
         {{"with_mean", false}, {"foreground_mean", nullptr}, {"background_mean", nullptr},
             {"with_median", false}, {"foreground_median", nullptr}, {"background_median", nullptr}},
-        {{"with_median", true}, {"foreground_median", 2.5}, {"background_median", nullptr}},
-        {{"with_mean", true}, {"foreground_mean", 7.0}, {"background_mean", nullptr}},
-        json::object()
+        {{"custom", {{"文本", "保留"}}}, {"polyline", {{1, 2}, {3, 4}}}}
     };
-    for (const auto& statistics : statisticsCases) {
-        json typedJson = resultJson;
-        auto& detectionJson = typedJson["sample_results"][0]["results"][0];
+    ParseProbe probe;
+    for (const auto& extra : cases) {
+        auto item = detection;
         for (const char* key : {"with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median"}) {
-            detectionJson.erase(key);
+            item[key] = 999;
         }
-        for (auto it = statistics.begin(); it != statistics.end(); ++it) detectionJson[it.key()] = it.value();
-        const auto typedParsed = probe.ParseToStructResult(typedJson);
-        const auto& typed = typedParsed.sampleResults[0].results[0];
-        if (typed.withMean != statistics.value("with_mean", false)
-            || typed.withMedian != statistics.value("with_median", false)) {
-            return fail("统计标志解析错误");
-        }
-        for (const auto& field : {std::make_pair("foreground_mean", typed.foregroundMean),
-            std::make_pair("background_mean", typed.backgroundMean),
-            std::make_pair("foreground_median", typed.foregroundMedian),
-            std::make_pair("background_median", typed.backgroundMedian)}) {
-            if (!statistics.contains(field.first)) {
-                if (field.second != 0.0) return fail("未计算的统计值未恢复默认值");
-            } else if (statistics.at(field.first).is_null()) {
-                if (!std::isnan(field.second)) return fail("null 统计值未读取为 NaN");
-            } else if (field.second != statistics.at(field.first).get<double>()) {
-                return fail("统计值解析错误");
-            }
-        }
+        if (!extra.is_null()) item["extra_info"] = extra;
+        const json response{{"sample_results", json::array({{{"results", json::array({item})}}})}};
+        const auto parsed = probe.ParseToStructResult(response);
+        if (parsed.sampleResults.size() != 1 || parsed.sampleResults[0].results.size() != 1)
+            return fail("结构化结果数量错误");
+        const auto& typed = parsed.sampleResults[0].results[0];
+        const json expected = extra.empty() ? json(nullptr) : extra;
+        if (typed.extraInfo != expected) return fail("扩展字段、null 或未知值未完整保留");
+        const dlcv_infer::ObjectResult constructed(
+            3, "目标", 0.7f, 4.0f, {0.0, 0.0, 2.0, 2.0}, false, cv::Mat(), true, false, -100.0f, extra);
+        if (constructed.extraInfo != expected) return fail("构造函数扩展字段改变");
     }
-
-    for (const std::string key : {"with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median"}) {
-        const bool isFlag = key == "with_mean" || key == "with_median";
-        const std::vector<json> invalidValues{json(), json("invalid"), json::array(), json::object(), isFlag ? json(1) : json(true)};
-        for (const auto& invalidValue : invalidValues) {
-            json tolerantJson = resultJson;
-            auto& detectionJson = tolerantJson["sample_results"][0]["results"][0];
-            detectionJson["with_median"] = true;
-            detectionJson["foreground_median"] = 19.0;
-            detectionJson["background_median"] = 23.0;
-            detectionJson[key] = invalidValue;
-            const auto tolerantParsed = probe.ParseToStructResult(tolerantJson);
-            const auto& typed = tolerantParsed.sampleResults[0].results[0];
-            if (typed.withMean != (key != "with_mean") || typed.withMedian != (key != "with_median")) {
-                return fail(key + " 无效标志未单独恢复默认值");
-            }
-            for (const auto& field : {std::make_tuple("foreground_mean", typed.foregroundMean, 56.25),
-                std::make_tuple("background_mean", typed.backgroundMean, 78.5),
-                std::make_tuple("foreground_median", typed.foregroundMedian, 19.0),
-                std::make_tuple("background_median", typed.backgroundMedian, 23.0)}) {
-                if (key == std::get<0>(field)) {
-                    if (invalidValue.is_null()) {
-                        if (!std::isnan(std::get<1>(field))) return fail(key + " 的 null 未读取为 NaN");
-                    } else if (std::get<1>(field) != 0.0) {
-                        return fail(key + " 无效数值未单独恢复默认值");
-                    }
-                } else if (std::get<1>(field) != std::get<2>(field)) {
-                    return fail(key + " 解析失败影响其他统计值");
-                }
-            }
+    for (const json& invalid : std::vector<json>{json(1), json(true), json("文本"), json::array()}) {
+        auto item = detection;
+        item["extra_info"] = invalid;
+        bool rejected = false;
+        try { probe.ParseToStructResult({{"sample_results", json::array({{{"results", json::array({item})}}})}}); }
+        catch (const std::invalid_argument& error) {
+            rejected = std::string(error.what()).find(invalid.type_name()) != std::string::npos;
         }
+        if (!rejected) return fail("无效扩展未按实际类型报错");
     }
-    PrintUtf8Line("目标均值解析自测通过");
+    const json baselineExtra{
+        {"custom", {{"enabled", true}, {"name", "保留"}, {"value", 2.0}}},
+        {"polyline", {{1.0, 2.0}, {3.0, 4.0}}}, {"empty", nullptr}
+    };
+    auto withinTolerance = baselineExtra;
+    withinTolerance["custom"]["value"] = 2.0 + 5e-7;
+    withinTolerance["polyline"][1][0] = 3.0 - 5e-7;
+    if (!dlcv_demo::ExtraInfoEquals(baselineExtra, withinTolerance, 1e-6))
+        return fail("嵌套扩展数值容差比较错误");
+    auto beyondTolerance = baselineExtra;
+    beyondTolerance["polyline"][1][0] = 3.0 + 2e-6;
+    if (dlcv_demo::ExtraInfoEquals(baselineExtra, beyondTolerance, 1e-6))
+        return fail("超出容差的折线坐标未识别");
+    if (!dlcv_demo::ExtraInfoEquals(baselineExtra, beyondTolerance, 1e-4))
+        return fail("DLL Demo 的既有数值容差未保留");
+    for (int mode = 0; mode < 5; ++mode) {
+        auto changed = baselineExtra;
+        if (mode == 0) changed["custom"]["enabled"] = false;
+        if (mode == 1) changed["custom"]["name"] = "改变";
+        if (mode == 2) changed.erase("empty");
+        if (mode == 3) changed["polyline"].push_back({5.0, 6.0});
+        if (mode == 4) changed["empty"] = 0;
+        if (dlcv_demo::ExtraInfoEquals(baselineExtra, changed, 1e-6))
+            return fail("未知字段、标志、null 或数组结构变化未识别");
+    }
+    const json integerLeft{{"index", 9007199254740992ULL}};
+    const json integerRight{{"index", 9007199254740993ULL}};
+    if (dlcv_demo::ExtraInfoEquals(integerLeft, integerRight, 1e-6) ||
+        !dlcv_demo::ExtraInfoEquals(json(nullptr), json(nullptr), 1e-6))
+        return fail("整数精度或无扩展比较错误");
+    PrintUtf8Line("目标扩展解析自测通过");
     return 0;
 }
 
@@ -3847,9 +3818,7 @@ void PrintStructuredResult(dlcv_infer::Result& result) {
                 << ", with_bbox=" << (object.withBbox ? "true" : "false")
                 << ", with_angle=" << (object.withAngle ? "true" : "false")
                 << ", angle=" << ToFixed(object.angle, 3)
-                << ", with_mean=" << (object.withMean ? "true" : "false")
-                << ", foreground_mean=" << ToFixed(object.foregroundMean, 3)
-                << ", background_mean=" << ToFixed(object.backgroundMean, 3);
+                << ", extra_info=" << object.extraInfo.dump();
             std::cout << ", bbox=[";
             for (size_t b = 0; b < object.bbox.size(); ++b) {
                 if (b > 0) std::cout << ", ";

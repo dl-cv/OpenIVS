@@ -154,7 +154,7 @@ python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.e
 1. 点击 **打开图片推理**，选择图片（`jpg/jpeg/png/bmp/gif/tiff/tif`）。
 2. 图像经过 `prepareImageForInference` 转换为 RGB。
 3. 调用 `model->InferBatch()` 执行推理。
-4. 结果在文本区显示（数量、每个目标的类别、score、bbox、area、angle，以及可用的前景与背景均值）；流程失败原因存在时显示在预测结果下方。
+4. 结果在文本区显示（数量、每个目标的类别、score、bbox、area、angle，以及 `extra_info` 内可用的前景与背景均值、中值）；流程失败原因存在时显示在预测结果下方。
 5. 图像区显示可视化结果（bbox 框 + mask 叠加）；流程判定存在时左上角显示带阴影方块的绿色 `OK` 或红色 `NG`。
 
 **代码路径**：`MainWindow::onInfer()`
@@ -171,7 +171,7 @@ python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.e
 **代码路径**：`MainWindow::onInferJson()`
 - 返回字段：`category_id`、`category_name`、`score`、`bbox`、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`、`with_mean`、`foreground_mean`、`background_mean`。
 
-配置独立“前景背景统计”Flow 节点后，使用“推理JSON”查看启用项的均值、中值及空区域的 `null`。节点的 `mean/median` 独立配置，不使用推理开关；普通推理旧均值三字段仍为 `false/0.0/0.0`。配置与采样语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
+配置独立“前景背景统计”Flow 节点后，结构化结果与“推理JSON”均通过目标 `extra_info` 携带启用项的均值、中值及空区域的 `null`。节点的 `mean/median` 独立配置，不使用推理开关；普通推理不增加统计键。配置与采样语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
 
 ### 4.4 批量推理测试
 
@@ -226,7 +226,7 @@ dlcv_infer_cpp_dll_demo.exe load-model <名称> <模型路径> [--device N] --th
 dlcv_infer_cpp_dll_demo.exe load-model <名称> <模型路径> --then benchmark <名称> <图片路径> [--threads N] [--runs N]
 ```
 
-组合命令包括 `load-model`、`list-models`、`model-info`、`dvs-model-info`、`infer`、`benchmark`、`free-model` 和 `free-all-models`。`benchmark` 使用同一模型和图片建立基准结果，再由多个线程重复推理并比较批量数量、目标数量、类别、框、分数、角度、面积、mask 和均值；线程数范围为 1～32。模型编号由实际加载或注册接口返回，不按数值区段推断资源类型或 DLL。
+组合命令包括 `load-model`、`list-models`、`model-info`、`dvs-model-info`、`infer`、`benchmark`、`free-model` 和 `free-all-models`。`benchmark` 使用同一模型和图片建立基准结果，再由多个线程重复推理并比较批量数量、目标数量、类别、框、分数、角度、面积、mask 和通用扩展信息（包括均值与中值）；线程数范围为 1～32。模型编号由实际加载或注册接口返回，不按数值区段推断资源类型或 DLL。
 
 程序退出时释放当前模型和全部模型。按 index 释放时，无效参数可返回参数错误；有效编号即使已不存在或底层报错也返回成功并完成本地清理，重复释放同样成功，错误详情最多写入日志或消息。运行目录需要 `dlcv_infer_cpp.dll`、OpenCV、Visual C++ 运行库及首次普通模型头对应的底层 DLL。
 
