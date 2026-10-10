@@ -24,6 +24,8 @@
 
 程序结束前调用 `dlcv_infer_cpp_free_all_models_c`。
 
+`dlcv_infer_c_test.exe --statistics-extra-info-selftest` 可单独验证四种统计开关、空采样、无统计节点、C/C++/JSON 扩展一致性，以及模型释放后扩展仍可读取、结果重复释放后清空。运行前通过 `DLCV_TEST_CORE_DLL` 指定本轮推理 DLL 的绝对路径。该自测使用内存图像和临时流程，不读取外部模型。
+
 ## 运行环境
 
 - Windows x64

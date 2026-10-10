@@ -100,7 +100,7 @@
 - 中文图片路径通过 `File.ReadAllBytes` 与 `Cv2.ImDecode` 解码；三通道和四通道图像分别转换为 RGB。
 - 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，摘要包含 `structured`、`json`、`consistent` 和 `threshold_check_passed`。
 - `InferOneOutJson` 返回带 `result_list` 的流程判定包装对象时，命令行模式从包装对象中读取结果数组后继续执行双路径一致性检查。
-- `structured` 与 `json` 均包含 `count`、`scores`、`categories` 和 `below_threshold`。
+- `structured` 与 `json` 均包含 `count`、`scores`、`categories`、`below_threshold` 和逐目标的 `extra_info` 数组；未提供扩展的目标对应 `null`，两路比较完整扩展对象。
 - `--output` 写入无 BOM 的 UTF-8 JSON；该路径不得覆盖模型或图片，父目录必须存在。
 - 原生推理运行库仍可能向标准输出写入本地编码日志；机器解析使用 `--output` 文件，不把 stdout 当作单一 JSON 文档。
 - WinExe 从交互式 `cmd` 启动时由调用方使用等待方式运行；PowerShell 自动化使用 `Start-Process -Wait -PassThru` 读取退出码。

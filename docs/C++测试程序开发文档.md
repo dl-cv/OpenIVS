@@ -169,7 +169,7 @@ python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.e
 3. 文本区显示格式化的 JSON（缩进 4）。
 
 **代码路径**：`MainWindow::onInferJson()`
-- 返回字段：`category_id`、`category_name`、`score`、`bbox`、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`、`with_mean`、`foreground_mean`、`background_mean`。
+- 返回字段：`category_id`、`category_name`、`score`、`bbox`、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`、可选的 `extra_info`。
 
 配置独立“前景背景统计”Flow 节点后，结构化结果与“推理JSON”均通过目标 `extra_info` 携带启用项的均值、中值及空区域的 `null`。节点的 `mean/median` 独立配置，不使用推理开关；普通推理不增加统计键。配置与采样语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
 

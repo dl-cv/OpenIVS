@@ -2586,6 +2586,10 @@ int main(int argc, char** argv) {
     }
     std::cout << "PASS: 纯 C 结构化接口编译和调用成功\n";
 
+    if (argc == 2 && std::strcmp(argv[1], "--statistics-extra-info-selftest") == 0) {
+        return RunStatisticsExtraInfoCheck() ? 0 : 1;
+    }
+
     if (argc == 2 && std::strcmp(argv[1], "--c-api-invalid-input") == 0) {
         const int invalidInputCode = dlcv_infer_pure_c_invalid_input_test();
         if (invalidInputCode != 0) {
