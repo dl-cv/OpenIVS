@@ -183,7 +183,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 - 统一测试只使用产品实际 DLL 和现有产品接口。首次普通模型按模型头选择默认 DLL，后续普通模型沿用该 DLL并逐个检查授权；共享 index 按进程内实际加载 DLL 查询。
 - 测试代码只放在测试工程，不要求生产 DLL 增加测试导出，不通过替换推理 DLL或另设测试 DLL 构造测试入口。实际模型测试输入遵循单一加密狗格式规则。
 
-`Test\\DlcvCSharpTest\\RunAllTests.ps1 [日志路径]` 是完整验证入口。脚本启动一次 `DlcvCSharpTest.exe all-tests`，统一收集 C# 和原生库输出；测试结束后在控制台显示各组测试状态、耗时及最终统计，原始输出保存到一个日志文件。未提供日志路径时，日志保存为程序目录下的 `bin\\x64\\Release\\DlcvCSharpTest-all-tests.log`。
+`Test\\DlcvCSharpTest\\RunAllTests.ps1 [日志路径]` 是完整验证入口。脚本启动一次 `DlcvCSharpTest.exe all-tests`，统一收集 C# 和原生库输出；测试结束后在控制台显示各组测试状态、耗时及最终统计，原始输出保存到一个日志文件。未提供日志路径时，总日志保存为 `%TEMP%\OpenIVS-DlcvCSharpTest-<GUID>-all-tests.log`；脚本要求自定义日志路径也位于系统临时目录。具体日志文件及清理方式见 [日志专题文档](日志专题文档.md)。
 
 测试程序在单个进程内依次执行无外部参数自测和固定模型回归用例。完整清单执行结束后返回，任一测试失败时返回 `1`，参数或日志路径无效时返回 `2`。
 
