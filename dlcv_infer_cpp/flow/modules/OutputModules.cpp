@@ -334,8 +334,9 @@ static void InitializeByImageEntry(const ModuleImage& wrap, FlowByImageEntry& ou
 }
 
 static Json MapExtraInfoToGlobal(const Json& detection, const std::vector<double>& T_c2o) {
-    if (!detection.contains("extra_info") || !detection.at("extra_info").is_object()) {
-        return Json();
+    if (!detection.contains("extra_info") || detection.at("extra_info").is_null()) return Json();
+    if (!detection.at("extra_info").is_object()) {
+        throw std::invalid_argument(std::string("extra_info 必须为对象或 null，实际类型为 ") + detection.at("extra_info").type_name());
     }
 
     Json extraInfo = detection.at("extra_info");
@@ -407,9 +408,6 @@ static void AppendOutResultItemTyped(
     if (extraInfo.is_object() && !extraInfo.empty()) {
         item.Extra["extra_info"] = extraInfo;
     }
-    item.Extra["with_mean"] = d.value("with_mean", false);
-    item.Extra["foreground_mean"] = d.value("foreground_mean", 0.0);
-    item.Extra["background_mean"] = d.value("background_mean", 0.0);
 
     outResults.push_back(std::move(item));
 }

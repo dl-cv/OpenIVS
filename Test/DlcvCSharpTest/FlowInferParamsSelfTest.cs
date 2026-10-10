@@ -14,7 +14,7 @@ namespace DlcvCSharpTest
 
             var source = JObject.Parse(
                 "{\"threshold\":0.3,\"top_k\":0,\"epsilon\":1," +
-                "\"calc_mean\":true,\"return_polygon\":false}");
+                "\"return_polygon\":false}");
             var properties = source.ToObject<Dictionary<string, object>>();
             if (!(properties["top_k"] is long) || !(properties["epsilon"] is long))
             {
@@ -55,12 +55,6 @@ namespace DlcvCSharpTest
                 Math.Abs(parameters.Value<double>("threshold") - 0.3) > 1e-9)
             {
                 Console.WriteLine("threshold 类型或数值异常: " + parameters.ToString());
-                return 1;
-            }
-            if (parameters["calc_mean"] == null || parameters["calc_mean"].Type != JTokenType.Boolean ||
-                !parameters.Value<bool>("calc_mean"))
-            {
-                Console.WriteLine("calc_mean 类型或数值异常: " + parameters.ToString());
                 return 1;
             }
             if (parameters["return_polygon"] == null || parameters["return_polygon"].Type != JTokenType.Boolean ||

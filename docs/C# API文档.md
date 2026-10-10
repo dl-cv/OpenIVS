@@ -23,11 +23,12 @@
 
 ---
 
-## 2. 核心结果类型（Utils.cs）
+## 2. 核心结果类型（DataTypes.cs）
 
 ### 2.1 CSharpObjectResult
 
 ```csharp
+// dlcv_infer_csharp.Utils
 public partial class Utils
 {
     public struct CSharpObjectResult
@@ -42,21 +43,14 @@ public partial class Utils
         public bool WithBbox { get; set; }            // 是否含 bbox
         public bool WithAngle { get; set; }           // 是否含旋转角度
         public float Angle { get; set; }              // 旋转角度（弧度），-100 表示无效
-        public bool WithMean { get; set; }            // 是否含前景与背景均值
-        public double ForegroundMean { get; set; }    // mask 前景区域像素均值
-        public double BackgroundMean { get; set; }    // mask 背景区域像素均值
-        public JObject ExtraInfo { get; set; }        // 额外信息（polyline 等）
+
+        public JObject ExtraInfo { get; set; }        // 通用扩展信息（统计、polyline、业务扩展）
 
         public CSharpObjectResult(
             int categoryId, string categoryName, float score, float area,
             List<double> bbox, bool withMask, Mat mask,
             bool withBbox = false, bool withAngle = false, float angle = -100, JObject extraInfo = null);
 
-        public CSharpObjectResult(
-            int categoryId, string categoryName, float score, float area,
-            List<double> bbox, bool withMask, Mat mask,
-            bool withBbox, bool withAngle, float angle, JObject extraInfo,
-            bool withMean, double foregroundMean, double backgroundMean);
     }
 }
 ```
@@ -65,9 +59,27 @@ public partial class Utils
 - `Bbox` 长度约定：水平框 ≥4（`x,y,w,h`），旋转框 ≥4（`cx,cy,w,h`，`angle` 单独字段）。
 - `Angle` 有效值范围：`> -99.0f` 视为有效；`-100.0f` 视为无效。
 - `Mask` 为空时（`Mask == null || Mask.Empty()`），`WithMask` 应为 `false`。
-- `WithMean=false` 时，`ForegroundMean` 与 `BackgroundMean` 均为 `0.0`；`WithMean=true` 时，两个值分别表示 mask 前景区域和背景区域的像素均值。
-- 原有 11 参数构造函数保持不变；需要设置均值字段时使用 14 参数构造函数。
+- 统计与业务扩展均通过 `ExtraInfo` 读取，完整字段语义见 [结果标准](模块、流程与模型推理标准文档.md) 3.3.1。
+- `ExtraInfo` 为 `JObject`，没有扩展时可为 `null`；键缺失、JSON `null`、数值 `0` 保持区别，构造与结构化转 JSON 不增加默认统计键。
+- `ToString()` 按通用扩展对象输出均值、中值与其他扩展，空侧显示 `null`，有效零值仍显示数值，未输出的统计组不显示。
+- 公开结果不提供专用统计属性及接收均值参数的构造重载。调用方使用上面的通用构造函数，把扩展数据放入 `extraInfo`，并从 `ExtraInfo` 取值。
+- `ExtraInfo` 是托管 JSON 对象，不调用 C 的释放函数；需要在结果之外修改扩展副本时使用 `DeepClone()`。
 - `ExtraInfo` 可包含 `polyline`（通过 `Utils.GetExtraInfoPolyline` / `Utils.SetExtraInfoPolyline` 读写）。
+
+```csharp
+JObject extra = result.ExtraInfo;
+JToken meanFlag = extra?["with_mean"];
+if (meanFlag != null) // 组缺失时不显示统计
+{
+    bool sampled = meanFlag.Value<bool>();
+    JToken value = extra["foreground_mean"];
+    double? foregroundMean = value.Type == JTokenType.Null
+        ? (double?)null : value.Value<double>();
+    // foregroundMean.HasValue 区分无采样与有效零值
+}
+```
+
+中值以相同方式读取 `with_median`、`foreground_median`、`background_median`；背景均值读取 `background_mean`。
 
 ### 2.2 CSharpSampleResult
 
@@ -235,8 +247,14 @@ public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 - `InferOneOutJson` 内部调用 `InferInternalCore(..., emitPoly: true)` 以保留 `poly` 字段。
 - `output/return_json` 产生按图 `ok/reason` 时，`Infer` / `InferBatch` 将其写入对应 `CSharpSampleResult.Ok/Reason`，`InferOneOutJson` 将其写入单图包装对象。
 - 流程中的 `model/*` 节点始终使用流程文件自身的 `properties.threshold`；入口 `paramsJson.threshold` 不会改写节点属性。
-- 流程中的 `model/*` 节点默认从自身 `properties.calc_mean` 读取均值计算开关；入口 `paramsJson.calc_mean` 显式传入时仅覆盖本次推理，省略时继续使用节点属性。
 - 入口 `threshold` 仅在流程执行完成后过滤最终对外结果，保留 `score >= threshold` 的对象；未传入有限数值时不做额外过滤，无有限数值 `score` 的非标准条目保留。
+
+
+**前景背景统计结果**
+
+`post_process/foreground_background_statistics` 通过独立 Flow 节点更新目标 `extra_info`，不使用模型推理输入开关。两组的启停、采样及空值规则统一见 [结果标准](模块、流程与模型推理标准文档.md) 3.3.1、6.4.1。
+
+C# 结构化结果从 `ExtraInfo` 读取，JSON 结果从目标 `extra_info` 读取；两条路径保留同一扩展内容、统计组缺失状态与 JSON `null`，目标一级没有统计键。普通模型和无统计节点的流程不补统计键，读取示例见 2.1。三套 CLI 摘要均透传按目标排列的 `extra_info`，不固定创建均值和中值数组。
 
 ### 4.3 内部推理方法
 
@@ -469,7 +487,6 @@ Cv2.CvtColor(image, rgb, ColorConversionCodes.BGR2RGB);
 var paramsJson = new JObject();
 paramsJson["threshold"] = 0.5;
 paramsJson["with_mask"] = true;
-paramsJson["calc_mean"] = true;
 paramsJson["batch_size"] = 1;
 
 CSharpResult result = model.Infer(rgb, paramsJson);
@@ -525,9 +542,10 @@ using (var model = ModelFactory.CreateFromIndex(existingIndex))
 |--------|------|--------|------|
 | `threshold` | float | 普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型的最终对外结果阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
-| `calc_mean` | bool | false | 是否计算 mask 前景区域与背景区域的像素均值 |
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
+
+`calc_mean` 不参与模型推理；统计由独立 Flow 节点按 `mean/median` 配置计算。
 
 ---
 

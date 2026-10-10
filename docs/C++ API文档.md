@@ -37,17 +37,13 @@ struct ObjectResult {
     bool withBbox;                // 是否含 bbox
     bool withAngle;               // 是否含旋转角度
     float angle;                  // 旋转角度（弧度），-100 表示无效
-    bool withMean;                // 是否含前景与背景均值
-    double foregroundMean;        // mask 前景区域的像素均值
-    double backgroundMean;        // mask 背景区域的像素均值
+    json extraInfo;               // 通用扩展信息（统计、折线、业务扩展）
+
 
     ObjectResult(int categoryId, const std::string& categoryName, float score,
                  float area, const std::vector<double>& bbox, bool withMask,
-                 const cv::Mat& mask, bool withBbox, bool withAngle, float angle);
-    ObjectResult(int categoryId, const std::string& categoryName, float score,
-                 float area, const std::vector<double>& bbox, bool withMask,
-                 const cv::Mat& mask, bool withBbox, bool withAngle, float angle,
-                 bool withMean, double foregroundMean, double backgroundMean);
+                 const cv::Mat& mask, bool withBbox = true, bool withAngle = false,
+                 float angle = -100.0f, json extra = nullptr);
 };
 
 struct SampleResult {
@@ -74,6 +70,21 @@ struct FlowNodeTiming {
 - `categoryName` 内部存储为 GBK 编码，便于 Windows UI 直接显示。
 - `bbox` 长度规则：水平框 ≥4（`x,y,w,h`），旋转框 ≥4（`cx,cy,w,h`，`angle` 单独字段）。
 - `angle` 有效值范围：`> -99.0f` 视为有效；`-100.0f` 视为无效。
+
+`ObjectResult` 是公开 C++ 包装结果，不是底层 DLL 的内部镜像。统计、折线及业务扩展统一保存在 `extraInfo`（没有扩展时可为 JSON `null`），不提供专用统计成员或接收统计参数的构造重载。调用方更新构造调用，并从 `extraInfo` 读取统计键；JSON 与结构化转换均保留键缺失、`null`、数值 `0` 和其他扩展，不补默认统计值。完整语义见 [结果标准](模块、流程与模型推理标准文档.md) 3.3.1。
+
+```cpp
+const json& extra = object.extraInfo;
+if (extra.is_object() && extra.contains("with_mean")) {
+    const bool sampled = extra.at("with_mean").get<bool>();
+    const json& value = extra.at("foreground_mean");
+    if (!value.is_null()) {
+        const double foregroundMean = value.get<double>(); // 0 是有效数值
+    }
+}
+```
+
+中值读取 `with_median`、`foreground_median`、`background_median`，背景均值读取 `background_mean`。`extraInfo` 是 C++ 值对象，由其析构函数管理内存，不调用 C 字符串释放函数。跨 DLL 使用时应配套使用当前公开头文件与库。
 
 ### 2.2 流程图相关数据结构
 
@@ -224,8 +235,9 @@ Result InferBatchPreservingOriginalMask(
 json InferOneOutJson(const cv::Mat& image, const json& params_json = nullptr);
 ```
 - 返回 JSON 数组，每个元素为单个检测结果对象。
-- 字段包含：`category_id`、`category_name`、`score`、`bbox`（`[x,y,w,h]`）、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`、`with_mean`、`foreground_mean`、`background_mean`。
+- 字段包含：`category_id`、`category_name`、`score`、`bbox`（`[x,y,w,h]`）、`with_bbox`、`with_angle`、`angle`、`mask`（点数组）、`with_mask`、`area`。
 - 普通模式下将底层返回的 `mask_ptr` mask 转换为点数组形式。
+- 普通模型不计算统计值，JSON 不输出均值与中值字段；统计字段由独立统计节点输出。C++ 包装结果的统计标志与空值说明见 2.1，C ABI 布局另见 C API 文档。
 
 ### 4.6 释放模型
 
@@ -365,6 +377,12 @@ public:
 4. 按 `origin_index` 或位置索引映射回原始图像结果。
 5. 返回 `{"result_list": [...]}` 格式 JSON。
 
+**前景背景统计结果**
+
+`post_process/foreground_background_statistics` 通过独立 Flow 节点更新统计值，不使用模型推理输入开关。目标 `extra_info` 的均值组使用 `with_mean`、`foreground_mean`、`background_mean`；开启项的状态为 JSON 布尔值，前景与背景值为数值或 `null`，关闭项删除对应三键。中值组使用 `with_median`、`foreground_median`、`background_median`，独立选择且默认关闭；完整端口、采样与重复执行语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
+
+C++ 结构化包装结果通过通用 `extraInfo` 对象读取统计，`InferOneOutJson` 从目标 `extra_info` 返回同一扩展内容，两条路径均保留关闭组的键缺失、空侧 JSON `null` 和有效零值，不补默认统计键；读取示例见 2.1。普通模型和无统计节点的流程不增加统计键。
+
 ---
 
 ## 7. 加密狗查询
@@ -438,7 +456,6 @@ cv::cvtColor(image, rgb, cv::COLOR_BGR2RGB);
 nlohmann::json params;
 params["threshold"] = 0.5;
 params["with_mask"] = true;
-params["calc_mean"] = false;
 params["batch_size"] = 1;
 
 dlcv_infer::Result result = model.Infer(rgb, params);
@@ -480,9 +497,10 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 |--------|------|--------|------|
 | `threshold` | float | 普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型中仅筛选最终对外结果，不覆盖节点自身阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
-| `calc_mean` | bool | false | 是否计算实例分割目标的前景与背景均值 |
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
+
+`calc_mean` 不参与模型推理；统计由独立 Flow 节点按 `mean/median` 配置计算。
 
 ---
 
@@ -600,7 +618,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 | 类型 | 当前字段 |
 | --- | --- |
-| `ObjectResult` | `categoryId`、`categoryName`、`score`、`area`、`bbox`、`withMask`、`mask`、`withBbox`、`withAngle`、`angle`、`withMean`、`foregroundMean`、`backgroundMean` |
+| `ObjectResult` | `categoryId`、`categoryName`、`score`、`area`、`bbox`、`withMask`、`mask`、`withBbox`、`withAngle`、`angle`、`extraInfo` |
 | `SampleResult` | `results` |
 | `Result` | `sampleResults` |
 | `FlowNodeTiming` | `nodeId`、`nodeType`、`nodeTitle`、`elapsedMs` |
@@ -629,7 +647,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 
 ### 19.4 推理、结果与计时
 
-普通模型请求固定组装 `model_index + image_list` 后调用底层推理，`code!=0` 时抛异常。结构化包装阶段会自动补推断 `with_bbox`、`with_angle`，读取 `with_mean`、`foreground_mean`、`background_mean`，并对 `mask` 做 `clone()`、必要时缩放或反推框。`InferOneOutJson()` 只返回首张图结果；未产生流程判定时返回原结果数组，产生判定时返回 `{"result_list":[...],"ok":true|false,"reason":null|[...]}`。最近一次计时和流程判定状态保存在当前线程；`GetLastInspectionStatus(bool&, std::vector<std::string>&, size_t)` 按图片索引读取最近一次 `Infer`、`InferBatch` 或 `InferOneOutJson` 的状态，未产生状态时返回 `false`。FlowGraph 模式的计时优先使用流程返回的 `timing`。
+普通模型请求固定组装 `model_index + image_list` 后调用底层推理，`code!=0` 时抛异常。结构化包装阶段会自动补推断 `with_bbox`、`with_angle`，保留通用 `extra_info`，并对 `mask` 做 `clone()`、必要时缩放或反推框。`InferOneOutJson()` 只返回首张图结果；未产生流程判定时返回原结果数组，产生判定时返回 `{"result_list":[...],"ok":true|false,"reason":null|[...]}`。最近一次计时和流程判定状态保存在当前线程；`GetLastInspectionStatus(bool&, std::vector<std::string>&, size_t)` 按图片索引读取最近一次 `Infer`、`InferBatch` 或 `InferOneOutJson` 的状态，未产生状态时返回 `false`。FlowGraph 模式的计时优先使用流程返回的 `timing`。
 
 ---
 

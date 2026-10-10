@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -336,12 +336,10 @@ namespace dlcv_infer_csharp
                             ["bbox"] = obj.Bbox != null ? JArray.FromObject(obj.Bbox) : null,
                             ["with_angle"] = obj.WithAngle,
                             ["angle"] = obj.Angle,
-                            ["with_mask"] = obj.WithMask,
-                            ["with_mean"] = obj.WithMean,
-                            ["foreground_mean"] = obj.ForegroundMean,
-                            ["background_mean"] = obj.BackgroundMean,
-                            ["extra_info"] = obj.ExtraInfo ?? new JObject()
+                            ["with_mask"] = obj.WithMask
                         };
+                        if (obj.ExtraInfo != null && obj.ExtraInfo.HasValues)
+                            item["extra_info"] = obj.ExtraInfo.DeepClone();
                         // 将 mask 以 RLE 的形式存储到 JSON（mask_rle）
                         if (obj.WithMask && obj.Mask != null && !obj.Mask.Empty())
                         {
@@ -588,22 +586,8 @@ namespace dlcv_infer_csharp
                             var topResult = recognizeResult.SampleResults[0].Results[0];
 
                             // 更新原始检测结果的分类名称
-                            var updatedDetection = new CSharpObjectResult(
-                                detection.CategoryId,
-                                topResult.CategoryName, // 使用识别模型的分类名称
-                                detection.Score,
-                                detection.Area,
-                                detection.Bbox,
-                                detection.WithMask,
-                                detection.Mask,
-                                detection.WithBbox,
-                                detection.WithAngle,
-                                detection.Angle,
-                                detection.ExtraInfo,
-                                detection.WithMean,
-                                detection.ForegroundMean,
-                                detection.BackgroundMean
-                            );
+                            var updatedDetection = detection;
+                            updatedDetection.CategoryName = topResult.CategoryName;
 
                             // 替换原始检测结果
                             sampleResult.Results[i] = updatedDetection;

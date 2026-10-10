@@ -89,7 +89,7 @@ namespace DlcvCSharpTest
                 Sample(Result(0, "狗", 0.9951171875, B(-1.0, -1.0, -1.0, -1.0), -1.0, -100.0, false, false, false, null))),
             Case("猫狗分类 Virbox DVT", "猫狗-分类_PLUS_v.dvt", "猫狗-狗.jpg",
                 Sample(Result(0, "狗", 0.9951171875, B(-1.0, -1.0, -1.0, -1.0), -1.0, -100.0, false, false, false, null))),
-            Case("气球大模型 DVT", "气球大模型-实例分割_PLUS_s.dvt", "气球.jpg",
+            Case("气球-大模型 DVT", "气球-大模型_PLUS_s.dvt", "气球.jpg",
                 Sample(Result(0, "气球", 0.9591543078422546, B(77.875, 59.8125, 486.25, 569.625), 219425.0, -100.0, true, true, false, M(485, 568, 219425)))),
             Case("气球实例分割 Sentinel DVT", "气球-实例分割_PLUS_s.dvt", "气球.jpg",
                 Sample(Result(0, "气球", 0.9892578125, B(41.79999923706055, 29.100000381469727, 517.4000244140625, 622.5000610351562), 227891.0, -100.0, true, true, false, M(517, 622, 227891)))),

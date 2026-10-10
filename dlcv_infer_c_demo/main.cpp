@@ -1,4 +1,5 @@
 #include "DlcvInferApi.h"
+#include "ExtraInfoComparison.h"
 
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -38,7 +39,6 @@ enum ExitCode {
 struct InferOptions {
     double threshold = 0.5;
     bool withMask = true;
-    bool calcMean = false;
 };
 
 struct StableObjectResult {
@@ -56,9 +56,7 @@ struct StableObjectResult {
     int maskHeight = 0;
     bool withAngle = false;
     float angle = 0.0F;
-    bool withMean = false;
-    double foregroundMean = 0.0;
-    double backgroundMean = 0.0;
+    nlohmann::json extraInfo;
 };
 
 struct StableResultSummary {
@@ -122,7 +120,7 @@ void printHelp() {
         << "  list-models\n"
         << "  list-sdk-models\n"
         << "  model-info <名称>\n"
-        << "  infer <名称> <图片路径> [--threshold F] [--with-mask true|false] [--calc-mean true|false]\n"
+        << "  infer <名称> <图片路径> [--threshold F] [--with-mask true|false]\n"
         << "  benchmark <名称> <图片路径> [--threads N] [--runs N]\n"
         << "  free-model <名称>\n"
         << "  free-all-models\n\n"
@@ -223,7 +221,6 @@ std::string makeParamsJson(const InferOptions& options) {
     stream << std::setprecision(8)
         << "{\"threshold\":" << options.threshold
         << ",\"with_mask\":" << (options.withMask ? "true" : "false")
-        << ",\"calc_mean\":" << (options.calcMean ? "true" : "false")
         << "}";
     return stream.str();
 }
@@ -263,9 +260,19 @@ bool buildStableSummary(
             target.maskHeight = source.mask.height;
             target.withAngle = source.with_angle;
             target.angle = source.angle;
-            target.withMean = source.with_mean;
-            target.foregroundMean = source.foreground_mean;
-            target.backgroundMean = source.background_mean;
+            if (source.extra_info != nullptr) {
+                try {
+                    target.extraInfo = nlohmann::json::parse(source.extra_info);
+                    if (!target.extraInfo.is_null() && !target.extraInfo.is_object()) {
+                        error = std::string("extra_info 必须为对象或 null，实际类型为 ") + target.extraInfo.type_name();
+                        return false;
+                    }
+                    if (target.extraInfo.is_object() && target.extraInfo.empty()) target.extraInfo = nullptr;
+                } catch (const std::exception& ex) {
+                    error = std::string("解析 extra_info 失败：") + ex.what();
+                    return false;
+                }
+            }
             targetSample.push_back(std::move(target));
         }
         summary.samples.push_back(std::move(targetSample));
@@ -311,8 +318,7 @@ bool compareStableSummary(
             }
             if (expected.withBbox != actual.withBbox ||
                 expected.withMask != actual.withMask ||
-                expected.withAngle != actual.withAngle ||
-                expected.withMean != actual.withMean) {
+                expected.withAngle != actual.withAngle) {
                 error = location + "的结果标志变化";
                 return false;
             }
@@ -335,10 +341,8 @@ bool compareStableSummary(
                 error = location + "的角度变化";
                 return false;
             }
-            if (expected.withMean &&
-                (!nearlyEqual(expected.foregroundMean, actual.foregroundMean, 0.000001) ||
-                 !nearlyEqual(expected.backgroundMean, actual.backgroundMean, 0.000001))) {
-                error = location + "的均值变化";
+            if (!dlcv_demo::ExtraInfoEquals(expected.extraInfo, actual.extraInfo, 1e-6)) {
+                error = location + "的扩展信息变化";
                 return false;
             }
         }
@@ -528,11 +532,6 @@ private:
                     std::cerr << "错误：--with-mask 必须是 true 或 false。\n";
                     return ExitCommandError;
                 }
-            } else if (args[i] == L"--calc-mean") {
-                if (!parseBool(args[i + 1], options.calcMean)) {
-                    std::cerr << "错误：--calc-mean 必须是 true 或 false。\n";
-                    return ExitCommandError;
-                }
             } else {
                 std::cerr << "错误：infer 不支持选项 " << wideToUtf8(args[i]) << "。\n";
                 return ExitCommandError;
@@ -594,9 +593,8 @@ private:
                 if (object.with_mask) {
                     std::cout << "，mask=" << object.mask.width << "x" << object.mask.height;
                 }
-                if (object.with_mean) {
-                    std::cout << "，前景均值=" << object.foreground_mean
-                        << "，背景均值=" << object.background_mean;
+                if (object.extra_info != nullptr) {
+                    std::cout << "，extra_info=" << object.extra_info;
                 }
                 std::cout << "。\n";
             }

@@ -1,11 +1,13 @@
 #include "CliRunner.h"
 
+#include <QApplication>
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QSaveFile>
+#include <QTimer>
 
 #include <cmath>
 #include <cstdint>
@@ -22,6 +24,7 @@
 #include "DlcvInferApi.h"
 #include "MainWindow.h"
 #include "json/json.hpp"
+#include "ExtraInfoComparison.h"
 
 namespace {
 
@@ -32,16 +35,16 @@ struct InferOptions {
     QString imagePath;
     QString outputPath;
     QString screenshotPath;
+    QString resultView = QStringLiteral("summary");
+    bool hasResultView = false;
     double threshold = 0.0;
     int device = 0;
     bool withMask = true;
-    bool calcMean = false;
     bool hasModel = false;
     bool hasImage = false;
     bool hasThreshold = false;
     bool hasDevice = false;
     bool hasWithMask = false;
-    bool hasCalcMean = false;
     bool hasOutput = false;
     bool hasScreenshot = false;
 };
@@ -51,14 +54,9 @@ struct PathSummary {
     json scores = json::array();
     json categories = json::array();
     json belowThreshold = json::array();
-    json withMeans = json::array();
-    json foregroundMeans = json::array();
-    json backgroundMeans = json::array();
+    json extraInfos = json::array();
     std::vector<double> comparableScores;
     std::vector<std::string> comparableCategories;
-    std::vector<bool> comparableWithMeans;
-    std::vector<double> comparableForegroundMeans;
-    std::vector<double> comparableBackgroundMeans;
 };
 
 class ApiCleanupGuard {
@@ -224,18 +222,6 @@ bool ParseInferOptions(const QStringList& args, InferOptions& options, QString& 
             }
             options.withMask = parsed;
             options.hasWithMask = true;
-        } else if (option == QStringLiteral("--calc-mean")) {
-            if (options.hasCalcMean) {
-                error = QStringLiteral("duplicate option: --calc-mean");
-                return false;
-            }
-            bool parsed = false;
-            if (!ParseBool(value, parsed)) {
-                error = QStringLiteral("--calc-mean must be true or false");
-                return false;
-            }
-            options.calcMean = parsed;
-            options.hasCalcMean = true;
         } else if (option == QStringLiteral("--screenshot")) {
             if (options.hasScreenshot) {
                 error = QStringLiteral("duplicate option: --screenshot");
@@ -243,6 +229,13 @@ bool ParseInferOptions(const QStringList& args, InferOptions& options, QString& 
             }
             options.screenshotPath = value;
             options.hasScreenshot = true;
+        } else if (option == QStringLiteral("--result-view")) {
+            if (options.hasResultView || (value != QStringLiteral("summary") && value != QStringLiteral("json"))) {
+                error = QStringLiteral("--result-view requires summary or json without duplication");
+                return false;
+            }
+            options.resultView = value;
+            options.hasResultView = true;
         } else if (option == QStringLiteral("--output")) {
             if (options.hasOutput) {
                 error = QStringLiteral("duplicate option: --output");
@@ -380,26 +373,17 @@ void AddSummaryItem(
     PathSummary& summary,
     double score,
     const std::string& category,
-    bool withMean,
-    double foregroundMean,
-    double backgroundMean,
+    const json& extraInfo,
     double threshold) {
     const int index = summary.count;
     ++summary.count;
     summary.categories.push_back(category);
     summary.comparableCategories.push_back(category);
     summary.comparableScores.push_back(score);
-    summary.withMeans.push_back(withMean);
-    summary.comparableWithMeans.push_back(withMean);
-    summary.comparableForegroundMeans.push_back(foregroundMean);
-    summary.comparableBackgroundMeans.push_back(backgroundMean);
-    if (std::isfinite(foregroundMean) && std::isfinite(backgroundMean)) {
-        summary.foregroundMeans.push_back(foregroundMean);
-        summary.backgroundMeans.push_back(backgroundMean);
-    } else {
-        summary.foregroundMeans.push_back(nullptr);
-        summary.backgroundMeans.push_back(nullptr);
+    if (!extraInfo.is_null() && !extraInfo.is_object()) {
+        throw std::invalid_argument(std::string("extra_info 必须为对象或 null，实际类型为 ") + extraInfo.type_name());
     }
+    summary.extraInfos.push_back(extraInfo.empty() ? json(nullptr) : extraInfo);
 
     if (!std::isfinite(score)) {
         summary.scores.push_back(nullptr);
@@ -437,24 +421,11 @@ PathSummary SummarizeStructured(const DlcvCResult& result, double threshold) {
                 summary,
                 static_cast<double>(object.score),
                 CategoryToUtf8(object.category_name),
-                object.with_mean,
-                static_cast<double>(object.foreground_mean),
-                static_cast<double>(object.background_mean),
+                object.extra_info == nullptr ? json(nullptr) : json::parse(object.extra_info),
                 threshold);
         }
     }
     return summary;
-}
-
-bool TryReadJsonBool(const json& token, const char* key, bool& value) {
-    try {
-        if (token.is_object() && token.contains(key) && token.at(key).is_boolean()) {
-            value = token.at(key).get<bool>();
-            return true;
-        }
-    } catch (...) {
-    }
-    return false;
 }
 
 bool TryReadJsonNumber(const json& token, const char* key, double& value) {
@@ -463,6 +434,10 @@ bool TryReadJsonNumber(const json& token, const char* key, double& value) {
             return false;
         }
         const json& jsonValue = token.at(key);
+        if (jsonValue.is_null()) {
+            value = std::numeric_limits<double>::quiet_NaN();
+            return true;
+        }
         if (jsonValue.is_number()) {
             value = jsonValue.get<double>();
             return std::isfinite(value);
@@ -484,18 +459,6 @@ PathSummary SummarizeJson(const json& result, double threshold) {
 
     PathSummary summary;
     for (const auto& token : *resultList) {
-        if (!token.is_object()) {
-            AddSummaryItem(
-                summary,
-                std::numeric_limits<double>::quiet_NaN(),
-                std::string(),
-                false,
-                std::numeric_limits<double>::quiet_NaN(),
-                std::numeric_limits<double>::quiet_NaN(),
-                threshold);
-            continue;
-        }
-
         std::string category;
         try {
             if (token.contains("category_name") && token.at("category_name").is_string()) {
@@ -506,17 +469,7 @@ PathSummary SummarizeJson(const json& result, double threshold) {
 
         double score = std::numeric_limits<double>::quiet_NaN();
         (void)TryReadJsonNumber(token, "score", score);
-        bool withMean = false;
-        double foregroundMean = 0.0;
-        double backgroundMean = 0.0;
-        (void)TryReadJsonBool(token, "with_mean", withMean);
-        if (withMean) {
-            foregroundMean = std::numeric_limits<double>::quiet_NaN();
-            backgroundMean = std::numeric_limits<double>::quiet_NaN();
-            (void)TryReadJsonNumber(token, "foreground_mean", foregroundMean);
-            (void)TryReadJsonNumber(token, "background_mean", backgroundMean);
-        }
-        AddSummaryItem(summary, score, category, withMean, foregroundMean, backgroundMean, threshold);
+        AddSummaryItem(summary, score, category, token.value("extra_info", json(nullptr)), threshold);
     }
     return summary;
 }
@@ -527,9 +480,7 @@ json PathSummaryToJson(const PathSummary& summary) {
         {"scores", summary.scores},
         {"categories", summary.categories},
         {"below_threshold", summary.belowThreshold},
-        {"with_mean", summary.withMeans},
-        {"foreground_mean", summary.foregroundMeans},
-        {"background_mean", summary.backgroundMeans}
+        {"extra_info", summary.extraInfos}
     };
 }
 
@@ -537,32 +488,12 @@ bool AreConsistent(const PathSummary& left, const PathSummary& right) {
     if (left.count != right.count ||
         left.comparableScores.size() != right.comparableScores.size() ||
         left.comparableCategories != right.comparableCategories ||
-        left.comparableWithMeans != right.comparableWithMeans) {
+        !dlcv_demo::ExtraInfoEquals(left.extraInfos, right.extraInfos, 1e-6)) {
         return false;
     }
     for (size_t i = 0; i < left.comparableScores.size(); ++i) {
         if (!std::isfinite(left.comparableScores[i]) || !std::isfinite(right.comparableScores[i]) ||
             std::abs(left.comparableScores[i] - right.comparableScores[i]) > 1e-6) {
-            return false;
-        }
-        if (left.comparableWithMeans[i] &&
-            (!std::isfinite(left.comparableForegroundMeans[i]) ||
-             !std::isfinite(right.comparableForegroundMeans[i]) ||
-             !std::isfinite(left.comparableBackgroundMeans[i]) ||
-             !std::isfinite(right.comparableBackgroundMeans[i]) ||
-             std::abs(left.comparableForegroundMeans[i] - right.comparableForegroundMeans[i]) > 1e-6 ||
-             std::abs(left.comparableBackgroundMeans[i] - right.comparableBackgroundMeans[i]) > 1e-6)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool HasCompleteMeans(const PathSummary& summary) {
-    for (size_t i = 0; i < summary.comparableWithMeans.size(); ++i) {
-        if (!summary.comparableWithMeans[i] ||
-            !std::isfinite(summary.comparableForegroundMeans[i]) ||
-            !std::isfinite(summary.comparableBackgroundMeans[i])) {
             return false;
         }
     }
@@ -622,8 +553,7 @@ int RunInferCommand(const InferOptions& options) {
         imageList.n = 1;
         const json params = {
             {"threshold", options.threshold},
-            {"with_mask", options.withMask},
-            {"calc_mean", options.calcMean}
+            {"with_mask", options.withMask}
         };
         const std::string paramsText = params.dump();
 
@@ -655,8 +585,6 @@ int RunInferCommand(const InferOptions& options) {
     const bool consistent = AreConsistent(structuredSummary, jsonSummary);
     const bool thresholdCheckPassed =
         structuredSummary.belowThreshold.empty() && jsonSummary.belowThreshold.empty();
-    const bool meanCheckPassed =
-        !options.calcMean || (HasCompleteMeans(structuredSummary) && HasCompleteMeans(jsonSummary));
     const json summary = {
         {"language", "c"},
         {"model", ToUtf8(options.modelPath)},
@@ -664,7 +592,6 @@ int RunInferCommand(const InferOptions& options) {
         {"threshold", options.threshold},
         {"device", options.device},
         {"with_mask", options.withMask},
-        {"calc_mean", options.calcMean},
         {"structured", PathSummaryToJson(structuredSummary)},
         {"json", PathSummaryToJson(jsonSummary)},
         {"inspection", json::object({
@@ -676,8 +603,7 @@ int RunInferCommand(const InferOptions& options) {
         {"consistent", consistent},
         {"inspection_consistent", nullptr},
         {"release_check_passed", releaseCheckPassed},
-        {"threshold_check_passed", thresholdCheckPassed},
-        {"mean_check_passed", meanCheckPassed}
+        {"threshold_check_passed", thresholdCheckPassed}
     };
 
     const std::string output = summary.dump(2) + "\n";
@@ -686,7 +612,7 @@ int RunInferCommand(const InferOptions& options) {
     if (options.hasOutput) {
         WriteJsonFile(options.outputPath, output);
     }
-    return consistent && releaseCheckPassed && thresholdCheckPassed && meanCheckPassed ? 0 : 3;
+    return consistent && releaseCheckPassed && thresholdCheckPassed ? 0 : 3;
 }
 
 json MakeRuntimeError(const InferOptions& options, const QString& error) {
@@ -695,7 +621,6 @@ json MakeRuntimeError(const InferOptions& options, const QString& error) {
         {"model", ToUtf8(options.modelPath)},
         {"image", ToUtf8(options.imagePath)},
         {"threshold", options.threshold},
-        {"calc_mean", options.calcMean},
         {"error", ToUtf8(error)}
     };
 }
@@ -719,10 +644,11 @@ void PrintCliHelp(const QString& programPath) {
         << "  " << program << "\n"
         << "  " << program
         << " infer --model <path> --image <path> --threshold <0..1>"
-           " [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]\n"
+           " [--device <int>] [--with-mask <true|false>] [--output <jsonPath>]\n"
         << "  " << program
         << " ui-test --model <path> --image <path> --threshold <0..1>"
-           " [--device <int>] --screenshot <tempPngPath> (QT_QPA_PLATFORM=offscreen)\n"
+           " [--device <int>] [--result-view <summary|json>]\n"
+           "   offscreen: --screenshot <tempPngPath>; windows: --output <tempJsonPath>\n"
         << "  " << program << " --check-c-api-exports\n"
         << "  " << program << " --help\n\n"
         << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
@@ -762,36 +688,43 @@ int RunCliCommand(const QStringList& args) {
     }
 
     if (uiTest) {
-        const QFileInfo screenshot(options.screenshotPath);
+        const bool offscreen = QGuiApplication::platformName() == QStringLiteral("offscreen");
+        const QFileInfo artifact(offscreen ? options.screenshotPath : options.outputPath);
         const QFileInfo tempRoot(QDir::tempPath());
         const QString directory = QDir::fromNativeSeparators(
-            QFileInfo(screenshot.absolutePath()).canonicalFilePath());
+            QFileInfo(artifact.absolutePath()).canonicalFilePath());
         const QString temp = QDir::fromNativeSeparators(tempRoot.canonicalFilePath());
-        if (QGuiApplication::platformName() != QStringLiteral("offscreen") ||
-            !options.hasScreenshot || options.screenshotPath.isEmpty() ||
-            screenshot.suffix().compare(QStringLiteral("png"), Qt::CaseInsensitive) != 0 ||
+        if ((!offscreen && QGuiApplication::platformName() != QStringLiteral("windows")) ||
+            (offscreen ? (!options.hasScreenshot || options.hasOutput) : (!options.hasOutput || options.hasScreenshot)) ||
+            artifact.filePath().isEmpty() ||
+            artifact.suffix().compare(offscreen ? QStringLiteral("png") : QStringLiteral("json"), Qt::CaseInsensitive) != 0 ||
             directory.isEmpty() || temp.isEmpty() ||
             !(directory.compare(temp, Qt::CaseInsensitive) == 0 ||
               directory.startsWith(temp + QLatin1Char('/'), Qt::CaseInsensitive)) ||
-            screenshot.exists() || options.hasOutput || options.hasWithMask || options.hasCalcMean) {
-            std::cerr << "error: ui-test requires a new PNG in the system temp directory "
-                         "and supports only model, image, threshold and device\n";
+            artifact.exists() || options.hasWithMask) {
+            std::cerr << "error: ui-test requires a new temp PNG (--screenshot, offscreen) "
+                         "or JSON (--output, windows)\n";
             return 2;
         }
         MainWindow window(nullptr, true);
         QString runError;
         const bool passed = window.runOffscreenInference(options.modelPath, options.imagePath,
-            options.threshold, options.device, screenshot.absoluteFilePath(), runError);
-        window.close();
+            options.threshold, options.device, artifact.absoluteFilePath(), options.resultView, runError);
         if (!passed) {
+            window.close();
             std::cerr << "error: " << ToUtf8(runError) << "\n";
             return 1;
         }
-        std::cout << "offscreen inference rendered to " << ToUtf8(screenshot.absoluteFilePath()) << "\n";
+        std::cout << "ui-test inference completed: " << ToUtf8(artifact.absoluteFilePath()) << "\n";
+        if (!offscreen) {
+            QTimer::singleShot(15000, &window, &QWidget::close);
+            return QApplication::exec();
+        }
+        window.close();
         return 0;
     }
-    if (options.hasScreenshot) {
-        std::cerr << "error: --screenshot is only supported by ui-test\n";
+    if (options.hasScreenshot || options.hasResultView) {
+        std::cerr << "error: --screenshot and --result-view are only supported by ui-test\n";
         return 2;
     }
     try {

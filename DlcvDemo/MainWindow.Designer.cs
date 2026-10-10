@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Drawing;
 using System.Windows.Forms;
@@ -56,7 +56,6 @@ namespace DlcvDemo
             this.numericUpDown_threshold = new System.Windows.Forms.NumericUpDown();
             this.label_num_thread = new System.Windows.Forms.Label();
             this.numericUpDown_num_thread = new System.Windows.Forms.NumericUpDown();
-            this.checkBox_calc_mean = new System.Windows.Forms.CheckBox();
             this.button_language = new System.Windows.Forms.Button();
             this.rightOpsTable = new System.Windows.Forms.TableLayoutPanel();
             this.checkBox_rpc_mode = new System.Windows.Forms.CheckBox();
@@ -318,19 +317,6 @@ namespace DlcvDemo
             this.numericUpDown_num_thread.TextAlign = System.Windows.Forms.HorizontalAlignment.Center;
             this.numericUpDown_num_thread.Value = new decimal(new int[] { 1, 0, 0, 0 });
             //
-            // checkBox_calc_mean
-            //
-            this.checkBox_calc_mean.AutoSize = true;
-            this.checkBox_calc_mean.BackColor = Color.White;
-            this.checkBox_calc_mean.ThreeState = true;
-            this.checkBox_calc_mean.CheckState = System.Windows.Forms.CheckState.Indeterminate;
-            this.checkBox_calc_mean.ForeColor = Color.FromArgb(55, 71, 79);
-            this.checkBox_calc_mean.Margin = new System.Windows.Forms.Padding(12, 11, 0, 11);
-            this.checkBox_calc_mean.Name = "checkBox_calc_mean";
-            this.checkBox_calc_mean.TabIndex = 5;
-            this.checkBox_calc_mean.Text = "计算均值：默认";
-            this.checkBox_calc_mean.UseVisualStyleBackColor = false;
-            //
             // button_language
             //
             this.button_language.Anchor = System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
@@ -588,7 +574,8 @@ namespace DlcvDemo
             // imagePanel1
             //
             this.imagePanel1.AccessibleName = "图像显示区";
-            this.imagePanel1.BackColor = Color.FromArgb(32, 36, 40);
+            this.imagePanel1.BackColor = Color.White;
+            this.imagePanel1.VisualizationLabelBackgroundColor = Color.White;
             this.imagePanel1.Dock = System.Windows.Forms.DockStyle.Fill;
             this.imagePanel1.MaxScale = 100F;
             this.imagePanel1.MinScale = 0.5F;
@@ -617,8 +604,6 @@ namespace DlcvDemo
             this.paramsTable.Controls.Add(this.numericUpDown_threshold, 3, 1);
             this.paramsTable.Controls.Add(this.label_num_thread, 0, 2);
             this.paramsTable.Controls.Add(this.numericUpDown_num_thread, 1, 2);
-            this.paramsTable.Controls.Add(this.checkBox_calc_mean, 2, 2);
-            this.paramsTable.SetColumnSpan(this.checkBox_calc_mean, 2);
             //
             // 右侧操作区
             //
@@ -697,7 +682,6 @@ namespace DlcvDemo
             this.button_github.Click += new System.EventHandler(this.button_github_Click);
             this.button_get_model_info.Click += new System.EventHandler(this.button_getmodelinfo_Click);
             this.numericUpDown_threshold.ValueChanged += new System.EventHandler(this.numericUpDown_threshold_ValueChanged);
-            this.checkBox_calc_mean.CheckStateChanged += new System.EventHandler(this.checkBox_calc_mean_StateChanged);
             this.button_language.Click += new System.EventHandler(this.button_language_Click);
             this.button_result_view.Click += new System.EventHandler(this.button_result_view_Click);
             this.resultLayout.ResumeLayout(false);
@@ -847,7 +831,6 @@ namespace DlcvDemo
         private System.Windows.Forms.NumericUpDown numericUpDown_threshold;
         private System.Windows.Forms.Label label_num_thread;
         private System.Windows.Forms.NumericUpDown numericUpDown_num_thread;
-        private System.Windows.Forms.CheckBox checkBox_calc_mean;
         private System.Windows.Forms.Button button_language;
         private System.Windows.Forms.TableLayoutPanel rightOpsTable;
         private System.Windows.Forms.CheckBox checkBox_rpc_mode;

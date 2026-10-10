@@ -28,6 +28,21 @@ class CliSourceTest(unittest.TestCase):
         self.assertLess(main.index("return 0;"), main.index("KeepMaxClock"))
 
 
+    def test_benchmark_compares_generic_extensions_in_cpp_and_c(self):
+        cpp = SOURCE.read_text(encoding="utf-8-sig")
+        c = (ROOT / "dlcv_infer_c_demo/main.cpp").read_text(encoding="utf-8-sig")
+        self.assertIn("ExtraInfoEquals(candidateObject.extraInfo, baselineObject.extraInfo", cpp)
+        self.assertIn("target.extraInfo = nlohmann::json::parse(source.extra_info)", c)
+        self.assertIn("ExtraInfoEquals(expected.extraInfo, actual.extraInfo", c)
+        self.assertIn('std::cout << "，extra_info=" << object.extra_info;', c)
+        for text in (cpp, c):
+            for field in ("withMean", "foregroundMean", "backgroundMean", "withMedian", "foregroundMedian", "backgroundMedian",
+                          "with_mean", "foreground_mean", "background_mean"):
+                self.assertNotIn("object." + field, text)
+
+
+
+
 @unittest.skipUnless(os.environ.get("DLCV_CPP_DLL_DEMO_EXE"), "未指定实际 EXE")
 class CliExecutableTest(unittest.TestCase):
     def run_cli(self, args, expected):

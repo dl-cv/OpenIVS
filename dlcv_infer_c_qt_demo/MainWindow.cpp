@@ -4,7 +4,6 @@
 #include <cmath>
 #include <string>
 
-#include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -24,6 +23,7 @@
 #include <QPointer>
 #include <QPushButton>
 #include <QScreen>
+#include <QStyle>
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
@@ -170,16 +170,26 @@ MainWindow::MainWindow(QWidget* parent, bool offscreen) : QMainWindow(parent), o
         reportError("加载推理库失败", QString::fromStdWString(api_.lastError()));
         return;
     }
-    if (!offscreen_) {
+    if (!offscreen_ || QGuiApplication::platformName() == QStringLiteral("windows")) {
         initializeDevicesAsync();
     }
 }
 
 bool MainWindow::runOffscreenInference(const QString& modelPath, const QString& imagePath,
-    double threshold, int device, const QString& screenshotPath, QString& error) {
+    double threshold, int device, const QString& outputPath, const QString& resultView, QString& error) {
     if (!offscreen_ || !api_.isLoaded()) {
         error = QStringLiteral("推理库未加载");
         return false;
+    }
+    if (deviceInitializationThread_.joinable()) {
+        deviceInitializationThread_.join();
+        QApplication::processEvents();
+        const QString deviceName = deviceNameToId_.key(device);
+        if (deviceName.isEmpty()) {
+            error = QStringLiteral("指定的推理设备不存在");
+            return false;
+        }
+        comboDevice_->setCurrentText(deviceName);
     }
     modelIndex_ = api_.loadModel(modelPath.toLocal8Bit().constData(), device);
     if (modelIndex_ < 0) {
@@ -200,16 +210,50 @@ bool MainWindow::runOffscreenInference(const QString& modelPath, const QString& 
         error = QStringLiteral("真实推理未检测到目标，未生成截图");
         return false;
     }
+    if (resultView == QStringLiteral("json")) {
+        onInferJson();
+        try {
+            const json result = json::parse(outputText_->toPlainText().toUtf8().constData());
+            const json& results = result.is_array() ? result : result.at("result_list");
+            if (!results.is_array() || results.empty()) {
+                error = QStringLiteral("JSON 推理未生成结果列表");
+                return false;
+            }
+        } catch (...) {
+            error = outputText_->toPlainText();
+            return false;
+        }
+    }
+    show();
     QApplication::processEvents();
-    const QPixmap snapshot = grab();
-    if (snapshot.isNull()) {
-        error = QStringLiteral("离屏窗口绘制失败");
+    QSaveFile file(outputPath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        error = QStringLiteral("验证结果文件无法写入");
         return false;
     }
-    QSaveFile file(screenshotPath);
-    if (!file.open(QIODevice::WriteOnly) || !snapshot.save(&file, "PNG") || !file.commit()) {
-        error = QStringLiteral("PNG 写入失败");
-        file.cancelWriting();
+    if (QGuiApplication::platformName() == QStringLiteral("offscreen")) {
+        const QPixmap snapshot = grab();
+        if (snapshot.isNull() || !snapshot.save(&file, "PNG")) {
+            error = QStringLiteral("离屏窗口绘制失败");
+            file.cancelWriting();
+            return false;
+        }
+    } else {
+        const json report = {{"passed", true}, {"result_count", offscreenResultCount_},
+            {"result_view", resultView.toStdString()},
+            {"qt_style", QApplication::style()->objectName().toStdString()},
+            {"qt_style_class", QApplication::style()->metaObject()->className()},
+            {"palette_base", palette().color(QPalette::Base).name().toStdString()},
+            {"result_text", outputText_->toPlainText().toUtf8().toStdString()}};
+        const std::string text = report.dump(2);
+        if (file.write(text.data(), static_cast<qint64>(text.size())) != static_cast<qint64>(text.size())) {
+            error = QStringLiteral("验证结果文件写入失败");
+            file.cancelWriting();
+            return false;
+        }
+    }
+    if (!file.commit()) {
+        error = QStringLiteral("验证结果文件保存失败");
         return false;
     }
     return true;
@@ -275,9 +319,6 @@ void MainWindow::setupUi() {
     spinThreshold_->setMaximum(1.0);
     spinThreshold_->setValue(0.5);
 
-    checkCalcMean_ = new QCheckBox("计算均值", this);
-    checkCalcMean_->setChecked(false);
-
     constexpr int kControlHeight = 36;
     constexpr int kButtonMinWidth = 120;
     const std::vector<QPushButton*> buttons = {
@@ -309,7 +350,6 @@ void MainWindow::setupUi() {
     spinBatchSize_->setFixedHeight(kControlHeight);
     spinThreshold_->setFixedHeight(kControlHeight);
     spinThreadCount_->setFixedHeight(kControlHeight);
-    checkCalcMean_->setFixedHeight(kControlHeight);
 
     auto* topControlsLayout = new QVBoxLayout();
     topControlsLayout->setContentsMargins(0, 0, 0, 0);
@@ -332,7 +372,6 @@ void MainWindow::setupUi() {
     row2Layout->addWidget(spinBatchSize_, 0, Qt::AlignVCenter);
     row2Layout->addWidget(labelThreshold_, 0, Qt::AlignVCenter);
     row2Layout->addWidget(spinThreshold_, 0, Qt::AlignVCenter);
-    row2Layout->addWidget(checkCalcMean_, 0, Qt::AlignVCenter);
     row2Layout->addStretch(1);
     row2Layout->addWidget(buttonFreeModel_, 0, Qt::AlignVCenter);
     row2Layout->addWidget(buttonFreeAllModels_, 0, Qt::AlignVCenter);
@@ -356,6 +395,7 @@ void MainWindow::setupUi() {
     outputText_->setReadOnly(true);
 
     imageViewer_ = new ImageViewerWidget(this);
+    imageViewer_->setUsePaletteBackground(true);
     imageViewer_->setShowStatusText(false);
     imageViewer_->setShowVisualization(true);
 
@@ -429,7 +469,9 @@ void MainWindow::initializeDevicesAsync() {
 
         std::vector<GpuDeviceItem> devices;
         QString warning;
-        api_.keepMaxClock();
+        if (!offscreen_) {
+            api_.keepMaxClock();
+        }
 
         const char* raw = api_.getGpuInfo();
         std::string rawCopy = raw == nullptr ? std::string{} : std::string(raw);
@@ -575,10 +617,8 @@ QString MainWindow::formatResultText(const std::vector<DisplayObjectResult>& res
                         .arg(object.angle, 0, 'f', 3)
                         .arg(degrees, 0, 'f', 1);
         }
-        if (object.withMean) {
-            text += QString("  前景均值=%1  背景均值=%2")
-                        .arg(object.foregroundMean, 0, 'f', 4)
-                        .arg(object.backgroundMean, 0, 'f', 4);
+        if (object.extraInfo.is_object() && !object.extraInfo.empty()) {
+            text += QString("  extra_info=%1").arg(QString::fromUtf8(object.extraInfo.dump(2).c_str()));
         }
         text += "\n";
     }
@@ -619,9 +659,9 @@ std::vector<DisplayObjectResult> MainWindow::copyFirstSample(const DlcvCResult& 
         target.withAngle = source.with_angle;
         target.angle = source.angle;
         target.area = source.area;
-        target.withMean = source.with_mean;
-        target.foregroundMean = source.foreground_mean;
-        target.backgroundMean = source.background_mean;
+        if (source.extra_info != nullptr) {
+            target.extraInfo = nlohmann::json::parse(source.extra_info);
+        }
         output.push_back(std::move(target));
     }
     return output;
@@ -740,7 +780,6 @@ bool MainWindow::inferCurrentImage() {
         {"threshold", spinThreshold_->value()},
         {"with_mask", true},
         {"batch_size", batchSize},
-        {"calc_mean", checkCalcMean_->isChecked()},
     };
     const std::string paramsText = params.dump();
 
@@ -798,7 +837,6 @@ void MainWindow::onInferJson() {
         {"threshold", spinThreshold_->value()},
         {"with_mask", true},
         {"batch_size", 1},
-        {"calc_mean", checkCalcMean_->isChecked()},
     };
     const std::string paramsText = params.dump();
     DlcvCImage image = makeCImage(inferImage);
@@ -839,7 +877,6 @@ void MainWindow::startPressureTest() {
     pressureThreadCount_ = spinThreadCount_->value();
     pressureBatchSize_ = spinBatchSize_->value();
     pressureThreshold_ = spinThreshold_->value();
-    pressureCalcMean_ = checkCalcMean_->isChecked();
     pressureModelIndex_ = modelIndex_;
     pressureBaseImage_ = inferImage.clone();
 
@@ -867,7 +904,6 @@ void MainWindow::startPressureTest() {
         {"threshold", pressureThreshold_},
         {"with_mask", true},
         {"batch_size", pressureBatchSize_},
-        {"calc_mean", pressureCalcMean_},
     };
     const std::string paramsText = params.dump();
 
@@ -992,7 +1028,6 @@ void MainWindow::setUiEnabledForPressureTest(bool enabled) {
     spinBatchSize_->setEnabled(enabled);
     spinThreshold_->setEnabled(enabled);
     spinThreadCount_->setEnabled(enabled);
-    checkCalcMean_->setEnabled(enabled);
 }
 
 void MainWindow::onGetModelInfo() {

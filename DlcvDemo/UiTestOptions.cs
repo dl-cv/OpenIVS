@@ -14,7 +14,6 @@ namespace DlcvDemo
         internal decimal Threshold { get; private set; } = 0.5m;
         internal bool HasThreshold { get; private set; }
         internal int DeviceId { get; private set; } = 0;
-        internal bool? CalcMean { get; private set; }
         internal bool InteractiveDialogs { get; private set; }
         internal string Language { get; private set; }
         internal string ResultView { get; private set; } = "summary";
@@ -22,6 +21,8 @@ namespace DlcvDemo
         internal int BatchSize { get; private set; } = 1;
         internal int ThreadCount { get; private set; } = 1;
         internal int PressureDurationMs { get; private set; } = 2000;
+        internal int CaptureDelayMs { get; private set; }
+        internal float LabelFontScale { get; private set; } = 1.0f;
 
         internal static bool TryParse(string[] args, out UiTestOptions options, out string error)
         {
@@ -62,6 +63,24 @@ namespace DlcvDemo
                     case "--screenshot":
                         options.ScreenshotPath = value;
                         break;
+                    case "--label-font-scale":
+                        if (!float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float labelFontScale)
+                            || float.IsNaN(labelFontScale) || labelFontScale < 0.3f || labelFontScale > 5.0f)
+                        {
+                            error = "--label-font-scale 必须是 0.3 到 5.0 之间的数字。";
+                            return false;
+                        }
+                        options.LabelFontScale = labelFontScale;
+                        break;
+                    case "--capture-delay-ms":
+                        if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int captureDelayMs)
+                            || captureDelayMs < 0 || captureDelayMs > 60000)
+                        {
+                            error = "--capture-delay-ms 必须是 0 到 60000 之间的整数。";
+                            return false;
+                        }
+                        options.CaptureDelayMs = captureDelayMs;
+                        break;
                     case "--threshold":
                         if (!decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out decimal threshold)
                             || threshold < 0m || threshold > 1m)
@@ -80,14 +99,6 @@ namespace DlcvDemo
                             return false;
                         }
                         options.DeviceId = deviceId;
-                        break;
-                    case "--calc-mean":
-                        if (!bool.TryParse(value, out bool calcMean))
-                        {
-                            error = "--calc-mean 必须是 true 或 false。";
-                            return false;
-                        }
-                        options.CalcMean = calcMean;
                         break;
                     case "--interactive-dialogs":
                         if (!bool.TryParse(value, out bool interactiveDialogs))
@@ -217,13 +228,14 @@ namespace DlcvDemo
         internal static void PrintHelp()
         {
             Console.Out.WriteLine("Usage:");
-            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--calc-mean <true|false>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>] [--language <zh-CN|en-US>] [--result-view <summary|json>] [--test-mode <infer|pressure>] [--batch-size <1..1024>] [--thread-count <1..32>] [--pressure-duration-ms <500..60000>]");
+            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>] [--language <zh-CN|en-US>] [--result-view <summary|json>] [--test-mode <infer|pressure>] [--batch-size <1..1024>] [--thread-count <1..32>] [--pressure-duration-ms <500..60000>] [--capture-delay-ms <0..60000>] [--label-font-scale <0.3..5.0>]");
             Console.Out.WriteLine();
             Console.Out.WriteLine("ui-test 启动正式程序使用的 WinForms 窗口，将进度和结果写入 --output。");
             Console.Out.WriteLine("interactive-dialogs=false 不弹出文件对话框且不激活窗口；--screenshot 通过窗口绘制代码保存截图。");
             Console.Out.WriteLine("--language 指定界面语言（zh-CN 或 en-US）；未指定时跟随系统语言，本次运行不持久化。");
             Console.Out.WriteLine("--threshold 未指定时读取模型保存值，模型未提供有效值时使用 0.5；显式参数优先。");
             Console.Out.WriteLine("--result-view 指定结果区显示汇总或 JSON，默认 summary；切换不重新推理。");
+            Console.Out.WriteLine("--capture-delay-ms 在结果生成后保持正式窗口消息循环，供隔离桌面采集完整窗口；默认 0。");
             Console.Out.WriteLine("--test-mode=pressure 时运行压力测试并保存统计界面，时长默认 2000ms。");
         }
     }

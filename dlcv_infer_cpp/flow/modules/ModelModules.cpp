@@ -355,13 +355,13 @@ static Json ConvertToLocalSamples(
         o["area"] = obj.area;
         o["bbox"] = obj.bbox;
         o["with_bbox"] = obj.withBbox;
-        o["with_mean"] = obj.withMean;
-        o["foreground_mean"] = obj.foregroundMean;
-        o["background_mean"] = obj.backgroundMean;
         const bool withMask = includeMask && obj.withMask;
         o["with_mask"] = withMask;
         o["with_angle"] = obj.withAngle;
         o["angle"] = obj.withAngle ? obj.angle : -100.0;
+        if (obj.extraInfo.is_object() && !obj.extraInfo.empty()) {
+            o["extra_info"] = obj.extraInfo;
+        }
 
         if (withMask && !obj.mask.empty()) {
             if (emitMaskDerivedMeta) {
@@ -426,13 +426,13 @@ static Json ConvertSampleResultToLocalSamples(
         o["area"] = obj.area;
         o["bbox"] = obj.bbox;
         o["with_bbox"] = obj.withBbox;
-        o["with_mean"] = obj.withMean;
-        o["foreground_mean"] = obj.foregroundMean;
-        o["background_mean"] = obj.backgroundMean;
         const bool withMask = includeMask && obj.withMask;
         o["with_mask"] = withMask;
         o["with_angle"] = obj.withAngle;
         o["angle"] = obj.withAngle ? obj.angle : -100.0;
+        if (obj.extraInfo.is_object() && !obj.extraInfo.empty()) {
+            o["extra_info"] = obj.extraInfo;
+        }
 
         if (withMask && !obj.mask.empty()) {
             if (emitMaskDerivedMeta) {
@@ -599,7 +599,6 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
     Json p = Json::object();
     TryAddParam(p, this->Properties, "threshold");
     TryAddParam(p, this->Properties, "iou_threshold");
-    TryAddParam(p, this->Properties, "calc_mean");
     TryAddParam(p, this->Properties, "top_k");
     TryAddParam(p, this->Properties, "with_mask");
     TryAddParam(p, this->Properties, "return_polygon");

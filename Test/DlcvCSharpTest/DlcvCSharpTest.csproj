@@ -102,6 +102,7 @@
     <Compile Include="Program.cs" />
     <Compile Include="FlowStageComparison.cs" />
     <Compile Include="FlowInferParamsSelfTest.cs" />
+    <Compile Include="ForegroundBackgroundStatisticsSelfTest.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

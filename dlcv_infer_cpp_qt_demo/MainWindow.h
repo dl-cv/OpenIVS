@@ -17,7 +17,6 @@
 #include "dlcv_infer.h"
 
 class QCloseEvent;
-class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
@@ -33,7 +32,7 @@ public:
     explicit MainWindow(QWidget* parent = nullptr, bool uiTestMode = false);
     bool devicesReadyForUiTest() const { return devicesReady_; }
     dlcv_infer::json runUiTest(const QString& modelPath, const QString& imagePath,
-        int deviceId, double threshold, bool calcMean, float labelFontScale, const QString& resultView);
+        int deviceId, double threshold, float labelFontScale, const QString& resultView);
     ~MainWindow() override = default;
 
 protected:
@@ -110,7 +109,6 @@ private:
     QSpinBox* spinBatchSize_ = nullptr;
     QSpinBox* spinThreadCount_ = nullptr;
     QDoubleSpinBox* spinThreshold_ = nullptr;
-    QCheckBox* checkCalcMean_ = nullptr;
 
     QPlainTextEdit* outputText_ = nullptr;
     ImageViewerWidget* imageViewer_ = nullptr;
@@ -126,7 +124,6 @@ private:
     int pressureThreadCount_ = 1;
     int pressureBatchSize_ = 1;
     double pressureThreshold_ = 0.5;
-    bool pressureCalcMean_ = false;
     int pressureModelIndex_ = -1;
     cv::Mat pressureBaseImage_;
     QTimer* pressureTimer_ = nullptr;

@@ -63,9 +63,10 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
+    const QByteArray uiTestPlatform = qgetenv("QT_QPA_PLATFORM").toLower();
     if (argc > 1 && QByteArray(argv[1]) == "ui-test" &&
-        qgetenv("QT_QPA_PLATFORM").toLower() != "offscreen") {
-        std::cerr << "ui-test requires QT_QPA_PLATFORM=offscreen\n";
+        uiTestPlatform != "offscreen" && uiTestPlatform != "windows") {
+        std::cerr << "ui-test requires QT_QPA_PLATFORM=offscreen or windows\n";
         return 2;
     }
 

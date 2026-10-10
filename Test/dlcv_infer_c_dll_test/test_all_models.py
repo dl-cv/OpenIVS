@@ -1,5 +1,6 @@
 import argparse
 import ctypes
+from copy import deepcopy
 import json
 import math
 import os
@@ -45,6 +46,8 @@ FLOAT_TOLERANCES = {
     "angle": 1e-3,
     "foreground_mean": 1e-6,
     "background_mean": 1e-6,
+    "foreground_median": 1e-6,
+    "background_median": 1e-6,
 }
 FLOAT_RELATIVE_TOLERANCE = 1e-6
 
@@ -88,9 +91,7 @@ class DlcvCObjectResult(ctypes.Structure):
         ("mask", DlcvCMask),
         ("with_angle", ctypes.c_bool),
         ("angle", ctypes.c_float),
-        ("with_mean", ctypes.c_bool),
-        ("foreground_mean", ctypes.c_double),
-        ("background_mean", ctypes.c_double),
+        ("extra_info", ctypes.c_void_p),
     ]
 
 
@@ -464,8 +465,7 @@ def normalize_prediction_object(value):
 
     with_bbox = bool(value.get("with_bbox", False))
     with_angle = bool(value.get("with_angle", False))
-    with_mean = bool(value.get("with_mean", False))
-    return {
+    result = {
         "category_id": int(value.get("category_id", 0)),
         "category_name": str(value.get("category_name", "")),
         "score": normalize_number(value.get("score", 0.0), "score"),
@@ -479,18 +479,36 @@ def normalize_prediction_object(value):
             if with_angle
             else -100.0
         ),
-        "with_mean": with_mean,
-        "foreground_mean": (
-            normalize_number(value.get("foreground_mean", 0.0), "foreground_mean")
-            if with_mean
-            else 0.0
-        ),
-        "background_mean": (
-            normalize_number(value.get("background_mean", 0.0), "background_mean")
-            if with_mean
-            else 0.0
-        ),
     }
+    statistics_keys = {
+        "with_mean", "foreground_mean", "background_mean",
+        "with_median", "foreground_median", "background_median",
+    }
+    if statistics_keys.intersection(value):
+        raise TestFailure("结果解析", "目标一级不允许统计键，统计必须位于 extra_info")
+    extra = value.get("extra_info", {})
+    if not isinstance(extra, dict):
+        raise TestFailure("结果解析", "extra_info 必须是 JSON 对象")
+    result["extra_info"] = deepcopy(extra)
+    for kind in ("mean", "median"):
+        keys = (f"with_{kind}", f"foreground_{kind}", f"background_{kind}")
+        present = set(keys).intersection(extra)
+        if not present:
+            continue
+        if present != set(keys):
+            raise TestFailure("结果解析", f"extra_info 的 {kind} 组必须包含完整三个键")
+        if not isinstance(extra[keys[0]], bool):
+            raise TestFailure("结果解析", f"extra_info.{keys[0]} 必须是布尔值")
+        for key in keys[1:]:
+            number = extra[key]
+            if number is not None:
+                if isinstance(number, bool) or not isinstance(number, (int, float)):
+                    raise TestFailure("结果解析", f"extra_info.{key} 必须是数值或 null")
+                result["extra_info"][key] = normalize_number(number, f"extra_info.{key}")
+        has_samples = any(extra[key] is not None for key in keys[1:])
+        if extra[keys[0]] != has_samples:
+            raise TestFailure("结果解析", f"extra_info.{keys[0]} 与两侧采样值不一致")
+    return result
 
 
 def prediction_sort_key(value):
@@ -502,7 +520,6 @@ def prediction_sort_key(value):
         round(value["score"], 6),
         value["with_angle"],
         round(value["angle"], 6),
-        value["with_mean"],
     )
 
 
@@ -511,6 +528,18 @@ def normalize_sample(objects):
         raise TestFailure("结果解析", "预测结果必须是数组")
     normalized = [normalize_prediction_object(value) for value in objects]
     return sorted(normalized, key=prediction_sort_key)
+
+
+def parse_extra_info(pointer):
+    if not pointer:
+        return {}
+    try:
+        extra = json.loads(ctypes.string_at(pointer).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TestFailure("结果解析", "C extra_info 不是有效 UTF-8 JSON") from exc
+    if not isinstance(extra, dict):
+        raise TestFailure("结果解析", "C extra_info 必须是 JSON 对象")
+    return extra
 
 
 def copy_structured_result(result):
@@ -545,9 +574,7 @@ def copy_structured_result(result):
                     "with_mask": bool(value.with_mask),
                     "with_angle": bool(value.with_angle),
                     "angle": float(value.angle),
-                    "with_mean": bool(value.with_mean),
-                    "foreground_mean": float(value.foreground_mean),
-                    "background_mean": float(value.background_mean),
+                    "extra_info": parse_extra_info(value.extra_info),
                 }
             )
         samples.append(normalize_sample(objects))
@@ -574,6 +601,34 @@ def normalize_json_result(value):
     return [normalize_sample(value)]
 
 
+def compare_extra_info(left, right, path, differences):
+    if isinstance(left, dict) and isinstance(right, dict):
+        if left.keys() != right.keys():
+            differences.append(f"{path} 键不一致: 结构化={sorted(left)} JSON={sorted(right)}")
+        for key in left.keys() & right.keys():
+            compare_extra_info(left[key], right[key], f"{path}.{key}", differences)
+        return
+    if isinstance(left, list) and isinstance(right, list):
+        if len(left) != len(right):
+            differences.append(f"{path} 长度不一致")
+        for index, (left_value, right_value) in enumerate(zip(left, right)):
+            compare_extra_info(left_value, right_value, f"{path}[{index}]", differences)
+        return
+    key = path.rsplit(".", 1)[-1]
+    if (key in FLOAT_TOLERANCES and isinstance(left, (int, float))
+            and isinstance(right, (int, float)) and not isinstance(left, bool)
+            and not isinstance(right, bool)):
+        equal = math.isclose(left, right, rel_tol=FLOAT_RELATIVE_TOLERANCE,
+                             abs_tol=FLOAT_TOLERANCES[key])
+    elif (isinstance(left, (int, float)) and isinstance(right, (int, float))
+          and not isinstance(left, bool) and not isinstance(right, bool)):
+        equal = left == right
+    else:
+        equal = type(left) is type(right) and left == right
+    if not equal:
+        differences.append(f"{path} 不一致: 结构化={left!r} JSON={right!r}")
+
+
 def compare_predictions(structured_samples, json_samples):
     differences = []
     if len(structured_samples) != len(json_samples):
@@ -587,14 +642,11 @@ def compare_predictions(structured_samples, json_samples):
         "with_bbox",
         "with_mask",
         "with_angle",
-        "with_mean",
     )
     number_fields = (
         "score",
         "area",
         "angle",
-        "foreground_mean",
-        "background_mean",
     )
     for sample_index, (structured, json_values) in enumerate(
         zip(structured_samples, json_samples)
@@ -626,6 +678,8 @@ def compare_predictions(structured_samples, json_samples):
                         f"结构化={left[field_name]!r} JSON={right[field_name]!r} "
                         f"容差={FLOAT_TOLERANCES[field_name]}"
                     )
+            compare_extra_info(left["extra_info"], right["extra_info"],
+                               f"{prefix} extra_info", differences)
             for coordinate_index, (left_value, right_value) in enumerate(
                 zip(left["bbox"], right["bbox"])
             ):
@@ -740,6 +794,11 @@ def run_model(api, model_path, image_path, device_id, params):
             json_predictions = normalize_json_result(
                 json.loads(decode_c_text(json_ptr))
             )
+            if model_path.suffix.lower() in (".dvt", ".dvo"):
+                fields = ("with_mean", "foreground_mean", "background_mean",
+                    "with_median", "foreground_median", "background_median")
+                if any(key in target for sample in json_predictions for target in sample for key in fields):
+                    raise TestFailure("JSON推理", "普通模型返回了统计字段")
             row["JSON推理"] = True
         finally:
             api.library.dlcv_infer_cpp_free_string_c(json_ptr)
@@ -751,7 +810,9 @@ def run_model(api, model_path, image_path, device_id, params):
         row["结果一致"] = not row["一致性差异"]
         if not row["结果一致"]:
             raise TestFailure("结果一致性", "; ".join(row["一致性差异"][:10]))
-        row["统一预测"] = structured_predictions
+        row["结构化C支持完整统计"] = False
+        row["完整统计一致"] = None
+        row["统一预测"] = json_predictions
     except TestFailure as exc:
         row["错误阶段"] = exc.stage
         row["错误"] = str(exc)
@@ -815,9 +876,6 @@ def build_parser():
     )
     parser.add_argument(
         "--with-mask", action="store_true", help="返回 mask，默认关闭"
-    )
-    parser.add_argument(
-        "--calc-mean", action="store_true", help="计算前景和背景均值，默认关闭"
     )
     parser.add_argument(
         "--image-map",
@@ -888,7 +946,6 @@ def main():
         {
             "threshold": args.threshold,
             "with_mask": args.with_mask,
-            "calc_mean": args.calc_mean,
             "batch_size": 1,
         },
         ensure_ascii=False,

@@ -10,7 +10,8 @@
 typedef char DlcvCImageSizeCheck[(sizeof(DlcvCImage) == 24) ? 1 : -1];
 typedef char DlcvCImageListSizeCheck[(sizeof(DlcvCImageList) == 16) ? 1 : -1];
 typedef char DlcvCMaskSizeCheck[(sizeof(DlcvCMask) == 16) ? 1 : -1];
-typedef char DlcvCObjectResultSizeCheck[(sizeof(DlcvCObjectResult) == 96) ? 1 : -1];
+typedef char DlcvCObjectResultSizeCheck[(sizeof(DlcvCObjectResult) == 80) ? 1 : -1];
+typedef char DlcvCExtraInfoOffsetCheck[(offsetof(DlcvCObjectResult, extra_info) == 72) ? 1 : -1];
 typedef char DlcvCSampleResultSizeCheck[(sizeof(DlcvCSampleResult) == 16) ? 1 : -1];
 typedef char DlcvCResultSizeCheck[(sizeof(DlcvCResult) == 32) ? 1 : -1];
 #endif

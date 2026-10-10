@@ -44,7 +44,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 ## 统一运行与验证输入规则
 
-- `DlcvDemo`、`dlcv_infer_cpp_qt_demo` 与 `dlcv_infer_c_qt_demo` 支持文档中定义的 `infer` 命令行模式，用于传入模型、图片、阈值、设备、mask 开关和均值计算开关并执行无界面自动验证。
+- `DlcvDemo`、`dlcv_infer_cpp_qt_demo` 与 `dlcv_infer_c_qt_demo` 支持文档中定义的 `infer` 命令行模式，用于传入模型、图片、阈值、设备、mask 开关并执行无界面自动验证。
 - 上述 Demo 无命令行参数时仍启动原 GUI，不改变桌面交互行为。
 - 其他程序、自测入口和临时排查入口仅使用各自文档中已经定义的参数；未记录的业务输入通过源码固定变量或配置对象字段设置。
 - 命令行推理模式输出结构化与 JSON 两条 API 路径的结果摘要，并以退出码区分成功、运行错误、参数错误和验证失败。
@@ -52,7 +52,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - `infer` 与 `ui-test` 用途不同：`infer` 是无界面功能测试，验证结构化与 JSON 双路径一致性、阈值过滤等，不创建窗口；`ui-test` 是界面自动验证，在真实窗口中复用模型加载、图片推理与绘制逻辑。
 
 - 两个 Qt Demo 的自动回归使用 `Test/run_qt_demo_regression.py` 运行实际 EXE，读取退出码与严格 UTF-8 JSON；推理测试不打开主窗口。Mask 合成数据和断言只编入 `Test/qt_demo/` 下两个独立测试 EXE，工程直接引用对应 Demo 的 `ImageViewerWidget.cpp`，不复制控件实现；测试采用 Qt offscreen 平台，不模拟鼠标键盘或控制桌面窗口。Demo 不包含 Mask 自测入口。
-- C++ Qt Demo 的真实窗口验证使用 `ui-test --model <模型> --image <图片> --output <临时JSON>`。`--label-font-scale` 接受 0.3 到 5；`--result-view` 接受 summary、json、model、release；release 在完成推理后执行“释放模型”，输出 `model_loaded=false` 与释放提示。默认使用窗口的阈值与均值开关初始值，也可通过原推理参数指定。程序等待设备初始化，复用实际按钮逻辑和绘制组件，成功后保存 UTF-8 JSON 并自动关闭；失败返回 1，参数错误返回 2。设置只写输出目录内的 INI，不读取或修改正常窗口的注册表配置，不启用显卡锁频。截图时由不可见 Desktop 采集正式完整窗口，不用控件导出替代。
+- C++ Qt Demo 的真实窗口验证使用 `ui-test --model <模型> --image <图片> --output <临时JSON>`。`--label-font-scale` 接受 0.3 到 5；`--result-view` 接受 summary、json、model、release；release 在完成推理后执行“释放模型”，输出 `model_loaded=false` 与释放提示。默认使用窗口的阈值初始值，也可通过原推理参数指定。程序等待设备初始化，复用实际按钮逻辑和绘制组件，成功后保存 UTF-8 JSON 并自动关闭；失败返回 1，参数错误返回 2。设置只写输出目录内的 INI，不读取或修改正常窗口的注册表配置，不启用显卡锁频。截图时由不可见 Desktop 采集正式完整窗口，不用控件导出替代。
 - C Qt Demo 只调用正式 C ABI；C ABI 未提供流程判定读取接口，因此 `inspection_supported=false`、`inspection_consistent=null`，不把该能力记为验证通过。C++ Qt Demo 继续检查已有流程判定接口。
 
 - `DlcvDemo`、`DlcvTest`、`OpenIVSWPF` 的实际 EXE 回归使用 `Test/run_desktop_project_regression.py`。两个 WPF selftest 只初始化推理与显示所需对象，不读取生产配置，不连接相机/PLC，不修改模型历史；具体参数和范围见开发文档。
@@ -169,7 +169,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | 加载模型 | `dlcv_infer_cpp_load_model_c` | `const char* model_path, int device_id` → 返回 `model_index` |
 | 释放模型 | `dlcv_infer_cpp_free_model_c` | `int model_index` → 返回 `0`/` -1` |
 | 推理 | `dlcv_infer_cpp_infer_c` | `int model_index, const DlcvCImageList* image_list` → 返回 `DlcvCResult` |
-| 带参数推理 | `dlcv_infer_cpp_infer_with_params_c` | 在图像列表之外接收 JSON 参数，可传 `threshold`、`calc_mean` 等字段 |
+| 带参数推理 | `dlcv_infer_cpp_infer_with_params_c` | 在图像列表之外接收 JSON 参数，可传 `threshold` 等字段 |
 | 释放结果 | `dlcv_infer_cpp_free_model_result_c` | `DlcvCResult* result` |
 | 模型信息 | `dlcv_infer_cpp_get_model_info_c` | 模型索引 → UTF-8 JSON 字符串 |
 | JSON 推理 | `dlcv_infer_cpp_infer_json_c` | 模型索引、单张图像和参数 JSON → UTF-8 JSON 字符串 |
@@ -179,7 +179,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 **数据结构**：六个 C 数据结构 `DlcvCImage`、`DlcvCImageList`、`DlcvCMask`、`DlcvCObjectResult`、`DlcvCSampleResult`、`DlcvCResult` 已直接定义在 `dlcv_infer_c_api.h` 中，调用端不再需要额外包含 `dlcv_data_type_c.h`。
 
-**内存管理**：`DlcvCResult` 内部所有动态内存（`message`、`category_name`、`mask_ptr`、`results` 数组、`sample_results` 数组）由 DLL 分配，调用方必须通过 `dlcv_infer_cpp_free_model_result_c` 释放。
+**内存管理**：`DlcvCResult` 内部所有动态内存（`message`、`category_name`、`extra_info`、`mask_ptr`、`results` 数组、`sample_results` 数组）由 DLL 分配，调用方必须通过 `dlcv_infer_cpp_free_model_result_c` 释放。
 
 **实现位置**：`dlcv_infer_cpp/dlcv_infer_c_api.h` + `dlcv_infer_cpp/dlcv_infer_c_api.cpp`，基于 `dlcv_infer::Model` 封装，与 C++ API 共同生成 `dlcv_infer_cpp.dll` 和 `dlcv_infer_cpp.lib`。
 
@@ -205,7 +205,6 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 |--------|------|--------|------|
 | `threshold` | float | 0.5 | 置信度阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
-| `calc_mean` | bool | false | 是否计算实例分割目标的前景与背景均值 |
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
 
@@ -257,7 +256,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 ### `ObjectResult` 字段
 
-| 字段 | 含义 | 典型用途 |
+| 字段 | 含义 | 存储与用途 |
 | --- | --- | --- |
 | `category_id` | 类别编号 | 程序内逻辑判断、分类统计 |
 | `category_name` | 类别名称 | 界面显示、文本输出、模板匹配 |
@@ -269,13 +268,10 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | `angle` | 旋转角度 | 绘制旋转框、旋转裁剪、回正 |
 | `with_mask` | 是否有 mask | 区分检测结果和分割结果 |
 | `mask` | 结构化结果中的局部 mask 图像 | 做进一步图像计算 |
-| `with_mean` | 是否有均值 | 区分已计算均值与默认值 |
-| `foreground_mean` | 前景均值 | mask 前景区域的像素均值 |
-| `background_mean` | 背景均值 | mask 背景区域的像素均值 |
-| `extra_info` | 扩展信息对象 | 放置折线、业务附加信息 |
-| `metadata` | 元信息对象 | 放置流程来源、模块附加信息 |
+| `extra_info` | 扩展信息对象 | C# `Utils.CSharpObjectResult.ExtraInfo`（`JObject`）、C++ `ObjectResult.extraInfo`（`json`）、C `DlcvCObjectResult.extra_info`（UTF-8 JSON 对象字符串），承载统计、折线及业务扩展 |
+| `metadata` | 元信息对象 | 原始 JSON 中的流程来源和模块信息，结构化结果无对应成员 |
 
-### JSON 结果字段
+### 原始 JSON 结果字段
 
 | JSON 字段 | 含义 | 说明 |
 | --- | --- | --- |
@@ -288,13 +284,14 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 | `with_angle` | 是否有角度 | 与结构化结果一致 |
 | `angle` | 旋转角度 | 无角度时固定为 `-100` |
 | `with_mask` | 是否有区域结果 | 与结构化结果一致 |
-| `with_mean` | 是否有均值 | 与结构化结果一致 |
-| `foreground_mean` | 前景均值 | 与结构化结果一致 |
-| `background_mean` | 背景均值 | 与结构化结果一致 |
 | `mask_rle` | RLE 编码区域 | 面向 JSON 传输和跨语言交换 |
 | `poly` | 多边形轮廓数组 | 用于前端绘制、边界分析、折线提取 |
-| `extra_info` | 扩展信息 | 例如 `extra_info.polyline` |
+| `extra_info` | 扩展信息 | 统计组、`extra_info.polyline` 及业务扩展 |
 | `metadata` | 元信息 | 记录模块附加信息、运行信息 |
+
+均值和中值仅存放于目标 `extra_info`，目标一级不输出统计键。公开结构只提供通用扩展字段：C# `Utils.CSharpObjectResult.ExtraInfo`（`JObject`）、C++ `ObjectResult.extraInfo`（`json`）和 C `DlcvCObjectResult.extra_info`（UTF-8 JSON 对象字符串，可为 `nullptr`），不提供专用统计成员。统计组关闭时删除该组三个键，空侧保留 JSON `null`，有效零值保留数值 `0`；折线及其他非统计扩展保持不变。没有统计节点的推理不增加统计字段，结构化与 JSON 转换也不补默认统计值。完整格式见 `docs/模块、流程与模型推理标准文档.md` 3.3、6.4.1，读取方式及释放要求见各语言 API 文档。
+
+底层 `dlcv_infer.dll` 的内部镜像结构不属于上述公开包装结构，其布局保持不变。公开 C ABI 调用方须使用配套的 `dlcv_infer_c_api.h` 与 DLL，并更新 ctypes／PInvoke 声明；`extra_info` 随整个结果由 `dlcv_infer_cpp_free_model_result_c` 释放，不单独释放。
 
 ### 几何语义
 
@@ -408,10 +405,10 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - **功能**：模型加载、单图/批量推理、JSON 输出、多线程压力测试、加密狗检测
 - **UI**：主窗口分为上方控制栏（按钮 + 参数调节）+ 下方输出区（左侧文本 + 右侧图像可视化）
 - **按钮**：加载模型、获取模型信息、打开图片推理、单次推理、推理JSON、多线程测试、释放模型、释放所有模型、文档、检查加密狗
-- **参数控件**：选择显卡（下拉）、batch_size（1~1024，默认1）、threshold（0.0~1.0，默认0.5）、计算均值（默认关闭）、线程数（1~32，默认1）
+- **参数控件**：选择显卡（下拉）、batch_size（1~1024，默认1）、threshold（0.0~1.0，默认0.5）、线程数（1~32，默认1）
 - **图像预处理**：`prepareImageForInference` 将 BGR/BGRA 转为 RGB
 - **压力测试**：每 500ms 更新统计，包含运行时间、完成请求数、平均延迟、实时速率、各节点平均耗时
-- **命令行模式**：`infer --model ... --image ... --threshold ... --calc-mean ...`，无界面执行结构化与 JSON 双路径验证
+- **命令行模式**：`infer --model ... --image ... --threshold ...`，无界面执行结构化与 JSON 双路径验证
 
 ### C Qt Demo（`dlcv_infer_c_qt_demo`）
 

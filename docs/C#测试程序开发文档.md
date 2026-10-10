@@ -2,6 +2,8 @@
 
 > 目标：任何开发者仅依据本文档，都能实现一个**功能与用户体验一致**的 `DlcvDemo`。允许代码结构不同，但最终呈现给用户的功能、交互、输出文本与可视化效果必须一致（除模型推理本身的不可控差异外）。
 
+图像画布与标签底色使用正式浅色界面的白色；其他使用共享图像控件的程序保留其原有底色。
+
 ### 1. 文档范围与术语
 
 - **软件名称**：`C# 测试程序`（主窗体标题与程序集名称一致）
@@ -87,19 +89,18 @@
 `infer` 是无界面功能测试，不创建窗口；界面自动验证使用 2.6 的 `ui-test`。
 
 ```text
-"C# 测试程序.exe" infer --model <path> --image <path> [--threshold <0..1>] [--device <int>] [--with-mask <true|false>] [--calc-mean <true|false>] [--output <jsonPath>]
+"C# 测试程序.exe" infer --model <path> --image <path> [--threshold <0..1>] [--device <int>] [--with-mask <true|false>] [--output <jsonPath>]
 "C# 测试程序.exe" --help
 "C# 测试程序.exe" --version
 ```
 
-- `--model`、`--image` 为必填参数；`--threshold` 省略时读取模型保存值，无有效值时使用 0.5，显式值优先；`--device` 默认 `0`，`--with-mask` 默认 `true`。省略 `--calc-mean` 时不发送该字段，流程模型继续使用节点中保存的配置。
+- `--model`、`--image` 为必填参数；`--threshold` 省略时读取模型保存值，无有效值时使用 0.5，显式值优先；`--device` 默认 `0`，`--with-mask` 默认 `true`。
 - `--device=-1` 表示 CPU，非负整数表示 GPU 编号。
 - 普通模型使用 `--threshold` 作为底层推理阈值；`.dvst`/`.dvso` 流程模型只用它过滤最终对外结果，流程内各 `model/*` 节点继续使用流程文件保存的 `threshold`。
-- `--calc-mean=true` 时，结构化与 JSON 摘要包含 `with_mean`、`foreground_mean`、`background_mean`，并通过 `mean_check_passed` 检查带掩码结果是否包含均值及两种结果的一致性；普通检测结果不参与均值检查，两条结果均为空时该检查通过。
 - 中文图片路径通过 `File.ReadAllBytes` 与 `Cv2.ImDecode` 解码；三通道和四通道图像分别转换为 RGB。
 - 同一次命令分别调用 `Infer` 与 `InferOneOutJson`，摘要包含 `structured`、`json`、`consistent` 和 `threshold_check_passed`。
 - `InferOneOutJson` 返回带 `result_list` 的流程判定包装对象时，命令行模式从包装对象中读取结果数组后继续执行双路径一致性检查。
-- `structured` 与 `json` 均包含 `count`、`scores`、`categories` 和 `below_threshold`。
+- `structured` 与 `json` 均包含 `count`、`scores`、`categories`、`below_threshold` 和逐目标的 `extra_info` 数组；未提供扩展的目标对应 `null`，两路比较完整扩展对象。
 - `--output` 写入无 BOM 的 UTF-8 JSON；该路径不得覆盖模型或图片，父目录必须存在。
 - 原生推理运行库仍可能向标准输出写入本地编码日志；机器解析使用 `--output` 文件，不把 stdout 当作单一 JSON 文档。
 - WinExe 从交互式 `cmd` 启动时由调用方使用等待方式运行；PowerShell 自动化使用 `Start-Process -Wait -PassThru` 读取退出码。
@@ -156,7 +157,6 @@ GUI 自动验证使用同一个 WinForms 主窗口的 `ui-test` 入口，模型�
 - **按钮**：`加载模型`、`打开图片推理`、`单次推理`、`推理JSON`、`多线程测试`、`一致性测试`、`释放模型`、`释放所有模型`、`检查加密狗`、`检查环境`、`文档`、`获取模型信息`、语言切换（中文模式 `En`，英文模式 `中`）。
 - **下拉框**：设备选择。
 - **Label**：`选择显卡`、`线程数`、`batch_size`、`threshold`。
-- **三态复选框**：右侧文字按状态显示 `计算均值：默认`、`计算均值：是`、`计算均值：否`。`默认` 时不发送 `calc_mean`，`是` 时发送 `true`，`否` 时发送 `false`。
 - **数值输入**：
   - 线程数（1-32，默认1）。
   - Batch Size（1-1024，默认1）。
@@ -328,7 +328,7 @@ GUI 自动验证使用同一个 WinForms 主窗口的 `ui-test` 入口，模型�
   - 已选择图片。
 - **输入**：
   - 图片：当前选择的图片（`ImreadModes.Unchanged` 读取，原样送入 `Model.InferBatch`，见 2.4）。
-  - 参数：UI 设置的 Batch Size、Threshold、计算均值状态，强制 `with_mask=true`；计算均值为 `默认` 时省略 `calc_mean`，其余两种状态写入对应布尔值。
+  - 参数：UI 设置的 Batch Size、Threshold，强制 `with_mask=true`。
   - Threshold 变化：在模型与图片均已就绪且没有测试运行时，调整 Threshold 控件应等价触发本功能。
 - **输出**：
   - **图像**：在界面显示原图及可视化结果。
@@ -347,10 +347,10 @@ GUI 自动验证使用同一个 WinForms 主窗口的 `ui-test` 入口，模型�
   - 参数 JSON：
   - `threshold = numericUpDown_threshold`
   - `with_mask = true`
-  - `checkBox_calc_mean.IsChecked=null` 对应 `默认`，此时省略 `calc_mean`；`true` 与 `false` 分别对应 `是` 与 `否`。
   - 调用：`model.InferOneOutJson(image_rgb, params)`
-- 输出到 `richTextBox1`：`JsonConvert.SerializeObject(json, Formatting.Indented)`（输出内容根节点必须为 JSON 数组 `[]`，即使为空）
-- **说明**：该功能只输出 JSON 文本，不更新 `imagePanel1` 的图像与可视化结果
+- 输出到 `richTextBox1`：`JsonConvert.SerializeObject(json, Formatting.Indented)`；未产生流程判定时为结果数组，产生判定时为包含 `result_list/ok/reason` 的包装对象。
+- **说明**：该功能只输出 JSON 文本，不更新 `imagePanel1` 的图像与可视化结果。
+- **前景背景统计**：在流程内连接“前景背景统计”节点的 `image/results`，通过本按钮查看目标 `extra_info` 中的均值、中值及 `null`；不开启普通推理参数或 GUI 统计开关。节点配置见 `模块、流程与模型推理标准文档.md` 6.4.1。
 - 异常处理：`ReportError("推理JSON失败", ex)`
 
 #### 7.8 多线程测试（按钮：`多线程测试`）
@@ -531,7 +531,7 @@ DlcvDemo 压力测试输出模板（必须一致，含空格、单位与换行�
   - 已有图片结果时调整 `threshold`，必须立即刷新文本框和图像区域的推理结果
 
 - **推理JSON**
-  - 文本框输出必须为 JSON（缩进格式），根为数组 `[]`
+  - 文本框输出必须为 JSON（缩进格式）；未产生流程判定时根为结果数组 `[]`，产生判定时根为包含 `result_list/ok/reason` 的包装对象。
   - 点击“推理JSON”不会自动刷新 `imagePanel1`（不应改变当前图像/可视化显示）
 
 - **多线程测试**

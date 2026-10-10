@@ -47,6 +47,9 @@
     <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\include\opencv2\core.hpp')">$(OpenCV_DIR)\include</OpenCvIncludeDir>
     <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and Exists('$(ProjectDir)..\third_party\opencv\build\include\opencv2\core.hpp')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\opencv\build\include'))</OpenCvIncludeDir>
     <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and Exists('C:\OpenCV\build\include\opencv2\core.hpp')">C:\OpenCV\build\include</OpenCvIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and '$(DLCVPRO_INFER_INCLUDE)'!=''">$(DLCVPRO_INFER_INCLUDE)</DlcvProInferIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(ProjectDir)..\third_party\dlcvpro_infer\include')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\dlcvpro_infer\include'))</DlcvProInferIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('C:\dlcv\Lib\site-packages\dlcvpro_infer\include')">C:\dlcv\Lib\site-packages\dlcvpro_infer\include</DlcvProInferIncludeDir>
     <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(OpenCV_LIB_DIR)'!=''">$(OpenCV_LIB_DIR)</OpenCvLibDir>
     <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\opencv_world4100.lib')">$(OpenCV_DIR)</OpenCvLibDir>
     <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\lib\opencv_world4100.lib')">$(OpenCV_DIR)\lib</OpenCvLibDir>
@@ -72,7 +75,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\dlcv_infer_cpp;$(OpenCvIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\dlcv_infer_cpp;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -93,7 +96,7 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\dlcv_infer_cpp;$(OpenCvIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\dlcv_infer_cpp;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

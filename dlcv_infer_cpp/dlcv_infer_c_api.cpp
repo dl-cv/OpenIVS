@@ -15,6 +15,7 @@
 #include <windows.h>
 
 #include <cctype>
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -129,6 +130,8 @@ static void ReleaseCResultMemory(DlcvCResult* result) noexcept {
                             DlcvCObjectResult& object = sample.results[j];
                             delete[] object.category_name;
                             object.category_name = nullptr;
+                            delete[] object.extra_info;
+                            object.extra_info = nullptr;
                             if (object.mask.mask_ptr != 0) {
                                 delete[] reinterpret_cast<unsigned char*>(
                                     static_cast<uintptr_t>(object.mask.mask_ptr));
@@ -569,11 +572,11 @@ static dlcv_infer::json BuildNativeObjectResult(
         { "mask", std::move(mask) },
         { "with_bbox", object.withBbox },
         { "with_angle", object.withAngle },
-        { "angle", object.withAngle ? object.angle : -100.0f },
-        { "with_mean", object.withMean },
-        { "foreground_mean", object.foregroundMean },
-        { "background_mean", object.backgroundMean }
+        { "angle", object.withAngle ? object.angle : -100.0f }
     };
+    if (object.extraInfo.is_object() && !object.extraInfo.empty()) {
+        result["extra_info"] = object.extraInfo;
+    }
     return result;
 }
 
@@ -945,9 +948,11 @@ DlcvCResult dlcv_infer_cpp_infer_with_params_c(
                         }
                         o.with_angle = obj.withAngle;
                         o.angle = obj.angle;
-                        o.with_mean = obj.withMean;
-                        o.foreground_mean = obj.foregroundMean;
-                        o.background_mean = obj.backgroundMean;
+                        if (obj.extraInfo.is_object() && !obj.extraInfo.empty()) {
+                            const std::string extraInfo = obj.extraInfo.dump();
+                            o.extra_info = new char[extraInfo.size() + 1];
+                            std::memcpy(o.extra_info, extraInfo.c_str(), extraInfo.size() + 1);
+                        }
                     }
                 }
             }

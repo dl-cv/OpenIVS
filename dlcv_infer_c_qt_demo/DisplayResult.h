@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <json/json.hpp>
 
 #include <opencv2/core.hpp>
 
@@ -16,8 +17,6 @@ struct DisplayObjectResult {
     bool withAngle = false;
     float angle = -100.0f;
     float area = 0.0f;
-    bool withMean = false;
-    double foregroundMean = 0.0;
-    double backgroundMean = 0.0;
+    nlohmann::json extraInfo;
 };
 

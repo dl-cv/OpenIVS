@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Windows.Forms;
 using Newtonsoft.Json.Linq;
@@ -140,7 +140,6 @@ namespace DlcvDemo
         {
             UpdateLanguageButton();
             UpdateResultViewButton();
-            checkBox_calc_mean_StateChanged(checkBox_calc_mean, EventArgs.Empty);
             if (pressureTestRunner != null && pressureTestRunner.IsRunning)
             {
                 if (isConsistencyTestMode)
@@ -611,7 +610,6 @@ namespace DlcvDemo
 				JObject data = new JObject();
 				data["threshold"] = (float)numericUpDown_threshold.Value;
 				data["with_mask"] = true;
-				AddCalcMeanOverride(data);
 
 				Mat inferImage = PrepareImageForModelInput(image);
 				try
@@ -699,11 +697,9 @@ namespace DlcvDemo
                         break;
                     }
                 }
+                imagePanel1.LabelFontScale = uiTestOptions.LabelFontScale;
                 numericUpDown_batch_size.Value = uiTestOptions.BatchSize;
                 numericUpDown_num_thread.Value = uiTestOptions.ThreadCount;
-                checkBox_calc_mean.CheckState = !uiTestOptions.CalcMean.HasValue
-                    ? CheckState.Indeterminate
-                    : (uiTestOptions.CalcMean.Value ? CheckState.Checked : CheckState.Unchecked);
                 WriteUiTestResult("started", null);
 
                 if (uiTestOptions.InteractiveDialogs)
@@ -825,6 +821,10 @@ namespace DlcvDemo
             {
                 await Task.Yield();
                 Refresh();
+                if (UiTestExitCode == 0 && uiTestOptions.CaptureDelayMs > 0)
+                {
+                    await Task.Delay(uiTestOptions.CaptureDelayMs);
+                }
                 Close();
             }
         }
@@ -870,9 +870,6 @@ namespace DlcvDemo
                 ["threshold"] = numericUpDown_threshold.Value,
                 ["model_info"] = model?.GetCachedModelInfo(),
                 ["threshold_explicit"] = uiTestOptions.HasThreshold,
-                ["calc_mean"] = uiTestOptions.CalcMean.HasValue
-                    ? new JValue(uiTestOptions.CalcMean.Value)
-                    : JValue.CreateNull(),
                 ["device"] = uiTestOptions.DeviceId,
                 ["interactive_dialogs"] = uiTestOptions.InteractiveDialogs,
                 ["window_title"] = Text,
@@ -907,30 +904,6 @@ namespace DlcvDemo
             }
 
             button_infer_Click(sender, e);
-        }
-
-        private void AddCalcMeanOverride(JObject data)
-        {
-            bool? calcMean = checkBox_calc_mean.CheckState == CheckState.Indeterminate
-                ? (bool?)null
-                : checkBox_calc_mean.Checked;
-            if (calcMean.HasValue)
-            {
-                data["calc_mean"] = calcMean.Value;
-            }
-        }
-
-        private void checkBox_calc_mean_StateChanged(object sender, EventArgs e)
-        {
-            if (checkBox_calc_mean == null)
-            {
-                return;
-            }
-
-            string stateText = checkBox_calc_mean.CheckState == CheckState.Indeterminate
-                ? I18n.T("默认")
-                : (checkBox_calc_mean.Checked ? I18n.T("是") : I18n.T("否"));
-            checkBox_calc_mean.Text = string.Format(I18n.T("计算均值：{0}"), stateText);
         }
 
         private void resultTextWordWrapMenuItem_Click(object sender, EventArgs e)
@@ -970,7 +943,6 @@ namespace DlcvDemo
                 JObject data = new JObject();
                 data["threshold"] = (float)numericUpDown_threshold.Value;
                 data["with_mask"] = true;
-                AddCalcMeanOverride(data);
 
                 Stopwatch stopwatch = new Stopwatch();
                 stopwatch.Start();
@@ -1060,11 +1032,6 @@ namespace DlcvDemo
             line.Append("  ");
             line.Append(BuildResultLocationText(obj));
             line.AppendFormat("  area={0:F1}", obj.Area);
-            if (obj.WithMean)
-            {
-                line.AppendFormat("  foreground_mean={0:F4}", obj.ForegroundMean);
-                line.AppendFormat("  background_mean={0:F4}", obj.BackgroundMean);
-            }
             string angleText = BuildResultAngleText(obj);
             if (!string.IsNullOrWhiteSpace(angleText))
             {

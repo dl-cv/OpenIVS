@@ -30,6 +30,11 @@ void ImageViewerWidget::setImageAndResults(const cv::Mat& bgrImage, const std::v
     setResults(results);
 }
 
+void ImageViewerWidget::setUsePaletteBackground(bool enabled) {
+    usePaletteBackground_ = enabled;
+    update();
+}
+
 void ImageViewerWidget::setImage(const cv::Mat& bgrImage) {
     image_ = bgrToQImage(bgrImage);
     fitToPanel();
@@ -91,7 +96,7 @@ void ImageViewerWidget::setLabelFontScale(float scale) {
 void ImageViewerWidget::paintEvent(QPaintEvent* event) {
     Q_UNUSED(event);
     QPainter painter(this);
-    painter.fillRect(rect(), QColor(20, 20, 20));
+    painter.fillRect(rect(), usePaletteBackground_ ? palette().color(QPalette::Base) : QColor(20, 20, 20));
 
     QString statusText = "OK";
     bool shouldDrawStatus = showStatusText_;
@@ -431,7 +436,7 @@ void ImageViewerWidget::drawResults(QPainter& painter, QString& statusText, bool
 
         const QSizeF textSize = metrics.size(Qt::TextSingleLine, label);
         const QRectF textRect(textLeftX, textTopY, textSize.width(), textSize.height());
-        painter.fillRect(textRect, QColor(0, 0, 0, 160));
+        painter.fillRect(textRect, usePaletteBackground_ ? palette().color(QPalette::Base) : QColor(0, 0, 0, 160));
         painter.setPen(color);
         painter.drawText(textRect, Qt::AlignLeft | Qt::AlignTop, label);
     };
