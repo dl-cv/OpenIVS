@@ -103,7 +103,6 @@ C:\dlcv\python.exe Test\dlcv_infer_c_dll_test\test_all_models.py `
 ```powershell
 python -m unittest discover -s Test/dlcv_infer_c_dll_test -p test_result_compare.py -v
 python -m unittest discover -s Test/dlcv_infer_c_dll_test -p test_mask_semantics_source.py -v
-python -m unittest discover -s Test/dlcv_infer_c_dll_test -p test_sliding_window_api_removed.py -v
 ```
 
-共 18 项：结果比较 12 项、mask 源码检查 3 项、独立 SlidingWindow API 删除检查 3 项。测试范围为 Windows x64 和有效模型输入；不要求取消普通模型的 10000 个索引限制，不检查运行期间的设备切换与恢复，也不包含 Linux 编译检查。
+共 16 项：结果比较 12 项、mask 源码检查 4 项。测试范围为 Windows x64 和有效模型输入；不要求取消普通模型的 10000 个索引限制，不检查运行期间的设备切换与恢复，也不包含 Linux 编译检查。
