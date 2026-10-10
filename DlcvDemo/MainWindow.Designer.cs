@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Drawing;
 using System.Windows.Forms;
@@ -574,7 +574,8 @@ namespace DlcvDemo
             // imagePanel1
             //
             this.imagePanel1.AccessibleName = "图像显示区";
-            this.imagePanel1.BackColor = Color.FromArgb(32, 36, 40);
+            this.imagePanel1.BackColor = Color.White;
+            this.imagePanel1.VisualizationLabelBackgroundColor = Color.White;
             this.imagePanel1.Dock = System.Windows.Forms.DockStyle.Fill;
             this.imagePanel1.MaxScale = 100F;
             this.imagePanel1.MinScale = 0.5F;

@@ -79,6 +79,12 @@
 
 结构化结果在释放前复制为显示数据。类别、分数、普通框、旋转框、mask、面积、角度和均值直接使用本次结构化结果显示，前景或背景的非有限均值显示“无采样”；不为显示统计再次执行推理。C ABI 的三个均值成员及布局不变，中值通过原有“推理JSON”按钮查看，不向 `DlcvCObjectResult` 增加成员。mask 在调用结果释放函数前复制到程序内部的 `cv::Mat`。节点配置与采样语义见 `模块、流程与模型推理标准文档.md` 6.4.1。
 
+图像画布与标签底色跟随 Qt 调色板的 Base 色；浅色模式为白色。原生启动可使用 Qt 正式参数 `-platform windows:darkmode=0 -style windows11`，样式来自随程序部署的 `qmodernwindowsstyle` 插件。
+
+### 非交互窗口验证
+
+`ui-test --model <模型> --image <图片> --threshold 0.5 --device <设备> --result-view summary|json` 使用实际模型和主窗口推理逻辑。Windows 平台传入 `--output <系统临时目录中新建的JSON>`，记录通过状态、目标数和实际结果文本，随后保持正式消息循环 15 秒供隔离桌面采集完整窗口；JSON 视图复用“推理JSON”按钮逻辑。offscreen 平台仍使用 `--screenshot <系统临时目录中新建的PNG>` 保存客户区验证图，不将该图用于完整软件窗口交付。
+
 ## 4. 构建与输出
 
 构建命令统一通过项目脚本执行：

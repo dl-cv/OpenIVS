@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QFont>
 #include <QSettings>
+#include <QStyle>
 #include <QTimer>
 #include <QImage>
 #include <QPixmap>
@@ -874,6 +875,9 @@ int main(int argc, char* argv[]) {
                 json report = w.runUiTest(uiOptions.modelPath, uiOptions.imagePath, uiOptions.device,
                     uiOptions.threshold, uiOptions.labelFontScale, uiOptions.resultView);
                 report["passed"] = true;
+                report["qt_style"] = app.style()->objectName().toStdString();
+                report["qt_style_class"] = app.style()->metaObject()->className();
+                report["palette_base"] = app.palette().color(QPalette::Base).name().toStdString();
                 WriteJsonFile(uiOptions.outputPath, report.dump(2));
                 w.show();
                 QTimer::singleShot(15000, &app, &QCoreApplication::quit);

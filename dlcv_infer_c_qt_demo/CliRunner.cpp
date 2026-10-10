@@ -34,6 +34,8 @@ struct InferOptions {
     QString imagePath;
     QString outputPath;
     QString screenshotPath;
+    QString resultView = QStringLiteral("summary");
+    bool hasResultView = false;
     double threshold = 0.0;
     int device = 0;
     bool withMask = true;
@@ -234,6 +236,13 @@ bool ParseInferOptions(const QStringList& args, InferOptions& options, QString& 
             }
             options.screenshotPath = value;
             options.hasScreenshot = true;
+        } else if (option == QStringLiteral("--result-view")) {
+            if (options.hasResultView || (value != QStringLiteral("summary") && value != QStringLiteral("json"))) {
+                error = QStringLiteral("--result-view requires summary or json without duplication");
+                return false;
+            }
+            options.resultView = value;
+            options.hasResultView = true;
         } else if (option == QStringLiteral("--output")) {
             if (options.hasOutput) {
                 error = QStringLiteral("duplicate option: --output");
@@ -694,7 +703,8 @@ void PrintCliHelp(const QString& programPath) {
            " [--device <int>] [--with-mask <true|false>] [--output <jsonPath>]\n"
         << "  " << program
         << " ui-test --model <path> --image <path> --threshold <0..1>"
-           " [--device <int>] --screenshot <tempPngPath> (QT_QPA_PLATFORM=offscreen|windows)\n"
+           " [--device <int>] [--result-view <summary|json>]\n"
+           "   offscreen: --screenshot <tempPngPath>; windows: --output <tempJsonPath>\n"
         << "  " << program << " --check-c-api-exports\n"
         << "  " << program << " --help\n\n"
         << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
@@ -735,32 +745,33 @@ int RunCliCommand(const QStringList& args) {
 
     if (uiTest) {
         const bool offscreen = QGuiApplication::platformName() == QStringLiteral("offscreen");
-        const QFileInfo screenshot(options.screenshotPath);
+        const QFileInfo artifact(offscreen ? options.screenshotPath : options.outputPath);
         const QFileInfo tempRoot(QDir::tempPath());
         const QString directory = QDir::fromNativeSeparators(
-            QFileInfo(screenshot.absolutePath()).canonicalFilePath());
+            QFileInfo(artifact.absolutePath()).canonicalFilePath());
         const QString temp = QDir::fromNativeSeparators(tempRoot.canonicalFilePath());
         if ((!offscreen && QGuiApplication::platformName() != QStringLiteral("windows")) ||
-            !options.hasScreenshot || options.screenshotPath.isEmpty() ||
-            screenshot.suffix().compare(QStringLiteral("png"), Qt::CaseInsensitive) != 0 ||
+            (offscreen ? (!options.hasScreenshot || options.hasOutput) : (!options.hasOutput || options.hasScreenshot)) ||
+            artifact.filePath().isEmpty() ||
+            artifact.suffix().compare(offscreen ? QStringLiteral("png") : QStringLiteral("json"), Qt::CaseInsensitive) != 0 ||
             directory.isEmpty() || temp.isEmpty() ||
             !(directory.compare(temp, Qt::CaseInsensitive) == 0 ||
               directory.startsWith(temp + QLatin1Char('/'), Qt::CaseInsensitive)) ||
-            screenshot.exists() || options.hasOutput || options.hasWithMask) {
-            std::cerr << "error: ui-test requires a new PNG in the system temp directory "
-                         "and supports only model, image, threshold and device\n";
+            artifact.exists() || options.hasWithMask) {
+            std::cerr << "error: ui-test requires a new temp PNG (--screenshot, offscreen) "
+                         "or JSON (--output, windows)\n";
             return 2;
         }
         MainWindow window(nullptr, true);
         QString runError;
         const bool passed = window.runOffscreenInference(options.modelPath, options.imagePath,
-            options.threshold, options.device, screenshot.absoluteFilePath(), runError);
+            options.threshold, options.device, artifact.absoluteFilePath(), options.resultView, runError);
         if (!passed) {
             window.close();
             std::cerr << "error: " << ToUtf8(runError) << "\n";
             return 1;
         }
-        std::cout << "ui-test inference rendered to " << ToUtf8(screenshot.absoluteFilePath()) << "\n";
+        std::cout << "ui-test inference completed: " << ToUtf8(artifact.absoluteFilePath()) << "\n";
         if (!offscreen) {
             QTimer::singleShot(15000, &window, &QWidget::close);
             return QApplication::exec();
@@ -768,8 +779,8 @@ int RunCliCommand(const QStringList& args) {
         window.close();
         return 0;
     }
-    if (options.hasScreenshot) {
-        std::cerr << "error: --screenshot is only supported by ui-test\n";
+    if (options.hasScreenshot || options.hasResultView) {
+        std::cerr << "error: --screenshot and --result-view are only supported by ui-test\n";
         return 2;
     }
     try {

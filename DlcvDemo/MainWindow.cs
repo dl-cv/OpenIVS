@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Windows.Forms;
 using Newtonsoft.Json.Linq;
@@ -697,6 +697,7 @@ namespace DlcvDemo
                         break;
                     }
                 }
+                imagePanel1.LabelFontScale = uiTestOptions.LabelFontScale;
                 numericUpDown_batch_size.Value = uiTestOptions.BatchSize;
                 numericUpDown_num_thread.Value = uiTestOptions.ThreadCount;
                 WriteUiTestResult("started", null);
@@ -820,6 +821,10 @@ namespace DlcvDemo
             {
                 await Task.Yield();
                 Refresh();
+                if (UiTestExitCode == 0 && uiTestOptions.CaptureDelayMs > 0)
+                {
+                    await Task.Delay(uiTestOptions.CaptureDelayMs);
+                }
                 Close();
             }
         }

@@ -72,6 +72,8 @@ namespace DLCV
         [DefaultValue(8f)]
         public float VisualizationMinFontSize { get; set; } = 8f;
 
+        public Color VisualizationLabelBackgroundColor { get; set; } = Color.FromArgb(160, 0, 0, 0);
+
         // 新增参数控制是否显示状态文本
         public bool ShowStatusText { get; set; } = false;
 
@@ -505,8 +507,7 @@ namespace DLCV
                                     SizeF textSize = e.Graphics.MeasureString(label, font);
                                     float textTopY = topLeftPadding + topLeftLabelIndex * (textSize.Height + topLeftPadding / 2f);
 
-                                    // 绘制半透明黑色背景
-                                    using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                                    using (SolidBrush backgroundBrush = new SolidBrush(VisualizationLabelBackgroundColor))
                                     {
                                         e.Graphics.FillRectangle(backgroundBrush, topLeftPadding, textTopY, textSize.Width, textSize.Height);
                                     }
@@ -596,8 +597,7 @@ namespace DLCV
                                 float textX = cx - textSize.Width / 2;
                                 float textY = cy - h / 2 - textSize.Height - 2;
 
-                                // 绘制半透明黑色背景
-                                using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                                using (SolidBrush backgroundBrush = new SolidBrush(VisualizationLabelBackgroundColor))
                                 {
                                     e.Graphics.FillRectangle(backgroundBrush, textX, textY, textSize.Width, textSize.Height);
                                 }
@@ -654,8 +654,7 @@ namespace DLCV
                                 SizeF textSize = e.Graphics.MeasureString(label, font);
                                 float textY = y - textSize.Height - 2;
 
-                                // 绘制半透明黑色背景
-                                using (SolidBrush backgroundBrush = new SolidBrush(Color.FromArgb(160, 0, 0, 0)))
+                                using (SolidBrush backgroundBrush = new SolidBrush(VisualizationLabelBackgroundColor))
                                 {
                                     e.Graphics.FillRectangle(backgroundBrush, x, textY, textSize.Width, textSize.Height);
                                 }

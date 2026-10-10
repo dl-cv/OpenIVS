@@ -103,7 +103,7 @@ class StatisticsModuleSourceTest(unittest.TestCase):
         self.assertIn("QTimer::singleShot(15000, &window, &QWidget::close)", cli)
         self.assertIn("return QApplication::exec()", cli)
         entry = window[window.index("bool MainWindow::runOffscreenInference("):window.index("void MainWindow::closeEvent(")]
-        self.assertLess(entry.index("if (!inferCurrentImage())"), entry.index("show();"))
+        self.assertLess(entry.index("show();"), entry.index("if (!inferCurrentImage())"))
         self.assertNotIn("comboDevice_->addItem", entry)
         self.assertNotIn("deviceNameToId_.insert", entry)
 

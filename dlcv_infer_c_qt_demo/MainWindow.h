@@ -30,7 +30,7 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget* parent = nullptr, bool offscreen = false);
     bool runOffscreenInference(const QString& modelPath, const QString& imagePath,
-        double threshold, int device, const QString& screenshotPath, QString& error);
+        double threshold, int device, const QString& outputPath, const QString& resultView, QString& error);
     ~MainWindow() override = default;
 
 protected:

@@ -23,6 +23,7 @@
 #include <QPointer>
 #include <QPushButton>
 #include <QScreen>
+#include <QStyle>
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
@@ -169,16 +170,26 @@ MainWindow::MainWindow(QWidget* parent, bool offscreen) : QMainWindow(parent), o
         reportError("加载推理库失败", QString::fromStdWString(api_.lastError()));
         return;
     }
-    if (!offscreen_) {
+    if (!offscreen_ || QGuiApplication::platformName() == QStringLiteral("windows")) {
         initializeDevicesAsync();
     }
 }
 
 bool MainWindow::runOffscreenInference(const QString& modelPath, const QString& imagePath,
-    double threshold, int device, const QString& screenshotPath, QString& error) {
+    double threshold, int device, const QString& outputPath, const QString& resultView, QString& error) {
     if (!offscreen_ || !api_.isLoaded()) {
         error = QStringLiteral("推理库未加载");
         return false;
+    }
+    if (deviceInitializationThread_.joinable()) {
+        deviceInitializationThread_.join();
+        QApplication::processEvents();
+        const QString deviceName = deviceNameToId_.key(device);
+        if (deviceName.isEmpty()) {
+            error = QStringLiteral("指定的推理设备不存在");
+            return false;
+        }
+        comboDevice_->setCurrentText(deviceName);
     }
     modelIndex_ = api_.loadModel(modelPath.toLocal8Bit().constData(), device);
     if (modelIndex_ < 0) {
@@ -189,6 +200,8 @@ bool MainWindow::runOffscreenInference(const QString& modelPath, const QString& 
     spinThreshold_->setValue(threshold);
     imagePath_ = imagePath;
     resize(1280, 800);
+    show();
+    QApplication::processEvents();
     if (!inferCurrentImage()) {
         error = outputText_->toPlainText();
         return false;
@@ -197,18 +210,50 @@ bool MainWindow::runOffscreenInference(const QString& modelPath, const QString& 
         error = QStringLiteral("真实推理未检测到目标，未生成截图");
         return false;
     }
-    // 结果准备好后显示完整窗口，原生 ui-test 可由外部采集程序取得实图。
+    if (resultView == QStringLiteral("json")) {
+        onInferJson();
+        try {
+            const json result = json::parse(outputText_->toPlainText().toUtf8().constData());
+            const json& results = result.is_array() ? result : result.at("result_list");
+            if (!results.is_array() || results.empty()) {
+                error = QStringLiteral("JSON 推理未生成结果列表");
+                return false;
+            }
+        } catch (...) {
+            error = outputText_->toPlainText();
+            return false;
+        }
+    }
     show();
     QApplication::processEvents();
-    const QPixmap snapshot = grab();
-    if (snapshot.isNull()) {
-        error = QStringLiteral("离屏窗口绘制失败");
+    QSaveFile file(outputPath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        error = QStringLiteral("验证结果文件无法写入");
         return false;
     }
-    QSaveFile file(screenshotPath);
-    if (!file.open(QIODevice::WriteOnly) || !snapshot.save(&file, "PNG") || !file.commit()) {
-        error = QStringLiteral("PNG 写入失败");
-        file.cancelWriting();
+    if (QGuiApplication::platformName() == QStringLiteral("offscreen")) {
+        const QPixmap snapshot = grab();
+        if (snapshot.isNull() || !snapshot.save(&file, "PNG")) {
+            error = QStringLiteral("离屏窗口绘制失败");
+            file.cancelWriting();
+            return false;
+        }
+    } else {
+        const json report = {{"passed", true}, {"result_count", offscreenResultCount_},
+            {"result_view", resultView.toStdString()},
+            {"qt_style", QApplication::style()->objectName().toStdString()},
+            {"qt_style_class", QApplication::style()->metaObject()->className()},
+            {"palette_base", palette().color(QPalette::Base).name().toStdString()},
+            {"result_text", outputText_->toPlainText().toUtf8().toStdString()}};
+        const std::string text = report.dump(2);
+        if (file.write(text.data(), static_cast<qint64>(text.size())) != static_cast<qint64>(text.size())) {
+            error = QStringLiteral("验证结果文件写入失败");
+            file.cancelWriting();
+            return false;
+        }
+    }
+    if (!file.commit()) {
+        error = QStringLiteral("验证结果文件保存失败");
         return false;
     }
     return true;
@@ -350,6 +395,7 @@ void MainWindow::setupUi() {
     outputText_->setReadOnly(true);
 
     imageViewer_ = new ImageViewerWidget(this);
+    imageViewer_->setUsePaletteBackground(true);
     imageViewer_->setShowStatusText(false);
     imageViewer_->setShowVisualization(true);
 
@@ -423,7 +469,9 @@ void MainWindow::initializeDevicesAsync() {
 
         std::vector<GpuDeviceItem> devices;
         QString warning;
-        api_.keepMaxClock();
+        if (!offscreen_) {
+            api_.keepMaxClock();
+        }
 
         const char* raw = api_.getGpuInfo();
         std::string rawCopy = raw == nullptr ? std::string{} : std::string(raw);
