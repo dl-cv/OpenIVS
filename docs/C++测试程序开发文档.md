@@ -336,4 +336,4 @@ Debug\dlcv_infer_cpp_test.exe undersized-model-selftest
 
 ## 已加载模型列表
 
-`dlcv_infer_cpp_dll_demo.exe list-sdk-models` 与 `dlcv_infer_c_demo.exe list-sdk-models` 返回已加载推理模块的模型快照。单独执行该命令不会初始化 GPU 时钟或加载底层推理模块；尚无模块时返回空 `modules` 数组。结果字段及释放方式参见 [C++ API文档.md](C%2B%2B%20API%E6%96%87%E6%A1%A3.md) 和 [C API文档.md](C%20API%E6%96%87%E6%A1%A3.md)。
+`dlcv_infer_cpp_dll_demo.exe list-sdk-models` 与 `dlcv_infer_c_demo.exe list-sdk-models` 返回已加载推理模块的模型快照。单独执行该命令不会初始化 GPU 时钟或加载底层推理模块；尚无模块时返回空 `modules` 数组。结果字段及释放方式参见 [C++ API文档.md](C++%20API文档.md) 和 [C API文档.md](C%20API文档.md)。
