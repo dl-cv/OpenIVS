@@ -14,7 +14,7 @@ def local_link_targets(document):
     content = document.read_text(encoding="utf-8-sig")
     content = re.sub(r"(?ms)^```[^\n]*\n.*?^```[ \t]*$", "", content)
     for match in LINK_PATTERN.finditer(content):
-        target = match.group(1).strip("<>")
+        target = match.group(1).strip("<>").replace("\\", "/")
         parsed = urlsplit(target)
         if parsed.scheme or parsed.netloc or not parsed.path:
             continue
@@ -22,18 +22,22 @@ def local_link_targets(document):
 
 
 class DocumentationLayoutTest(unittest.TestCase):
-    def test_root_markdown_is_limited_to_entry_and_rules(self):
+    def test_root_markdown_is_limited_to_usage_and_rules(self):
         self.assertEqual(
             {path.name for path in REPOSITORY_ROOT.glob("*.md")},
             {"README.md", "AGENTS.md", "CLAUDE.md"},
         )
-        self.assertFalse((REPOSITORY_ROOT / "README").exists())
-        self.assertTrue((DOCUMENTATION_ROOT / "images/openivs.png").is_file())
+        self.assertTrue((REPOSITORY_ROOT / "README/openivs.png").is_file())
+        self.assertFalse((DOCUMENTATION_ROOT / "images").exists())
+        homepage = (REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8-sig")
+        for marker in ("## 简介", "## 安装需求", "## 使用说明", "![](README/openivs.png)"):
+            self.assertIn(marker, homepage)
 
     def test_documentation_index_covers_all_manuals(self):
         index = DOCUMENTATION_ROOT / "README.md"
         manuals = {path.resolve() for path in DOCUMENTATION_ROOT.glob("*.md")}
         manuals.remove(index.resolve())
+        manuals.add((REPOSITORY_ROOT / "README.md").resolve())
         self.assertEqual(set(local_link_targets(index)), manuals)
 
     def test_relative_document_and_image_links_resolve(self):

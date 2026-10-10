@@ -86,7 +86,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 ## 文档位置
 
-项目文档统一存放在 `docs/`，目录见 `docs/README.md`；根目录 `README.md` 保留仓库文档入口。
+项目技术文档统一存放在 `docs/`，目录见 `docs/README.md`；整理技术文档时保留根目录 `README.md` 的原有使用说明及 `README/` 图片，不将首页替换为文档目录。
 
 ## 常见修改点
 
