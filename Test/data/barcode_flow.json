@@ -1,0 +1,97 @@
+{
+  "nodes": [
+    {
+      "id": 1,
+      "order": 0,
+      "type": "input/image",
+      "properties": {},
+      "outputs": [
+        {
+          "name": "image",
+          "type": "image_chan",
+          "links": [
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "order": 1,
+      "type": "features/barcode_reader",
+      "properties": {
+        "formats": "",
+        "try_rotate": true,
+        "try_invert": true
+      },
+      "inputs": [
+        {
+          "name": "image",
+          "type": "image_chan",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "image_chan",
+          "links": [
+            2
+          ]
+        },
+        {
+          "name": "results",
+          "type": "result_chan",
+          "links": [
+            3
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "order": 2,
+      "type": "output/return_json",
+      "properties": {},
+      "inputs": [
+        {
+          "name": "image",
+          "type": "image_chan",
+          "link": 2
+        },
+        {
+          "name": "results",
+          "type": "result_chan",
+          "link": 3
+        }
+      ],
+      "outputs": []
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "image_chan"
+    ],
+    [
+      2,
+      2,
+      0,
+      3,
+      0,
+      "image_chan"
+    ],
+    [
+      3,
+      2,
+      1,
+      3,
+      1,
+      "result_chan"
+    ]
+  ]
+}

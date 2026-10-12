@@ -5487,6 +5487,52 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunThreeModelLoadTiming(argc, argv);
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"barcode-selftest") {
+        try {
+            if (argc != 5) throw std::invalid_argument("barcode-selftest <manifest.json> <flow.json> <output.json>");
+            std::ifstream stream{std::filesystem::path(argv[2])};
+            json manifest; stream >> manifest;
+            dlcv_infer::flow::FlowGraphModel flow;
+            auto report = flow.Load(WideToUtf8(argv[3]));
+            if (report.at("code") != 0) throw std::runtime_error(report.dump());
+            auto factory = dlcv_infer::flow::ModuleRegistry::Get("features/barcode_reader");
+            if (!factory) throw std::runtime_error("Barcode module not registered");
+            auto reader = factory(1, "", json::object(), nullptr);
+            if (!reader->Process({}, json::array()).ResultList.empty()) throw std::runtime_error("Empty batch failed");
+            json output = json::array();
+            for (const auto& item : manifest) {
+                cv::Mat raw = cv::imread(item.at("path").get<std::string>(), cv::IMREAD_UNCHANGED), image;
+                if (raw.empty()) throw std::runtime_error("Missing input image");
+                if (raw.channels() == 3) cv::cvtColor(raw, image, cv::COLOR_BGR2RGB);
+                else if (raw.channels() == 4) cv::cvtColor(raw, image, cv::COLOR_BGRA2RGBA);
+                else image = raw;
+                cv::Mat padded(image.rows, image.cols + 13, image.type(), cv::Scalar::all(255));
+                cv::Mat roi = padded(cv::Rect(0, 0, image.cols, image.rows));
+                image.copyTo(roi);
+                dlcv_infer::flow::ModuleImage wrap(roi, roi, dlcv_infer::flow::TransformationState(roi.cols, roi.rows), 7, "barcode-roi");
+                auto local = reader->Process({wrap}, json::array()).ResultList;
+                if (local[0]["origin_index"] != 7 || local[0]["unique_id"] != "barcode-roi") throw std::runtime_error("Metadata lost");
+                auto result = flow.InferOneOutJson(roi);
+                output.push_back({{"name", item.at("name")}, {"local", local[0]["sample_results"]}, {"flow", result}});
+                for (int i = 0; i < 20; ++i) reader->Process({wrap}, json::array());
+                auto filtered = factory(1, "", {{"formats", "DataMatrix"}}, nullptr)->Process({wrap}, json::array());
+                for (const auto& det : filtered.ResultList[0]["sample_results"])
+                    if (det["extra_info"]["barcode_format"] != "Data Matrix") throw std::runtime_error("Format filter failed");
+                for (const auto& properties : {json{{"formats", "invalid-format"}}, json{{"try_rotate", "false"}}}) {
+                    bool failed = false;
+                    try { factory(1, "", properties, nullptr)->Process({wrap}, json::array()); }
+                    catch (const std::exception&) { failed = true; }
+                    if (!failed) throw std::runtime_error("Invalid properties accepted");
+                }
+            }
+            std::ofstream destination{std::filesystem::path(argv[4])};
+            destination << output.dump(2);
+            if (!destination) throw std::runtime_error("Cannot write test output");
+            std::cout << "Barcode selftest passed: " << output.size() << std::endl;
+            return 0;
+        } catch (const std::exception& ex) { std::cerr << ex.what() << std::endl; return 1; }
+    }
+
     if (argc >= 2 && std::wstring(argv[1]) == L"foreground-background-statistics-selftest") {
         return RunForegroundBackgroundStatisticsSelfTest();
     }
@@ -5554,6 +5600,7 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  image-generation-expand-selftest\n";
     std::cout << "  cross-model-label-merge-selftest\n";
     std::cout << "  load-three-models <extractModelPath> <componentModelPath> <icModelPath>\n";
+    std::cout << "  barcode-selftest <manifest.json> <flow.json> <output.json>\n";
     std::cout << "  foreground-background-statistics-selftest\n";
     std::cout << "  object-mean-parsing-selftest\n";
     std::cout << "  dvsp-disabled-selftest\n";

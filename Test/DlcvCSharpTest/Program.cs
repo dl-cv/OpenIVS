@@ -95,6 +95,8 @@ namespace DlcvCSharpTest
                     return RunModelChannelOrderSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && args[0] == "barcode-selftest") return BarcodeReaderSelfTest.Run(args);
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "foreground-background-statistics-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return ForegroundBackgroundStatisticsSelfTest.Run();
