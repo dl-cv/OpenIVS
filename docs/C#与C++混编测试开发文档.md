@@ -82,15 +82,15 @@ python .cursor/skills/vs-build/scripts/build.py DlcvCSharpCppTest/DlcvCSharpCppT
 `model-test` 不创建 WinForms 对象，执行 C# 加载、C++ 共享、两侧普通模型信息读取、指定释放顺序和最终索引失效检查；DVST/DVSO 还分别调用两侧 `GetDvsModelInfo()`。测试同时读取 `Utils.GetAllModels()`，确认当前资源位于实际已加载模块的独立快照中，且列表查询没有额外加载其他推理 DLL。`--release-order` 接受 `csharp-first`（默认）或 `cpp-first`；`--device` 默认为 0。`--load-mode shared` 为默认共享流程，`cpp-shared` 从 C++ 加载并共享到 C#，验证两种释放顺序、再次共享及关闭释放；`cpp` 只从 C++ 加载并验证释放、重载和最终编号失效，`independent` 分别从 C++、C# 文件构造并验证两种释放顺序。
 
 ```powershell
-& .\Test\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe model-test --model "<模型文件>" --release-order csharp-first --output "$env:TEMP\mixed-cli.json"
+& .\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe model-test --model "<模型文件>" --release-order csharp-first --output "$env:TEMP\mixed-cli.json"
 ```
 
 ## 非交互 UI 验证
 
 ```powershell
-& .\Test\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe designer-test --output "$env:TEMP\mixed-designer.json"
-& .\Test\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe ui-test --output "$env:TEMP\mixed-ui.json"
-& .\Test\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe ui-test --model "<模型文件>" --device 0 --output "$env:TEMP\mixed-model.json" --screenshot "$env:TEMP\mixed-model.png"
+& .\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe designer-test --output "$env:TEMP\mixed-designer.json"
+& .\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe ui-test --output "$env:TEMP\mixed-ui.json"
+& .\DlcvCSharpCppTest\bin\x64\Debug\DlcvCSharpCppTest.exe ui-test --model "<模型文件>" --device 0 --output "$env:TEMP\mixed-model.json" --screenshot "$env:TEMP\mixed-model.png"
 ```
 
 - `designer-test` 仅构造和释放未显示的窗体，检查八个模型操作按钮和浏览按钮，并检查进程未加载 C++/CLI 桥接或原生推理模块。
