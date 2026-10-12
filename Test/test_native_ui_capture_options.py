@@ -8,16 +8,19 @@ def read_source(relative):
     return (ROOT / relative).read_text(encoding="utf-8-sig")
 
 class NativeUiCaptureSourceTest(unittest.TestCase):
-    def test_light_canvas_and_labels_follow_application_colors(self):
+    def test_window_theme_does_not_change_visualization_backgrounds(self):
         for app in ("dlcv_infer_cpp_qt_demo", "dlcv_infer_c_qt_demo"):
             viewer = read_source(app + "/ImageViewerWidget.cpp")
-            self.assertEqual(viewer.count("usePaletteBackground_ ? palette().color(QPalette::Base)"), 2)
-            self.assertIn("bool usePaletteBackground_ = false;", read_source(app + "/ImageViewerWidget.h"))
-            self.assertIn("imageViewer_->setUsePaletteBackground(true);", read_source(app + "/MainWindow.cpp"))
+            self.assertIn("painter.fillRect(rect(), QColor(20, 20, 20));", viewer)
+            self.assertIn("painter.fillRect(textRect, QColor(0, 0, 0, 160));", viewer)
+            self.assertNotIn("usePaletteBackground_", viewer)
+            self.assertNotIn("setUsePaletteBackground", read_source(app + "/MainWindow.cpp"))
         designer = read_source("DlcvDemo/MainWindow.Designer.cs")
-        self.assertIn("this.imagePanel1.BackColor = Color.White;", designer)
-        self.assertIn("this.imagePanel1.VisualizationLabelBackgroundColor = Color.White;", designer)
-        self.assertEqual(read_source("ImageViewer/ImageViewer.cs").count("new SolidBrush(VisualizationLabelBackgroundColor)"), 3)
+        self.assertIn("this.rootLayout.BackColor = Color.FromArgb(243, 245, 247);", designer)
+        self.assertIn("this.topCard.BackColor = Color.White;", designer)
+        self.assertIn("this.imagePanel1.BackColor = Color.FromArgb(32, 36, 40);", designer)
+        self.assertNotIn("VisualizationLabelBackgroundColor", designer)
+        self.assertEqual(read_source("ImageViewer/ImageViewer.cs").count("new SolidBrush(Color.FromArgb(160, 0, 0, 0))"), 3)
 
     def test_csharp_delay_is_optional_and_bounded(self):
         source = read_source("DlcvDemo/UiTestOptions.cs")

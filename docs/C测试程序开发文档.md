@@ -79,7 +79,7 @@
 
 结构化结果在释放前复制为显示数据。类别、分数、普通框、旋转框、mask、面积和角度直接使用本次结构化结果显示；`extra_info` 的 UTF-8 JSON 对象解析为程序内部的通用扩展对象，同时展示均值、中值及空侧 `null`，有效零值仍为数值。不为显示统计再次执行 JSON 推理。mask 在调用结果释放函数前复制到程序内部的 `cv::Mat`，扩展信息解析后不再持有 C 借用指针。节点语义见 `模块、流程与模型推理标准文档.md` 6.4.1，公开 C 结果及释放要求见 `C API文档.md` 3。
 
-图像画布与标签底色跟随 Qt 调色板的 Base 色；浅色模式为白色。原生启动可使用 Qt 正式参数 `-platform windows:darkmode=0 -style windows11`，样式来自随程序部署的 `qmodernwindowsstyle` 插件。
+窗口可通过 Qt 正式参数 `-platform windows:darkmode=0 -style windows11` 使用浅色模式，样式来自随程序部署的 `qmodernwindowsstyle` 插件；图像画布保持深灰色，标签保持半透明黑色底色，不随窗口主题改变。
 
 ### 非交互窗口验证
 
