@@ -250,7 +250,6 @@ void MainWindow::setupUi() {
     outputText_->setReadOnly(true);
 
     imageViewer_ = new ImageViewerWidget(this);
-    imageViewer_->setUsePaletteBackground(true);
     imageViewer_->setShowStatusText(false);
     imageViewer_->setShowVisualization(true);
 
