@@ -337,8 +337,9 @@ std::string ReadLineOrThrow(FILE* fp) {
     std::string line;
     for (;;) {
         const int c = std::fgetc(fp);
-        if (c == EOF) break;
+        if (c == EOF) throw std::runtime_error("unterminated dvst header line");
         if (c == '\n') break;
+        if (line.size() >= 16 * 1024 * 1024) throw std::runtime_error("dvst header line is too large");
         line.push_back(static_cast<char>(c));
     }
     if (line.empty()) throw std::runtime_error("failed to read dvst header line");
@@ -347,9 +348,12 @@ std::string ReadLineOrThrow(FILE* fp) {
 
 long long ReadFileSizeFromJson(const Json& v) {
     try {
+        if (v.is_number_unsigned()) {
+            const auto size = v.get<unsigned long long>();
+            return size <= static_cast<unsigned long long>(std::numeric_limits<long long>::max())
+                ? static_cast<long long>(size) : -1;
+        }
         if (v.is_number_integer()) return v.get<long long>();
-        if (v.is_number()) return static_cast<long long>(v.get<double>());
-        if (v.is_string()) return std::stoll(v.get<std::string>());
     } catch (...) {}
     return -1;
 }
@@ -421,6 +425,30 @@ DvsArchiveData ReadDvsArchive(const std::wstring& archivePathW) {
             header.at("file_list").size() != header.at("file_size").size()) {
             throw std::runtime_error("流程模型文件头中的 file_list 与 file_size 不匹配");
         }
+
+        // 在读取载荷和分配内存之前核对头部声明与文件实际剩余长度。
+#ifdef _WIN32
+        const auto payloadOffset = _ftelli64(fp);
+        const int seekEnd = _fseeki64(fp, 0, SEEK_END);
+        const auto archiveSize = _ftelli64(fp);
+        const int seekBack = _fseeki64(fp, payloadOffset, SEEK_SET);
+#else
+        const auto payloadOffset = ftello(fp);
+        const int seekEnd = fseeko(fp, 0, SEEK_END);
+        const auto archiveSize = ftello(fp);
+        const int seekBack = fseeko(fp, payloadOffset, SEEK_SET);
+#endif
+        if (payloadOffset < 0 || seekEnd != 0 || archiveSize < payloadOffset || seekBack != 0) {
+            throw std::runtime_error("无法读取流程模型文件长度");
+        }
+        auto remaining = archiveSize - payloadOffset;
+        for (const auto& sizeToken : header.at("file_size")) {
+            const long long size = ReadFileSizeFromJson(sizeToken);
+            if (size < 0) throw std::runtime_error("流程模型中的文件大小无效");
+            if (size > remaining) throw std::runtime_error("归档声明的文件大小超出实际剩余长度");
+            remaining -= size;
+        }
+        if (remaining != 0) throw std::runtime_error("归档实际长度与文件头声明长度不一致");
 
         bool gotPipeline = false;
         std::string pipelineData;
@@ -2480,7 +2508,8 @@ namespace dlcv_infer {
         if (IsUnsupportedDvspPath(modelPathUtf8)) {
             throw std::invalid_argument("不支持 .dvsp 模型推理");
         }
-        RejectUndersizedModelFile(modelPathW);
+        if (!EndsWithIgnoreCase(modelPathUtf8, ".dvst"))
+            RejectUndersizedModelFile(modelPathW);
         if (IsFlowArchivePath(modelPathUtf8)) {
             try {
                 LoadFlowArchiveAndRegister(modelPathW, device_id);
@@ -2512,7 +2541,8 @@ namespace dlcv_infer {
         if (IsUnsupportedDvspPath(modelPathUtf8)) {
             throw std::invalid_argument("不支持 .dvsp 模型推理");
         }
-        RejectUndersizedModelFile(modelPath);
+        if (!EndsWithIgnoreCase(modelPathUtf8, ".dvst"))
+            RejectUndersizedModelFile(modelPath);
         if (IsFlowArchivePath(modelPathUtf8)) {
             try {
                 LoadFlowArchiveAndRegister(modelPath, device_id);

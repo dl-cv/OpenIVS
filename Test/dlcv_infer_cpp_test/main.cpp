@@ -569,9 +569,11 @@ std::string LoadUndersizedModelExpectingError(const std::wstring& path) {
     }
 }
 
+int RunDvstValidationSelfTest();
+
 int RunUndersizedModelSelfTest() {
     try {
-        const wchar_t* suffixes[] = { L".dvt", L".dvo", L".dvp", L".dvst", L".dvso" };
+        const wchar_t* suffixes[] = { L".dvt", L".dvo", L".dvp", L".dvso" };
         std::vector<std::wstring> files;
         for (const wchar_t* suffix : suffixes) {
             std::wstring path = BuildUndersizedSelfTestPath(suffix);
@@ -597,7 +599,7 @@ int RunUndersizedModelSelfTest() {
 
         for (const auto& file : files) DeleteFileW(file.c_str());
         PrintUtf8Line("C++ 过小模型文件拒绝测试通过");
-        return 0;
+        return RunDvstValidationSelfTest();
     } catch (const std::exception& ex) {
         PrintUtf8ErrorLine(ex.what());
         return 1;
@@ -698,6 +700,58 @@ bool LoadDvsArchiveForSelfTest(const std::wstring& path, std::string& error) {
         error = "加载 DVS 自测归档时发生未知异常";
         return false;
     }
+}
+
+int RunDvstValidationSelfTest() {
+    const std::string pipeline = "{\"nodes\":[],\"edges\":[]}";
+    const json header = {{"file_list", {"pipeline.json"}}, {"file_size", {pipeline.size()}}};
+    const std::string archive = "DV\n" + header.dump() + "\n" + pipeline;
+    auto verify = [](const std::string& name, const std::string& contents, const std::string& expectedError) {
+        ScopedDvsSelfTestFile file(BuildDvsSelfTestFilePath(L"validation"));
+        file.path.replace(file.path.size() - 5, 5, L".DVST");
+        WriteDvsSelfTestFile(file.path, std::vector<unsigned char>(contents.begin(), contents.end()));
+        // Both public path overloads must use the same archive validation.
+        for (bool narrow : {false, true}) {
+            std::string error;
+            try {
+                std::unique_ptr<dlcv_infer::Model> model;
+                if (narrow) model = std::make_unique<dlcv_infer::Model>(WideToUtf8(file.path), 0);
+                else model = std::make_unique<dlcv_infer::Model>(file.path, 0);
+                model->FreeModel();
+            } catch (const std::exception& ex) { error = ex.what(); }
+            if (expectedError.empty() ? !error.empty() :
+                error.empty() || HasUndersizedModelMessage(error) || error.find(expectedError) == std::string::npos)
+                throw std::runtime_error(name + " validation mismatch: " + (error.empty() ? "loaded" : error));
+        }
+    };
+    verify("small-valid", archive, "");
+    const std::string largePipeline = pipeline + std::string(1024 * 1024, ' ');
+    json largeHeader = header;
+    largeHeader["file_size"][0] = largePipeline.size();
+    verify("large-valid", "DV\n" + largeHeader.dump() + "\n" + largePipeline, "");
+    verify("empty", "", "文件头");
+    verify("bad-magic", "XX" + archive.substr(2), "DV");
+    verify("bad-json", "DV\n{bad}\n", "parse");
+    verify("unterminated-header", "DV\n" + header.dump(), "header");
+    verify("missing-list", "DV\n{}\n", "file_list");
+    json badHeader = header;
+    badHeader["file_size"] = json::array();
+    verify("mismatched-lists", "DV\n" + badHeader.dump() + "\n", "file_list");
+    badHeader = header;
+    badHeader["file_list"][0] = 123;
+    verify("bad-name", "DV\n" + badHeader.dump() + "\n" + pipeline, "文件名");
+    verify("truncated", archive.substr(0, archive.size() - 1), "长度");
+    verify("trailing-bytes", archive + "x", "长度");
+    for (const std::string& size : {"-1", "1.5", "\"1\"", "9223372036854775807", "18446744073709551615"}) {
+        badHeader = header;
+        badHeader["file_size"][0] = json::parse(size);
+        verify("bad-size", "DV\n" + badHeader.dump() + "\n" + pipeline, "大小");
+    }
+    badHeader = header;
+    badHeader["file_list"][0] = "other.json";
+    verify("missing-pipeline", "DV\n" + badHeader.dump() + "\n" + pipeline, "pipeline.json");
+    PrintUtf8Line("C++ DVST 文件头/长度校验测试通过");
+    return 0;
 }
 
 bool VerifyDvsArchiveAccepted(
