@@ -1,7 +1,2 @@
 Test/** linguist-generated=true
-Test/DlcvCSharpCppTest/** -linguist-generated
-Test/DlcvCSharpCppTest/*SelfTest.cs linguist-generated=true
-Test/DlcvCSharpCppTest/CommandLineTest.cs linguist-generated=true
-Test/DlcvCSharpCppTest/MainForm.Testing.cs linguist-generated=true
-Test/DlcvCSharpCppTest/run_tests.py linguist-generated=true
-Test/DlcvCSharpCppTest/check_startup_configuration.ps1 linguist-generated=true
+DlcvCSharpCppTest/** -linguist-generated

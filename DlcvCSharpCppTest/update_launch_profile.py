@@ -5,7 +5,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 BASE = Path(__file__).resolve().parent
-ROOT = BASE.parent.parent
+ROOT = BASE.parent
 PROFILE = "C# 与 C++ 混编模型测试"
 NS = {"m": "http://schemas.microsoft.com/developer/msbuild/2003"}
 

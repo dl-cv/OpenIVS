@@ -24,10 +24,10 @@
     <TargetName>DlcvCSharpCppBridge</TargetName>
     <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_INCLUDE_DIR)'!=''">$(OpenCV_INCLUDE_DIR)</OpenCvIncludeDir>
     <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and Exists('$(OpenCV_DIR)\include\opencv2\core.hpp')">$(OpenCV_DIR)\include</OpenCvIncludeDir>
-    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and Exists('$(ProjectDir)..\..\..\third_party\opencv\build\include\opencv2\core.hpp')">$(ProjectDir)..\..\..\third_party\opencv\build\include</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and Exists('$(ProjectDir)..\..\third_party\opencv\build\include\opencv2\core.hpp')">$(ProjectDir)..\..\third_party\opencv\build\include</OpenCvIncludeDir>
     <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'==''">C:\OpenCV\build\include</OpenCvIncludeDir>
     <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and '$(DLCVPRO_INFER_INCLUDE)'!=''">$(DLCVPRO_INFER_INCLUDE)</DlcvProInferIncludeDir>
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(ProjectDir)..\..\..\third_party\dlcvpro_infer\include')">$(ProjectDir)..\..\..\third_party\dlcvpro_infer\include</DlcvProInferIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(ProjectDir)..\..\third_party\dlcvpro_infer\include')">$(ProjectDir)..\..\third_party\dlcvpro_infer\include</DlcvProInferIncludeDir>
     <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'==''">C:\dlcv\Lib\site-packages\dlcvpro_infer\include</DlcvProInferIncludeDir>
     <OpenCvBinDir Condition="'$(OpenCvBinDir)'=='' and '$(OpenCV_BIN_DIR)'!=''">$(OpenCV_BIN_DIR)</OpenCvBinDir>
     <OpenCvBinDir Condition="'$(OpenCvBinDir)'==''">$(OpenCvIncludeDir)\..\x64\vc16\bin</OpenCvBinDir>
@@ -38,7 +38,7 @@
       <WarningLevel>Level3</WarningLevel><PrecompiledHeader>NotUsing</PrecompiledHeader>
       <LanguageStandard>stdcpp17</LanguageStandard><ExceptionHandling>Async</ExceptionHandling>
       <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\..\..\dlcv_infer_cpp;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\dlcv_infer_cpp;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebugDLL</RuntimeLibrary>
       <RuntimeLibrary Condition="'$(Configuration)'!='Debug'">MultiThreadedDLL</RuntimeLibrary>
       <PreprocessorDefinitions Condition="'$(Configuration)'=='Debug'">_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -54,7 +54,7 @@
     <ClInclude Include="CppModel.h" /><ClInclude Include="NativeModel.h" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\dlcv_infer_cpp\dlcv_infer_cpp.vcxproj">
+    <ProjectReference Include="..\..\dlcv_infer_cpp\dlcv_infer_cpp.vcxproj">
       <Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly><LinkLibraryDependencies>true</LinkLibraryDependencies>
     </ProjectReference>
