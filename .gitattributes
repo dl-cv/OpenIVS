@@ -1,5 +1,5 @@
 Test/** linguist-generated=true
-Test/DlcvCSharpCppTest/** !linguist-generated
+Test/DlcvCSharpCppTest/** -linguist-generated
 Test/DlcvCSharpCppTest/*SelfTest.cs linguist-generated=true
 Test/DlcvCSharpCppTest/CommandLineTest.cs linguist-generated=true
 Test/DlcvCSharpCppTest/MainForm.Testing.cs linguist-generated=true
