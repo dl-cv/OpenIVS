@@ -557,7 +557,7 @@ namespace DlcvDemo
             this.button_save_json.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);
             this.button_save_json.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.button_save_json.ForeColor = Color.FromArgb(38, 50, 56);
-            this.button_save_json.Margin = new System.Windows.Forms.Padding(6, 0, 0, 8);
+            this.button_save_json.Margin = new System.Windows.Forms.Padding(0, 0, 6, 8);
             this.button_save_json.Name = "button_save_json";
             this.button_save_json.Size = new System.Drawing.Size(100, 28);
             this.button_save_json.TabIndex = 25;
@@ -648,8 +648,8 @@ namespace DlcvDemo
             // resultLayout
             //
             this.resultLayout.Controls.Add(this.label_result, 0, 0);
-            this.resultLayout.Controls.Add(this.button_result_view, 1, 0);
-            this.resultLayout.Controls.Add(this.button_save_json, 2, 0);
+            this.resultLayout.Controls.Add(this.button_save_json, 1, 0);
+            this.resultLayout.Controls.Add(this.button_result_view, 2, 0);
             this.resultLayout.Controls.Add(this.richTextBox1, 0, 1);
             this.resultLayout.SetColumnSpan(this.richTextBox1, 3);
             //

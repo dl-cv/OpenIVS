@@ -151,8 +151,7 @@ namespace DlcvDemo
             {
                 length--;
             }
-            return string.Format(I18n.T("JSON 较大，仅预览前 {0:N0} 个字符（共 {1:N0} 个）。点击“保存 JSON”获取完整结果。"), length, json.Length)
-                + Environment.NewLine + Environment.NewLine + json.Substring(0, length);
+            return json.Substring(0, length) + Environment.NewLine + "……";
         }
 
         private void ClearResultData()

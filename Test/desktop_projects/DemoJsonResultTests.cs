@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
@@ -52,6 +51,8 @@ namespace DlcvDemo
                 string preview = richTextBox1.Text;
                 CheckJsonPreview(originalJson, preview);
                 RequireJsonCheck(button_save_json.Enabled, "存在 JSON 时保存按钮未启用。");
+                RequireJsonCheck(button_save_json.Right < button_result_view.Left
+                    && button_result_view.Right == resultLayout.ClientSize.Width, "保存按钮未位于左侧或原切换按钮位置改变。");
                 savingJson = true;
                 UpdateResultViewButton();
                 var closing = new System.Windows.Forms.FormClosingEventArgs(System.Windows.Forms.CloseReason.UserClosing, false);
@@ -212,12 +213,8 @@ namespace DlcvDemo
             if (char.IsHighSurrogate(json[length - 1]) && char.IsLowSurrogate(json[length])) length--;
             string expected = NormalizeJsonCheckText(json.Substring(0, length));
             string actual = NormalizeJsonCheckText(preview);
-            RequireJsonCheck(actual.Length > expected.Length && actual.Length <= expected.Length + 1024
-                && actual.EndsWith(expected, StringComparison.Ordinal), "大型 JSON 预览未保留限定长度的原文。");
-            string notice = actual.Substring(0, actual.Length - expected.Length);
-            RequireJsonCheck(notice.Contains("JSON")
-                && notice.Contains(length.ToString("N0", CultureInfo.CurrentCulture)), "大型 JSON 缺少长度提示。");
-            RequireJsonCheck(!char.IsHighSurrogate(actual[actual.Length - 1]), "预览截断了代理对。");
+            RequireJsonCheck(actual == expected + "\n……", "大型 JSON 应只在截断内容末尾追加省略号。");
+            RequireJsonCheck(!char.IsHighSurrogate(expected[expected.Length - 1]), "预览截断了代理对。");
         }
 
         private static long CheckSavedJson(string path, string expected)
