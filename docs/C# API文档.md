@@ -140,7 +140,7 @@ public static class ModelFactory
 **构造函数行为**：
 1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，实例化 `FlowGraphModel` 或 `DvsModel`。
 2. 若路径以 `.dvsp` 结尾 → 抛出 `NotSupportedException`，不加载文件。
-3. 若文件存在且体积小于 1MB → 抛出 `InvalidDataException`，消息为模型文件可能已损坏或不完整（文件小于 1MB），不进入 DVT/DVP/DVS/RPC 加载。内存加载子模型不受此规则约束。
+3. `.dvst` 不设 1MB 下限，按 `DV\n` 文件头、JSON 清单及声明长度校验；声明大小须为非负整数，载荷总长度必须与实际剩余长度一致，截断或多余尾部均拒绝。其他受支持格式若文件存在且小于 1MB，仍抛出 `InvalidDataException` 并提示损坏或不完整。内存加载子模型不受此大小下限约束。
 4. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 C API。
 5. 首次普通模型加载根据模型头 `dog_provider` 选择进程默认 DLL，并检查该模型授权；后续普通模型沿用默认 DLL，同时逐个检查授权。实际产品输入由模型加速器一次生成，每次只选择一种加密狗格式，同一产物及流程内子模型只包含该格式。非该生成流程得到的混合格式文件不属于产品输入，不用于扩展接口能力。
 6. 构造失败时抛出 `Exception`（底层错误信息封装在异常消息中）。
@@ -302,7 +302,7 @@ public class DvsModel : FlowGraphModel
 
 **`Load` 行为**：
 1. 打开 `.dvst`/`.dvso` 文件，校验头部 `DV\n`。
-2. 读取 JSON 头行，解析 `file_list` 和 `file_size` 数组。
+2. 读取完整 JSON 头行（上限 16 MiB），校验 `file_list` 和 `file_size` 数组数量一致、文件名为非空字符串、大小为非负整数；在分配载荷内存前核对声明总长度与实际剩余长度一致。
 3. 将 `pipeline.json` 和归档内子模型二进制读入内存，不写入模型文件；同名成员内容完全相同时保留第一份并复用，内容不同时抛出 `InvalidDataException`。
 4. 清除流程节点中遗留的 `model_index`，根据模型节点建立内存模型来源表，保留 `model_path_original` 和 `model_name`，通过 `dlcv_load_model_binary` 加载每个唯一子模型。
 5. 调用带内存模型来源表的 `LoadFromRoot` 完成加载；`FlowGraphModel` 持有节点对应的模型对象，推理期间按 index 复用。

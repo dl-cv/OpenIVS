@@ -174,14 +174,26 @@ namespace DlcvModules
             if (fileList == null || fileSize == null || fileList.Count != fileSize.Count)
                 throw new InvalidDataException("文件头信息损坏：file_list 或 file_size 缺失或数量不一致");
 
+            // 先核对总长度，再按清单分配内存，避免损坏头触发超大分配。
+            long remaining = stream.Length - stream.Position;
+            for (int i = 0; i < fileSize.Count; i++)
+            {
+                long declaredSize = ReadDeclaredSize(fileSize[i], i);
+                if (declaredSize > remaining)
+                    throw new InvalidDataException("归档声明的文件大小超出实际剩余长度");
+                remaining -= declaredSize;
+            }
+            if (remaining != 0)
+                throw new InvalidDataException("归档实际长度与文件头声明长度不一致");
+
             pipelineJson = null;
             byte[] pipelineData = null;
             entries = new Dictionary<string, ArchiveEntry>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < fileList.Count; i++)
             {
-                string entryName = fileList[i]?.ToString();
+                string entryName = fileList[i]?.Type == JTokenType.String ? fileList[i].Value<string>() : null;
                 if (string.IsNullOrWhiteSpace(entryName))
-                    throw new InvalidDataException($"文件头信息损坏：第 {i + 1} 个文件名为空");
+                    throw new InvalidDataException($"文件头信息损坏：第 {i + 1} 个文件名不是非空字符串");
 
                 long declaredSize = ReadDeclaredSize(fileSize[i], i);
                 byte[] data = ReadExactBytes(stream, declaredSize, $"读取 {entryName} 时文件意外结束");

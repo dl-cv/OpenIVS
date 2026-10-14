@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <ZXingRuntimeFile>$(MSBuildThisFileDirectory)packages\ZXingCpp.0.5.3\runtimes\win-x64\native\ZXing.dll</ZXingRuntimeFile>
+  </PropertyGroup>
+  <Target Name="CopyZXingRuntime" AfterTargets="Build" Condition="'$(Platform)'=='x64'">
+    <Error Condition="!Exists('$(ZXingRuntimeFile)')" Text="Missing ZXingCpp 0.5.3: restore DlcvCsharpApi/packages.config into the solution packages directory before building." />
+    <Copy SourceFiles="$(ZXingRuntimeFile)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)third_party\zxing-cpp\LICENSE.txt" DestinationFiles="$(TargetDir)ZXing-LICENSE.txt" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)third_party\zxing-cpp\NOTICE.txt" DestinationFiles="$(TargetDir)ZXing-NOTICE.txt" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

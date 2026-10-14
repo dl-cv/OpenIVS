@@ -95,6 +95,8 @@ namespace DlcvCSharpTest
                     return RunModelChannelOrderSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && args[0] == "barcode-selftest") return BarcodeReaderSelfTest.Run(args);
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "foreground-background-statistics-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return ForegroundBackgroundStatisticsSelfTest.Run();
@@ -6155,7 +6157,7 @@ namespace DlcvCSharpTest
             var files = new List<string>();
             try
             {
-                string[] extensions = { ".dvt", ".dvo", ".dvp", ".dvst", ".dvso" };
+                string[] extensions = { ".dvt", ".dvo", ".dvp", ".dvso" };
                 foreach (string ext in extensions)
                 {
                     string path = Path.Combine(Path.GetTempPath(), "dlcv_undersized_" + Guid.NewGuid().ToString("N") + ext);
@@ -6179,8 +6181,41 @@ namespace DlcvCSharpTest
                     return 1;
                 }
 
-                Console.WriteLine("C# 过小模型文件拒绝测试通过");
+                string pipeline = "{\"nodes\":[],\"edges\":[]}";
+                string header = "{\"file_list\":[\"pipeline.json\"],\"file_size\":[" + Encoding.UTF8.GetByteCount(pipeline) + "]}";
+                string archive = "DV\n" + header + "\n" + pipeline;
+                Action<string, string, string> verifyArchive = (name, contents, expectedError) =>
+                {
+                    string path = Path.Combine(Path.GetTempPath(), "dlcv_dvst_" + Guid.NewGuid().ToString("N") + name + ".DVST");
+                    File.WriteAllBytes(path, Encoding.UTF8.GetBytes(contents));
+                    files.Add(path);
+                    string error = LoadModelExpectingError(path);
+                    if (expectedError == null ? error != null :
+                        error == null || HasUndersizedModelMessage(error) || !error.Contains(expectedError))
+                        throw new Exception(name + " 校验结果不符: " + (error ?? "加载成功"));
+                };
+                verifyArchive("small-valid", archive, null);
+                string largePipeline = pipeline + new string(' ', 1024 * 1024);
+                verifyArchive("large-valid", "DV\n" + header.Replace("[" + pipeline.Length + "]", "[" + largePipeline.Length + "]") + "\n" + largePipeline, null);
+                verifyArchive("empty", "", "结束");
+                verifyArchive("bad-magic", "XX" + archive.Substring(2), "DV");
+                verifyArchive("bad-json", "DV\n{bad}\n", "JSON");
+                verifyArchive("unterminated-header", "DV\n" + header, "头行未结束");
+                verifyArchive("missing-list", "DV\n{}\n", "file_list");
+                verifyArchive("mismatched-lists", "DV\n{\"file_list\":[\"pipeline.json\"],\"file_size\":[]}\n", "file_list");
+                verifyArchive("bad-name", archive.Replace("\"pipeline.json\"", "123"), "文件名");
+                verifyArchive("truncated", archive.Substring(0, archive.Length - 1), "长度");
+                verifyArchive("trailing-bytes", archive + "x", "长度");
+                foreach (string size in new[] { "-1", "1.5", "\"1\"", "9223372036854775807", "18446744073709551615" })
+                    verifyArchive("bad-size", archive.Replace("[" + pipeline.Length + "]", "[" + size + "]"), size == "9223372036854775807" ? "过大" : "大小");
+                verifyArchive("missing-pipeline", archive.Replace("pipeline.json", "other.json"), "pipeline.json");
+                Console.WriteLine("C# 模型大小与 DVST 文件头/长度校验测试通过");
                 return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 1;
             }
             finally
             {

@@ -98,7 +98,9 @@ namespace dlcv_infer_csharp
             {
                 throw new NotSupportedException("当前不支持 .dvsp 模型，请使用 .dvst 或 .dvso");
             }
-            EnsureModelFileNotUndersized(modelPath);
+            // DVST 由归档解析器校验文件头及声明长度，不使用普通模型的大小下限。
+            if (extension != ".dvst")
+                EnsureModelFileNotUndersized(modelPath);
             _isDvpMode = extension == ".dvp";
             _isDvsMode = extension == ".dvst" || extension == ".dvso";
             _isRpcMode = rpc_mode;

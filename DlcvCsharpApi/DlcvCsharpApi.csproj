@@ -44,6 +44,9 @@
     <Reference Include="OpenCvSharp.Extensions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=6adad1e807fea099, processorArchitecture=MSIL">
       <HintPath>..\packages\OpenCvSharp4.Extensions.4.10.0.20241108\lib\netstandard2.0\OpenCvSharp.Extensions.dll</HintPath>
     </Reference>
+    <Reference Include="ZXingCpp">
+      <HintPath>..\packages\ZXingCpp.0.5.3\lib\netstandard2.0\ZXingCpp.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Buffers, Version=4.0.3.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>..\packages\System.Buffers.4.5.1\lib\net461\System.Buffers.dll</HintPath>
@@ -68,6 +71,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="flow\modules\BarcodeReader.cs" />
     <Compile Include="DllLoader.cs" />
     <Compile Include="Model.cs" />
     <Compile Include="DataTypes.cs" />
@@ -112,6 +116,18 @@
     <Compile Include="sequence\Nodes\BuiltinNodes.cs" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="..\packages\ZXingCpp.0.5.3\runtimes\win-x64\native\ZXing.dll">
+      <Link>ZXing.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\third_party\zxing-cpp\LICENSE.txt">
+      <Link>ZXing-LICENSE.txt</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\third_party\zxing-cpp\NOTICE.txt">
+      <Link>ZXing-NOTICE.txt</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <None Include="app.config" />
     <None Include="packages.config" />
   </ItemGroup>

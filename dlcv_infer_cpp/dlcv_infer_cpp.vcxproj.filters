@@ -26,6 +26,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="flow\modules\BarcodeReaderModule.cpp"><Filter>源文件\flow\modules</Filter></ClCompile>
     <ClCompile Include="dlcv_infer.cpp"><Filter>源文件</Filter></ClCompile>
     <ClCompile Include="dlcv_infer_c_api.cpp"><Filter>源文件</Filter></ClCompile>
     <ClCompile Include="dlcv_sntl_admin.cpp"><Filter>源文件</Filter></ClCompile>

@@ -569,9 +569,11 @@ std::string LoadUndersizedModelExpectingError(const std::wstring& path) {
     }
 }
 
+int RunDvstValidationSelfTest();
+
 int RunUndersizedModelSelfTest() {
     try {
-        const wchar_t* suffixes[] = { L".dvt", L".dvo", L".dvp", L".dvst", L".dvso" };
+        const wchar_t* suffixes[] = { L".dvt", L".dvo", L".dvp", L".dvso" };
         std::vector<std::wstring> files;
         for (const wchar_t* suffix : suffixes) {
             std::wstring path = BuildUndersizedSelfTestPath(suffix);
@@ -597,7 +599,7 @@ int RunUndersizedModelSelfTest() {
 
         for (const auto& file : files) DeleteFileW(file.c_str());
         PrintUtf8Line("C++ 过小模型文件拒绝测试通过");
-        return 0;
+        return RunDvstValidationSelfTest();
     } catch (const std::exception& ex) {
         PrintUtf8ErrorLine(ex.what());
         return 1;
@@ -698,6 +700,58 @@ bool LoadDvsArchiveForSelfTest(const std::wstring& path, std::string& error) {
         error = "加载 DVS 自测归档时发生未知异常";
         return false;
     }
+}
+
+int RunDvstValidationSelfTest() {
+    const std::string pipeline = "{\"nodes\":[],\"edges\":[]}";
+    const json header = {{"file_list", {"pipeline.json"}}, {"file_size", {pipeline.size()}}};
+    const std::string archive = "DV\n" + header.dump() + "\n" + pipeline;
+    auto verify = [](const std::string& name, const std::string& contents, const std::string& expectedError) {
+        ScopedDvsSelfTestFile file(BuildDvsSelfTestFilePath(L"validation"));
+        file.path.replace(file.path.size() - 5, 5, L".DVST");
+        WriteDvsSelfTestFile(file.path, std::vector<unsigned char>(contents.begin(), contents.end()));
+        // Both public path overloads must use the same archive validation.
+        for (bool narrow : {false, true}) {
+            std::string error;
+            try {
+                std::unique_ptr<dlcv_infer::Model> model;
+                if (narrow) model = std::make_unique<dlcv_infer::Model>(WideToUtf8(file.path), 0);
+                else model = std::make_unique<dlcv_infer::Model>(file.path, 0);
+                model->FreeModel();
+            } catch (const std::exception& ex) { error = ex.what(); }
+            if (expectedError.empty() ? !error.empty() :
+                error.empty() || HasUndersizedModelMessage(error) || error.find(expectedError) == std::string::npos)
+                throw std::runtime_error(name + " validation mismatch: " + (error.empty() ? "loaded" : error));
+        }
+    };
+    verify("small-valid", archive, "");
+    const std::string largePipeline = pipeline + std::string(1024 * 1024, ' ');
+    json largeHeader = header;
+    largeHeader["file_size"][0] = largePipeline.size();
+    verify("large-valid", "DV\n" + largeHeader.dump() + "\n" + largePipeline, "");
+    verify("empty", "", "文件头");
+    verify("bad-magic", "XX" + archive.substr(2), "DV");
+    verify("bad-json", "DV\n{bad}\n", "parse");
+    verify("unterminated-header", "DV\n" + header.dump(), "header");
+    verify("missing-list", "DV\n{}\n", "file_list");
+    json badHeader = header;
+    badHeader["file_size"] = json::array();
+    verify("mismatched-lists", "DV\n" + badHeader.dump() + "\n", "file_list");
+    badHeader = header;
+    badHeader["file_list"][0] = 123;
+    verify("bad-name", "DV\n" + badHeader.dump() + "\n" + pipeline, "文件名");
+    verify("truncated", archive.substr(0, archive.size() - 1), "长度");
+    verify("trailing-bytes", archive + "x", "长度");
+    for (const std::string& size : {"-1", "1.5", "\"1\"", "9223372036854775807", "18446744073709551615"}) {
+        badHeader = header;
+        badHeader["file_size"][0] = json::parse(size);
+        verify("bad-size", "DV\n" + badHeader.dump() + "\n" + pipeline, "大小");
+    }
+    badHeader = header;
+    badHeader["file_list"][0] = "other.json";
+    verify("missing-pipeline", "DV\n" + badHeader.dump() + "\n" + pipeline, "pipeline.json");
+    PrintUtf8Line("C++ DVST 文件头/长度校验测试通过");
+    return 0;
 }
 
 bool VerifyDvsArchiveAccepted(
@@ -5487,6 +5541,54 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunThreeModelLoadTiming(argc, argv);
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"barcode-selftest") {
+        try {
+            if (argc != 5) throw std::invalid_argument("barcode-selftest <manifest.json> <flow.json> <output.json>");
+            std::ifstream stream{std::filesystem::path(argv[2])};
+            json manifest; stream >> manifest;
+            dlcv_infer::flow::FlowGraphModel flow;
+            auto report = flow.Load(WideToUtf8(argv[3]));
+            if (report.at("code") != 0) throw std::runtime_error(report.dump());
+            auto factory = dlcv_infer::flow::ModuleRegistry::Get("features/barcode_reader");
+            if (!factory) throw std::runtime_error("Barcode module not registered");
+            auto reader = factory(1, "", json::object(), nullptr);
+            if (!reader->Process({}, json::array()).ResultList.empty()) throw std::runtime_error("Empty batch failed");
+            json output = json::array();
+            for (const auto& item : manifest) {
+                std::ifstream imageFile{std::filesystem::path(Utf8ToWide(item.at("path").get<std::string>())), std::ios::binary};
+                std::vector<unsigned char> imageBytes((std::istreambuf_iterator<char>(imageFile)), std::istreambuf_iterator<char>());
+                cv::Mat raw = imageBytes.empty() ? cv::Mat() : cv::imdecode(imageBytes, cv::IMREAD_UNCHANGED), image;
+                if (raw.empty()) throw std::runtime_error("Missing input image");
+                if (raw.channels() == 3) cv::cvtColor(raw, image, cv::COLOR_BGR2RGB);
+                else if (raw.channels() == 4) cv::cvtColor(raw, image, cv::COLOR_BGRA2RGBA);
+                else image = raw;
+                cv::Mat padded(image.rows, image.cols + 13, image.type(), cv::Scalar::all(255));
+                cv::Mat roi = padded(cv::Rect(0, 0, image.cols, image.rows));
+                image.copyTo(roi);
+                dlcv_infer::flow::ModuleImage wrap(roi, roi, dlcv_infer::flow::TransformationState(roi.cols, roi.rows), 7, "barcode-roi");
+                auto local = reader->Process({wrap}, json::array()).ResultList;
+                if (local[0]["origin_index"] != 7 || local[0]["unique_id"] != "barcode-roi") throw std::runtime_error("Metadata lost");
+                auto result = flow.InferOneOutJson(roi);
+                output.push_back({{"name", item.at("name")}, {"local", local[0]["sample_results"]}, {"flow", result}});
+                for (int i = 0; i < 20; ++i) reader->Process({wrap}, json::array());
+                auto filtered = factory(1, "", {{"formats", "DataMatrix"}}, nullptr)->Process({wrap}, json::array());
+                for (const auto& det : filtered.ResultList[0]["sample_results"])
+                    if (det["extra_info"]["barcode_format"] != "Data Matrix") throw std::runtime_error("Format filter failed");
+                for (const auto& properties : {json{{"formats", "invalid-format"}}, json{{"try_rotate", "false"}}}) {
+                    bool failed = false;
+                    try { factory(1, "", properties, nullptr)->Process({wrap}, json::array()); }
+                    catch (const std::exception&) { failed = true; }
+                    if (!failed) throw std::runtime_error("Invalid properties accepted");
+                }
+            }
+            std::ofstream destination{std::filesystem::path(argv[4])};
+            destination << output.dump(2);
+            if (!destination) throw std::runtime_error("Cannot write test output");
+            std::cout << "Barcode selftest passed: " << output.size() << std::endl;
+            return 0;
+        } catch (const std::exception& ex) { std::cerr << ex.what() << std::endl; return 1; }
+    }
+
     if (argc >= 2 && std::wstring(argv[1]) == L"foreground-background-statistics-selftest") {
         return RunForegroundBackgroundStatisticsSelfTest();
     }
@@ -5554,6 +5656,7 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  image-generation-expand-selftest\n";
     std::cout << "  cross-model-label-merge-selftest\n";
     std::cout << "  load-three-models <extractModelPath> <componentModelPath> <icModelPath>\n";
+    std::cout << "  barcode-selftest <manifest.json> <flow.json> <output.json>\n";
     std::cout << "  foreground-background-statistics-selftest\n";
     std::cout << "  object-mean-parsing-selftest\n";
     std::cout << "  dvsp-disabled-selftest\n";
