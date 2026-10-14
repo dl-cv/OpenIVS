@@ -20,7 +20,7 @@
 
 ---
 
-图像画布与标签底色跟随 Qt 调色板的 Base 色；浅色模式为白色。原生启动使用 Qt 正式参数 `-platform windows:darkmode=0 -style windows11`，`ui-test` 的结果 JSON 同时记录实际样式名称、样式类与 Base 色。共享图像控件默认保持原有底色，第一测试程序在正式初始化中启用主题底色。
+窗口可通过 Qt 正式参数 `-platform windows:darkmode=0 -style windows11` 使用浅色模式；图像画布保持深灰色，标签保持半透明黑色底色，不随窗口主题改变。`ui-test` 的结果 JSON 同时记录实际样式名称、样式类与 Base 色。
 
 ## 2. 编译步骤
 

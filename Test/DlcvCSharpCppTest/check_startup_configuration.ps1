@@ -2,8 +2,9 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-$projectPath = Join-Path $PSScriptRoot 'DlcvCSharpCppTest.csproj'
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$projectRoot = Join-Path $root 'DlcvCSharpCppTest'
+$projectPath = Join-Path $projectRoot 'DlcvCSharpCppTest.csproj'
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 $installation = & $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -property installationPath
 if ($LASTEXITCODE -ne 0 -or -not $installation) { throw '未找到 Visual Studio MSBuild' }
@@ -35,7 +36,7 @@ try {
     $guid = $project.GetPropertyValue('ProjectGuid')
     $collection.UnloadAllProjects()
     $solution = [IO.File]::ReadAllText((Join-Path $root 'OpenIVS.sln'))
-    $relative = 'Test\DlcvCSharpCppTest\DlcvCSharpCppTest.csproj'
+    $relative = 'DlcvCSharpCppTest\DlcvCSharpCppTest.csproj'
     $declaration = 'Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DlcvCSharpCppTest", "' + $relative + '", "' + $guid + '"'
     if ([regex]::Matches($solution, [regex]::Escape($declaration)).Count -ne 1) {
         throw '原解决方案必须登记且仅登记一次 C# 测试项目'
@@ -46,10 +47,10 @@ try {
         $profile[0].Projects[0].Path -ne $relative -or $profile[0].Projects[0].Action -ne 'Start') {
         throw '共享启动配置必须只启动 C# 应用'
     }
-    [xml]$config = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'App.config'))
+    [xml]$config = [IO.File]::ReadAllText((Join-Path $projectRoot 'App.config'))
     $dpi = $config.SelectSingleNode('/configuration/System.Windows.Forms.ApplicationConfigurationSection/add[@key="DpiAwareness"]')
     if ($null -eq $dpi -or $dpi.value -ne 'PerMonitorV2') { throw '缺少 PerMonitorV2 配置' }
-    [xml]$manifest = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'app.manifest'))
+    [xml]$manifest = [IO.File]::ReadAllText((Join-Path $projectRoot 'app.manifest'))
     $manager = New-Object System.Xml.XmlNamespaceManager($manifest.NameTable)
     $manager.AddNamespace('c', 'urn:schemas-microsoft-com:compatibility.v1')
     if ($null -eq $manifest.SelectSingleNode('//c:supportedOS[@Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"]', $manager)) {
@@ -71,12 +72,12 @@ try {
             OutputType = 'WinExe'; PlatformTarget = 'x64'; Prefer32Bit = 'false'
             StartAction = 'Project'; StartupObject = 'DlcvCSharpCppTest.Program'
             EnableUnmanagedDebugging = 'true'; TargetFrameworkVersion = 'v4.7.2'
-            ApplicationIcon = '..\..\logo.ico'; ApplicationManifest = 'app.manifest'
+            ApplicationIcon = '..\logo.ico'; ApplicationManifest = 'app.manifest'
         }
         foreach ($name in $expected.Keys) {
             if ($project.GetPropertyValue($name) -ne $expected[$name]) { throw "$configuration 的 $name 不正确" }
         }
-        $target = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "bin\x64\$configuration\DlcvCSharpCppTest.exe"))
+        $target = [IO.Path]::GetFullPath((Join-Path $projectRoot "bin\x64\$configuration\DlcvCSharpCppTest.exe"))
         if ($project.GetPropertyValue('TargetPath') -ne $target) { throw "$configuration 启动产物路径不正确" }
         $results += @{ configuration = $configuration; platform = 'x64'; target = $target }
         $collection.UnloadAllProjects()

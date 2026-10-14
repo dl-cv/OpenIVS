@@ -3,7 +3,7 @@
     "Name": "C# 与 C++ 混编模型测试",
     "Projects": [
       {
-        "Path": "Test\\DlcvCSharpCppTest\\DlcvCSharpCppTest.csproj",
+        "Path": "DlcvCSharpCppTest\\DlcvCSharpCppTest.csproj",
         "Action": "Start"
       }
     ]

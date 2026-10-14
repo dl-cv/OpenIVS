@@ -5555,7 +5555,9 @@ int wmain(int argc, wchar_t* argv[]) {
             if (!reader->Process({}, json::array()).ResultList.empty()) throw std::runtime_error("Empty batch failed");
             json output = json::array();
             for (const auto& item : manifest) {
-                cv::Mat raw = cv::imread(item.at("path").get<std::string>(), cv::IMREAD_UNCHANGED), image;
+                std::ifstream imageFile{std::filesystem::path(Utf8ToWide(item.at("path").get<std::string>())), std::ios::binary};
+                std::vector<unsigned char> imageBytes((std::istreambuf_iterator<char>(imageFile)), std::istreambuf_iterator<char>());
+                cv::Mat raw = imageBytes.empty() ? cv::Mat() : cv::imdecode(imageBytes, cv::IMREAD_UNCHANGED), image;
                 if (raw.empty()) throw std::runtime_error("Missing input image");
                 if (raw.channels() == 3) cv::cvtColor(raw, image, cv::COLOR_BGR2RGB);
                 else if (raw.channels() == 4) cv::cvtColor(raw, image, cv::COLOR_BGRA2RGBA);

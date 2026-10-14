@@ -19,7 +19,7 @@ namespace DlcvCSharpTest
                 var report = flow.Load(args[2]);
                 if ((int)report["code"] != 0) throw new Exception(report.ToString());
                 foreach (JObject item in JArray.Parse(File.ReadAllText(args[1])))
-                using (var raw = Cv2.ImRead((string)item["path"], ImreadModes.Unchanged))
+                using (var raw = Cv2.ImDecode(File.ReadAllBytes((string)item["path"]), ImreadModes.Unchanged))
                 using (var image = new Mat())
                 {
                     if (raw.Empty()) throw new Exception("Missing input: " + item["path"]);

@@ -31,7 +31,6 @@ public:
 
     void setImageAndResults(const cv::Mat& bgrImage, const std::vector<DisplayObjectResult>& results);
     void setImage(const cv::Mat& bgrImage);
-    void setUsePaletteBackground(bool enabled);
     void setResults(const std::vector<DisplayObjectResult>& results);
     void clearResults();
 
@@ -72,7 +71,6 @@ private:
     static QColor categoryColor(const QString& categoryName);
 
     void fitToPanel();
-    bool usePaletteBackground_ = false;
     void calculateMinScale();
     void adjustImagePosition();
     qreal labelFontSizeInImageSpace() const;
