@@ -52,6 +52,13 @@ namespace DlcvDemo
                 string preview = richTextBox1.Text;
                 CheckJsonPreview(originalJson, preview);
                 RequireJsonCheck(button_save_json.Enabled, "存在 JSON 时保存按钮未启用。");
+                savingJson = true;
+                UpdateResultViewButton();
+                var closing = new System.Windows.Forms.FormClosingEventArgs(System.Windows.Forms.CloseReason.UserClosing, false);
+                Form1_FormClosing(this, closing);
+                RequireJsonCheck(closing.Cancel && !button_save_json.Enabled, "保存期间允许关闭窗口或重复保存。");
+                savingJson = false;
+                UpdateResultViewButton();
                 timer.Restart();
                 richTextBox1.SelectAll();
                 string selected = richTextBox1.SelectedText;
@@ -159,6 +166,7 @@ namespace DlcvDemo
                     ["saved_bytes"] = savedBytes,
                     ["saved_utf8_without_bom"] = true,
                     ["saved_json_equal"] = true,
+                    ["close_during_save_blocked"] = true,
                     ["saved_cache_snapshot"] = true,
                     ["existing_result_overwritten"] = true,
                     ["result_switch_preserved_cache"] = true,
@@ -177,6 +185,7 @@ namespace DlcvDemo
             }
             finally
             {
+                savingJson = false;
                 model_path = originalModelPath;
                 image_path = originalImagePath;
                 lastJsonText = originalJson;

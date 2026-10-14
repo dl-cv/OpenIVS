@@ -1559,6 +1559,11 @@ namespace DlcvDemo
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
+            if (savingJson)
+            {
+                e.Cancel = true;
+                return;
+            }
             try
             {
                 StopPressureTest();
