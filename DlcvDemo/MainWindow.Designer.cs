@@ -72,6 +72,7 @@ namespace DlcvDemo
             this.resultLayout = new System.Windows.Forms.TableLayoutPanel();
             this.label_result = new System.Windows.Forms.Label();
             this.button_result_view = new System.Windows.Forms.Button();
+            this.button_save_json = new System.Windows.Forms.Button();
             this.richTextBox1 = new System.Windows.Forms.TextBox();
             this.imageCard = new System.Windows.Forms.Panel();
             this.imagePanel1 = new DLCV.ImageViewer();
@@ -509,8 +510,9 @@ namespace DlcvDemo
             // resultLayout
             //
             this.resultLayout.BackColor = Color.White;
-            this.resultLayout.ColumnCount = 2;
+            this.resultLayout.ColumnCount = 3;
             this.resultLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
+            this.resultLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.resultLayout.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.resultLayout.Dock = System.Windows.Forms.DockStyle.Fill;
             this.resultLayout.Name = "resultLayout";
@@ -547,6 +549,21 @@ namespace DlcvDemo
             this.button_result_view.Tag = "no-i18n";
             this.button_result_view.Text = "JSON";
             this.button_result_view.UseVisualStyleBackColor = false;
+            this.button_save_json.AccessibleName = "保存完整 JSON 结果";
+            this.button_save_json.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
+            this.button_save_json.BackColor = Color.FromArgb(231, 235, 239);
+            this.button_save_json.FlatAppearance.BorderSize = 0;
+            this.button_save_json.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
+            this.button_save_json.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);
+            this.button_save_json.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.button_save_json.ForeColor = Color.FromArgb(38, 50, 56);
+            this.button_save_json.Margin = new System.Windows.Forms.Padding(0, 0, 6, 8);
+            this.button_save_json.Name = "button_save_json";
+            this.button_save_json.Size = new System.Drawing.Size(100, 28);
+            this.button_save_json.TabIndex = 25;
+            this.button_save_json.Text = "保存 JSON";
+            this.button_save_json.Enabled = false;
+            this.button_save_json.UseVisualStyleBackColor = false;
             //
             // richTextBox1
             //
@@ -631,9 +648,10 @@ namespace DlcvDemo
             // resultLayout
             //
             this.resultLayout.Controls.Add(this.label_result, 0, 0);
-            this.resultLayout.Controls.Add(this.button_result_view, 1, 0);
+            this.resultLayout.Controls.Add(this.button_save_json, 1, 0);
+            this.resultLayout.Controls.Add(this.button_result_view, 2, 0);
             this.resultLayout.Controls.Add(this.richTextBox1, 0, 1);
-            this.resultLayout.SetColumnSpan(this.richTextBox1, 2);
+            this.resultLayout.SetColumnSpan(this.richTextBox1, 3);
             //
             // resultCard
             //
@@ -683,6 +701,7 @@ namespace DlcvDemo
             this.numericUpDown_threshold.ValueChanged += new System.EventHandler(this.numericUpDown_threshold_ValueChanged);
             this.button_language.Click += new System.EventHandler(this.button_language_Click);
             this.button_result_view.Click += new System.EventHandler(this.button_result_view_Click);
+            this.button_save_json.Click += new System.EventHandler(this.button_save_json_Click);
             this.resultLayout.ResumeLayout(false);
             this.resultLayout.PerformLayout();
             this.imageCard.ResumeLayout(false);
@@ -846,6 +865,7 @@ namespace DlcvDemo
         private System.Windows.Forms.TableLayoutPanel resultLayout;
         private System.Windows.Forms.Label label_result;
         private System.Windows.Forms.Button button_result_view;
+        private System.Windows.Forms.Button button_save_json;
         private System.Windows.Forms.TextBox richTextBox1;
         private System.Windows.Forms.Panel imageCard;
         private DLCV.ImageViewer imagePanel1;

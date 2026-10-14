@@ -11,6 +11,7 @@ namespace DlcvDemo
         internal string ImagePath { get; private set; }
         internal string OutputPath { get; private set; }
         internal string ScreenshotPath { get; private set; }
+        internal string SaveJsonPath { get; private set; }
         internal decimal Threshold { get; private set; } = 0.5m;
         internal bool HasThreshold { get; private set; }
         internal int DeviceId { get; private set; } = 0;
@@ -62,6 +63,9 @@ namespace DlcvDemo
                         break;
                     case "--screenshot":
                         options.ScreenshotPath = value;
+                        break;
+                    case "--save-json":
+                        options.SaveJsonPath = value;
                         break;
                     case "--label-font-scale":
                         if (!float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float labelFontScale)
@@ -128,12 +132,13 @@ namespace DlcvDemo
                         break;
                     case "--test-mode":
                         if (!string.Equals(value, "infer", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(value, "infer-json", StringComparison.OrdinalIgnoreCase)
                             && !string.Equals(value, "pressure", StringComparison.OrdinalIgnoreCase))
                         {
-                            error = "--test-mode 必须是 infer 或 pressure。";
+                            error = "--test-mode 必须是 infer、infer-json 或 pressure。";
                             return false;
                         }
-                        options.TestMode = string.Equals(value, "pressure", StringComparison.OrdinalIgnoreCase) ? "pressure" : "infer";
+                        options.TestMode = value.ToLowerInvariant();
                         break;
                     case "--batch-size":
                         if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int batchSize)
@@ -199,6 +204,7 @@ namespace DlcvDemo
                 string image = Path.GetFullPath(options.ImagePath);
                 string output = Path.GetFullPath(options.OutputPath);
                 string screenshot = options.ScreenshotPath == null ? null : Path.GetFullPath(options.ScreenshotPath);
+                string saveJson = options.SaveJsonPath == null ? null : Path.GetFullPath(options.SaveJsonPath);
                 if (string.Equals(output, model, StringComparison.OrdinalIgnoreCase)
                     || string.Equals(output, image, StringComparison.OrdinalIgnoreCase)
                     || string.Equals(output + ".tmp", model, StringComparison.OrdinalIgnoreCase)
@@ -206,7 +212,12 @@ namespace DlcvDemo
                     || (screenshot != null && (string.Equals(screenshot, model, StringComparison.OrdinalIgnoreCase)
                         || string.Equals(screenshot, image, StringComparison.OrdinalIgnoreCase)
                         || string.Equals(screenshot, output, StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(screenshot, output + ".tmp", StringComparison.OrdinalIgnoreCase))))
+                        || string.Equals(screenshot, output + ".tmp", StringComparison.OrdinalIgnoreCase)))
+                    || (saveJson != null && (string.Equals(saveJson, model, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(saveJson, image, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(saveJson, output, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(saveJson, output + ".tmp", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(saveJson, screenshot, StringComparison.OrdinalIgnoreCase))))
                 {
                     error = "测试输出路径不能与输入文件或其他输出文件相同。";
                     return false;
@@ -215,6 +226,22 @@ namespace DlcvDemo
                 {
                     error = "--screenshot 必须指定 PNG 文件路径。";
                     return false;
+                }
+                if (saveJson != null)
+                {
+                    if (options.TestMode == "pressure")
+                    {
+                        error = "--save-json 仅用于 infer 或 infer-json 测试模式。";
+                        return false;
+                    }
+                    if (string.IsNullOrWhiteSpace(options.SaveJsonPath)
+                        || Directory.Exists(saveJson)
+                        || string.IsNullOrEmpty(Path.GetFileName(saveJson))
+                        || !Directory.Exists(Path.GetDirectoryName(saveJson)))
+                    {
+                        error = "--save-json 必须指定文件路径，且父目录已存在。";
+                        return false;
+                    }
                 }
             }
             catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException)
@@ -228,13 +255,15 @@ namespace DlcvDemo
         internal static void PrintHelp()
         {
             Console.Out.WriteLine("Usage:");
-            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>] [--language <zh-CN|en-US>] [--result-view <summary|json>] [--test-mode <infer|pressure>] [--batch-size <1..1024>] [--thread-count <1..32>] [--pressure-duration-ms <500..60000>] [--capture-delay-ms <0..60000>] [--label-font-scale <0.3..5.0>]");
+            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>] [--save-json <jsonPath>] [--language <zh-CN|en-US>] [--result-view <summary|json>] [--test-mode <infer|infer-json|pressure>] [--batch-size <1..1024>] [--thread-count <1..32>] [--pressure-duration-ms <500..60000>] [--capture-delay-ms <0..60000>] [--label-font-scale <0.3..5.0>]");
             Console.Out.WriteLine();
             Console.Out.WriteLine("ui-test 启动正式程序使用的 WinForms 窗口，将进度和结果写入 --output。");
             Console.Out.WriteLine("interactive-dialogs=false 不弹出文件对话框且不激活窗口；--screenshot 通过窗口绘制代码保存截图。");
             Console.Out.WriteLine("--language 指定界面语言（zh-CN 或 en-US）；未指定时跟随系统语言，本次运行不持久化。");
             Console.Out.WriteLine("--threshold 未指定时读取模型保存值，模型未提供有效值时使用 0.5；显式参数优先。");
             Console.Out.WriteLine("--result-view 指定结果区显示汇总或 JSON，默认 summary；切换不重新推理。");
+            Console.Out.WriteLine("--save-json 在 infer 或 infer-json 测试中保存完整 JSON，并验证预览、结果切换与保存功能；父目录须已存在。");
+            Console.Out.WriteLine("--test-mode=infer-json 复用推理 JSON 按钮生成原始 JSON 结果。");
             Console.Out.WriteLine("--capture-delay-ms 在结果生成后保持正式窗口消息循环，供隔离桌面采集完整窗口；默认 0。");
             Console.Out.WriteLine("--test-mode=pressure 时运行压力测试并保存统计界面，时长默认 2000ms。");
         }
