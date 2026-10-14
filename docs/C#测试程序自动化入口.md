@@ -13,9 +13,10 @@
   [--device <int>]
   [--interactive-dialogs <true|false>]
   [--screenshot <PNG 路径>]
+  [--save-json <完整结果 JSON 路径>]
   [--language <zh-CN|en-US>]
   [--result-view <summary|json>]
-  [--test-mode <infer|pressure>]
+  [--test-mode <infer|infer-json|pressure>]
   [--batch-size <1..1024>]
   [--thread-count <1..32>]
   [--pressure-duration-ms <500..60000>]
@@ -24,7 +25,8 @@
 ```
 
 - 自动验证使用 `--interactive-dialogs false`：不弹文件选择框、不激活窗口，按参数加载模型和图片，成功或失败后关闭窗口；`true` 为人工交互模式。
-- `--test-mode` 默认 `infer`；`pressure` 使用界面的多线程测试流程，时长默认 2000ms，结束时保存统计结果。批量大小和线程数默认均为 1。
+- `--test-mode` 默认 `infer`；`infer-json` 在单次推理后执行正式“推理 JSON”按钮；`pressure` 使用界面的多线程测试流程，时长默认 2000ms，结束时保存统计结果。批量大小和线程数默认均为 1。
+- `--save-json` 用于 `infer` 和 `infer-json`，使用正式保存方法导出完整缓存，父目录须存在，路径不得与模型、图片、状态 JSON、状态临时文件或截图相同。结果中的 `json_export_check` 记录 UTF-8 与 JSON 内容核验、预览和全选耗时、缓存切换、2 MB 文本、空结果、错误路径、输入文件保护及保存快照检查。测试实现位于 `Test/desktop_projects/DemoJsonResultTests.cs`，通过项目引用编入现有 UI 测试入口。
 - `--language` 只影响本次运行，不持久化；`--result-view` 默认 `summary`，切换至 `json` 不重新推理。
 - `--screenshot` 可选，必须使用 `.png`；通过 `Form.DrawToBitmap` 保存目标窗口，不操作鼠标键盘、不采集桌面。
 - `--label-font-scale` 默认 1.0，设置正式图像控件已有的标签字号倍率，只影响本次验证。

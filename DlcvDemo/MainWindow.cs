@@ -19,6 +19,9 @@ namespace DlcvDemo
     {
         private readonly UiTestOptions uiTestOptions;
         private bool environmentCheckRunning;
+        private const int JsonPreviewCharacterLimit = 32768;
+        private bool savingJson;
+        private JObject jsonExportCheck;
         internal int UiTestExitCode { get; private set; }
 
         // 设备映射表：设备名称 -> 设备ID
@@ -106,6 +109,7 @@ namespace DlcvDemo
         {
             button_result_view.Text = showJsonResult ? I18n.T("汇总") : "JSON";
             button_result_view.Enabled = !string.IsNullOrEmpty(lastSummaryText) || !string.IsNullOrEmpty(lastJsonText);
+            button_save_json.Enabled = !savingJson && !string.IsNullOrEmpty(lastJsonText);
         }
 
         private void button_result_view_Click(object sender, EventArgs e)
@@ -124,7 +128,7 @@ namespace DlcvDemo
             {
                 richTextBox1.Text = string.IsNullOrEmpty(lastJsonText)
                     ? I18n.T("暂无 JSON 数据")
-                    : lastJsonText;
+                    : BuildJsonPreview(lastJsonText);
             }
             else
             {
@@ -133,6 +137,89 @@ namespace DlcvDemo
                     : lastSummaryText;
             }
             UpdateResultViewButton();
+        }
+
+        private static string BuildJsonPreview(string json)
+        {
+            if (string.IsNullOrEmpty(json) || json.Length <= JsonPreviewCharacterLimit)
+            {
+                return json;
+            }
+            // 大量 mask 坐标会拖慢原生文本框的排版和选择，仅限制预览，保留完整导出内容。
+            int length = JsonPreviewCharacterLimit;
+            if (char.IsHighSurrogate(json[length - 1]))
+            {
+                length--;
+            }
+            return string.Format(I18n.T("JSON 较大，仅预览前 {0:N0} 个字符（共 {1:N0} 个）。点击“保存 JSON”获取完整结果。"), length, json.Length)
+                + Environment.NewLine + Environment.NewLine + json.Substring(0, length);
+        }
+
+        private void ClearResultData()
+        {
+            lastSummaryText = null;
+            lastJsonText = null;
+            UpdateResultViewButton();
+        }
+
+        private async Task SaveJsonToPathAsync(string path)
+        {
+            string json = lastJsonText;
+            if (string.IsNullOrEmpty(json))
+            {
+                throw new InvalidOperationException(I18n.T("暂无 JSON 数据"));
+            }
+            if (PathsEqual(path, model_path) || PathsEqual(path, image_path))
+            {
+                throw new IOException(I18n.T("JSON 文件不能覆盖模型或图片。"));
+            }
+            await Task.Run(() => File.WriteAllText(path, json, new UTF8Encoding(false)));
+        }
+
+        private async void button_save_json_Click(object sender, EventArgs e)
+        {
+            if (savingJson || string.IsNullOrEmpty(lastJsonText))
+            {
+                return;
+            }
+            using (var dialog = new SaveFileDialog())
+            {
+                dialog.Title = I18n.T("保存 JSON");
+                dialog.Filter = "JSON (*.json)|*.json";
+                dialog.DefaultExt = "json";
+                dialog.AddExtension = true;
+                dialog.RestoreDirectory = true;
+                dialog.FileName = string.IsNullOrEmpty(image_path) ? "result.json" : Path.GetFileNameWithoutExtension(image_path) + ".json";
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+                savingJson = true;
+                UpdateResultViewButton();
+                try
+                {
+                    await SaveJsonToPathAsync(dialog.FileName);
+                    if (!IsDisposed && !Disposing)
+                    {
+                        MessageBox.Show(this, I18n.T("JSON 已保存：") + Environment.NewLine + dialog.FileName, I18n.T("保存 JSON"));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (!IsDisposed && !Disposing)
+                    {
+                        ReportError(I18n.T("保存 JSON 失败"), ex);
+                    }
+                }
+                finally
+                {
+                    savingJson = false;
+                    if (!IsDisposed && !Disposing)
+                    {
+                        UpdateResultViewButton();
+                    }
+                }
+            }
         }
 
         // 语言切换后重算不受字典快照控制的动态文本。
@@ -546,6 +633,7 @@ namespace DlcvDemo
             string ext = Path.GetExtension(selectedFilePath) ?? "";
             if (ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase))
                 throw new NotSupportedException(I18n.T("不支持 .dvsp 模型推理"));
+            ClearResultData();
             if (saveLastPath)
             {
                 Properties.Settings.Default.LastModelPath = selectedFilePath;
@@ -588,6 +676,7 @@ namespace DlcvDemo
 
 		private void button_infer_json_Click(object sender, EventArgs e)
 		{
+			ClearResultData();
 			try
 			{
 				if (model == null)
@@ -790,10 +879,22 @@ namespace DlcvDemo
                     {
                         throw new InvalidOperationException(I18n.T("界面未生成 JSON 结果: ") + richTextBox1.Text);
                     }
+                    if (uiTestOptions.TestMode == "infer-json")
+                    {
+                        button_infer_json_Click(this, EventArgs.Empty);
+                        if (string.IsNullOrEmpty(lastJsonText))
+                        {
+                            throw new InvalidOperationException(richTextBox1.Text);
+                        }
+                    }
                     if (string.Equals(uiTestOptions.ResultView, "json", StringComparison.OrdinalIgnoreCase))
                     {
                         showJsonResult = true;
                         ApplyResultView();
+                    }
+                    if (uiTestOptions.SaveJsonPath != null)
+                    {
+                        jsonExportCheck = await RunJsonResultUiChecksAsync();
                     }
                 }
 
@@ -876,6 +977,7 @@ namespace DlcvDemo
                 ["ui_framework"] = "WinForms",
                 ["screenshot"] = uiTestOptions.ScreenshotPath,
                 ["result_view"] = uiTestOptions.ResultView,
+                ["json_export_check"] = jsonExportCheck,
                 ["test_mode"] = uiTestOptions.TestMode,
                 ["batch_size"] = uiTestOptions.BatchSize,
                 ["thread_count"] = uiTestOptions.ThreadCount,
@@ -921,6 +1023,7 @@ namespace DlcvDemo
 
         private void button_infer_Click(object sender, EventArgs e)
         {
+            ClearResultData();
             try
             {
                 if (model == null)
@@ -1441,6 +1544,7 @@ namespace DlcvDemo
 
         private void button_freemodel_Click(object sender, EventArgs e)
         {
+            ClearResultData();
             // 如果存在正在运行的压力测试，先停止它
             StopPressureTest();
             DisposeCurrentModel();
@@ -1549,6 +1653,7 @@ namespace DlcvDemo
 
         private void button_free_all_model_Click(object sender, EventArgs e)
         {
+            ClearResultData();
             // 如果存在正在运行的压力测试，先停止它
             StopPressureTest();
 
