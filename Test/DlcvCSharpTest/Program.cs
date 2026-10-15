@@ -7460,9 +7460,83 @@ namespace DlcvCSharpTest
                     return 1;
                 }
 
+                try
+                {
+                    // 模块应只包住最大连通域，不把另一块前景并入旋转框。
+                    var rotatedBox = (JArray)det["bbox"];
+                    AssertNear(112.0, rotatedBox[0].Value<double>(), 0.01, "largest center.x");
+                    AssertNear(226.0, rotatedBox[1].Value<double>(), 0.01, "largest center.y");
+                    AssertNear(26.0, rotatedBox[2].Value<double>(), 0.01, "largest width");
+                    AssertNear(10.0, rotatedBox[3].Value<double>(), 0.01, "largest height");
+                    AssertNear(-Math.PI / 2.0, rotatedBox[4].Value<double>(), 0.01, "largest angle");
+                    if (det["with_angle"].Value<bool>() != true)
+                        throw new Exception("旋转框标记未设置");
+
+                    using (var hollow = new Mat(50, 80, MatType.CV_8UC1, Scalar.Black))
+                    {
+                        // 外轮廓更大的空心区域像素更少，应选择右侧实心区域。
+                        Cv2.Rectangle(hollow, new Rect(2, 2, 25, 25), Scalar.White, 1);
+                        Cv2.Rectangle(hollow, new Rect(45, 12, 12, 12), Scalar.White, -1);
+                        AssertMaskToRBoxGeometry(hollow, new[] { 50.5, 17.5, 11.0, 11.0, -Math.PI / 2.0 });
+                    }
+                    using (var tiny = new Mat(20, 20, MatType.CV_8UC1, Scalar.Black))
+                    {
+                        // 8 邻域对角像素属于同一目标，小区域不做腐蚀。
+                        Cv2.Rectangle(tiny, new Rect(2, 2, 3, 3), Scalar.White, -1);
+                        Cv2.Rectangle(tiny, new Rect(5, 5, 3, 3), Scalar.White, -1);
+                        tiny.Set(10, 15, (byte)255);
+                        AssertMaskToRBoxGeometry(tiny, new[] { 4.5, 4.5, 5.0 * Math.Sqrt(2.0), 2.0 * Math.Sqrt(2.0), Math.PI / 4.0 });
+                    }
+                    using (var tied = new Mat(20, 40, MatType.CV_8UC1, Scalar.Black))
+                    {
+                        Cv2.Rectangle(tied, new Rect(2, 2, 5, 3), Scalar.White, -1);
+                        Cv2.Rectangle(tied, new Rect(20, 2, 5, 3), Scalar.White, -1);
+                        AssertMaskToRBoxGeometry(tied, new[] { 4.0, 3.0, 4.0, 2.0, 0.0 });
+                    }
+                    using (var empty = new Mat(20, 20, MatType.CV_8UC1, Scalar.Black))
+                    {
+                        AssertMaskToRBoxGeometry(empty, null);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("mask_to_rbox 连通域回归失败: " + ex.Message);
+                    return 1;
+                }
+
                 Console.WriteLine("mask_to_rbox 自测通过");
                 return 0;
             }
+        }
+
+        private static void AssertMaskToRBoxGeometry(Mat mask, double[] expected)
+        {
+            var resultList = new JArray
+            {
+                new JObject
+                {
+                    ["type"] = "local",
+                    ["sample_results"] = new JArray
+                    {
+                        new JObject
+                        {
+                            ["bbox"] = new JArray(0, 0, mask.Cols, mask.Rows),
+                            ["mask_rle"] = MaskRleUtils.MatToMaskInfo(mask)
+                        }
+                    }
+                }
+            };
+            var output = new MaskToRBox(40).Process(new List<ModuleImage>(), resultList);
+            var detections = (JArray)output.ResultList[0]["sample_results"];
+            if (expected == null)
+            {
+                if (detections.Count != 0) throw new Exception("空 mask 不应产生旋转框");
+                return;
+            }
+            if (detections.Count != 1) throw new Exception("有效 mask 应产生一个旋转框");
+            var bbox = (JArray)detections[0]["bbox"];
+            for (int i = 0; i < expected.Length; i++)
+                AssertNear(expected[i], bbox[i].Value<double>(), 0.01, "component bbox[" + i + "]");
         }
 
         private static int RunPolyFilterSelfTest()
