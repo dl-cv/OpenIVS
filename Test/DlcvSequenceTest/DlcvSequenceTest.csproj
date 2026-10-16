@@ -40,6 +40,7 @@
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Drawing" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\DlcvCsharpApi\DlcvCsharpApi.csproj">
@@ -49,6 +50,21 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="CameraStartupTests.cs" />
+    <Compile Include="CameraFrameTests.cs" />
+    <Compile Include="..\..\OpenIVS2\Services\OpenIvsCameraHandle.cs">
+      <Link>OpenIvsCameraHandle.cs</Link>
+    </Compile>
+    <Compile Include="..\..\OpenIVS2\Models\AppSettings.cs">
+      <Link>AppSettings.cs</Link>
+    </Compile>
+    <Compile Include="..\..\OpenIVS2\Services\CameraStartupCheck.cs">
+      <Link>CameraStartupCheck.cs</Link>
+    </Compile>
+    <Compile Include="FlowTimingTests.cs" />
+    <Compile Include="..\..\OpenIVS2\Services\FlowTimingTracker.cs">
+      <Link>FlowTimingTracker.cs</Link>
+    </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

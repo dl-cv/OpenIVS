@@ -28,8 +28,10 @@ namespace OpenIVS2
             public TextBlock TitleText;
             public Border StatusBorder;
             public TextBlock StatusText;
+            public TextBlock FlowTimeText;
         }
 
+        private readonly FlowTimingTracker _flowTiming = new FlowTimingTracker();
         private readonly bool _acceptanceMode;
         private readonly SettingsService _settingsService = new SettingsService();
         private readonly WindowsStartupService _startupService = new WindowsStartupService();
@@ -50,6 +52,7 @@ namespace OpenIVS2
         private bool _openingSettings;
         private bool _closing;
         private bool _closeConfirmed;
+        private int _cycleErrorPending;
         private bool? _modbusConnected;
         private int _totalCount;
         private int _okCount;
@@ -261,12 +264,29 @@ namespace OpenIVS2
             SetBusy(true, "正在加载相机与模型...");
             try
             {
+                var missingCameras = await Task.Run(() => CameraStartupCheck.FindMissing(
+                    _settings.EnabledCameras(), OpenIvsCameraResourceFactory.EnumerateCameraIds));
+                if (missingCameras.Count > 0)
+                {
+                    foreach (var camera in missingCameras)
+                        SetCameraStatus(camera.Slot, "NOT READY", Brushes.Red);
+                    CameraIndicator.Fill = Brushes.Red;
+                    StatusText.Text = "相机未连接，请检查连接或修改设置后重新启动";
+                    var message = "未找到以下相机：" + Environment.NewLine +
+                        string.Join(Environment.NewLine, missingCameras.Select(x => x.Name + "（" +
+                            (string.IsNullOrWhiteSpace(x.CameraId) ? "未指定ID" : x.CameraId) + "）")) +
+                        Environment.NewLine + Environment.NewLine +
+                        "本次检测未启动，程序将保持打开。请检查相机连接，或在设置中禁用/更换相机后重新启动检测。";
+                    Log("warn", "camera", message);
+                    MessageBox.Show(message, "相机未连接", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
                 var graph = SequenceGraphBuilder.Build(_settings);
                 SaveRuntimeSequence(graph);
                 var deviceIds = _settings.EnabledCameras()
                     .GroupBy(x => x.ModelPath, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(x => x.Key, x => x.First().DeviceId, StringComparer.OrdinalIgnoreCase);
-                _flowRunner = flowRunnerOverride ?? new DlcvFlowRunner(deviceIds);
+                _flowRunner = flowRunnerOverride ?? new DlcvFlowRunner(deviceIds) { ModelCallCompleted = _flowTiming.RecordModelCall };
                 _modbus = modbusOverride ?? CreateModbusClient();
                 _cameraFactory = new OpenIvsCameraResourceFactory();
                 _displaySink = new UiDisplaySink(Dispatcher, UpdateCameraFrame);
@@ -372,6 +392,7 @@ namespace OpenIVS2
             _displaySink = null;
             _modbusConnected = null;
             _running = false;
+            _flowTiming.Reset();
             SettingsButton.IsEnabled = true;
             PlcIndicator.Fill = Brushes.Gray;
             CameraIndicator.Fill = Brushes.Gray;
@@ -484,10 +505,49 @@ namespace OpenIVS2
                     }).ToList()
                 };
                 CommitCycle(evaluation);
+                SetStatus("检测失败：" + failure.Exception.GetBaseException().Message);
             });
             Log("error", failure.FailureNodeId ?? "sequence", failure.Exception.Message);
             ReleaseCycleObjects(failure.Results);
+            QueueCycleError(failure);
             return Task.CompletedTask;
+        }
+
+        private void QueueCycleError(SequenceTriggerFailure failure)
+        {
+            if (_closing || _acceptanceMode || Dispatcher.HasShutdownStarted) return;
+            if (Interlocked.CompareExchange(ref _cycleErrorPending, 1, 0) != 0) return;
+            try
+            {
+                // 不在失败回调中等待模态窗口，保证周期能结束、释放资源和触发锁。
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        if (_closing || !_running) return;
+                        var camera = _settings.EnabledCameras().FirstOrDefault(x =>
+                            string.Equals("wait_" + x.Slot, failure.FailureNodeId, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals("run_" + x.Slot, failure.FailureNodeId, StringComparison.OrdinalIgnoreCase));
+                        var location = camera == null ? failure.FailureNodeId :
+                            camera.Name + "（" + camera.Slot + "，ID: " + camera.CameraId + "）";
+                        var error = failure.Exception.GetBaseException();
+                        var message = "检测失败：" + location + Environment.NewLine + error.Message;
+                        if (camera != null && error is TimeoutException &&
+                            string.Equals("wait_" + camera.Slot, failure.FailureNodeId, StringComparison.OrdinalIgnoreCase))
+                            message += Environment.NewLine + "取图超时：" + camera.FrameTimeoutMs + " ms；" +
+                                (camera.SoftwareTrigger ? "软件触发" : "连续采集") +
+                                "。请检查相机连接、供电及采集状态。";
+                        message += Environment.NewLine + "本次检测已记为 NG，程序不会退出；排除问题后可重新触发检测。";
+                        MessageBox.Show(this, message, "检测失败", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                    finally { Interlocked.Exchange(ref _cycleErrorPending, 0); }
+                }));
+            }
+            catch
+            {
+                Interlocked.Exchange(ref _cycleErrorPending, 0);
+                throw;
+            }
         }
 
         private static void ReleaseCycleObjects(Dictionary<string, object> results)
@@ -568,6 +628,23 @@ namespace OpenIVS2
 
         private void OnProgress(string type, string evt, string nodeId, string nodeType)
         {
+            // 节点完成时取已记录的模型调用耗时，不使用节点事件之间的时间差。
+            var elapsedMs = _flowTiming.OnProgress(evt, nodeId, nodeType);
+            if (nodeType == "run_flow" && nodeId != null && nodeId.StartsWith("run_", StringComparison.Ordinal))
+            {
+                string text = null;
+                if (elapsedMs.HasValue) text = "模型调用：" + elapsedMs.Value.ToString("0.0") + " ms";
+                else if (evt == "node_started") text = "模型调用：执行中";
+                else if (evt == "node_completed") text = "模型调用：-- ms";
+                else if (evt == "node_failed") text = "模型调用：失败";
+                else if (evt == "node_cancelled") text = "模型调用：已取消";
+                if (text != null)
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        CameraCardControls card;
+                        if (_cameraCards.TryGetValue(nodeId.Substring(4), out card)) card.FlowTimeText.Text = text;
+                    }));
+            }
             if (evt == "trigger_started")
             {
                 if (Dispatcher.CheckAccess()) ClearCycleDisplay();
@@ -583,6 +660,7 @@ namespace OpenIVS2
             foreach (var card in _cameraCards.Values)
             {
                 card.Viewer.ClearFrame();
+                card.FlowTimeText.Text = "模型调用：-- ms";
                 card.StatusText.Text = "等待画面";
                 card.StatusBorder.Background = Brushes.Gray;
             }
@@ -646,9 +724,18 @@ namespace OpenIVS2
             var header = new Grid { Margin = new Thickness(4, 2, 4, 8) };
             header.ColumnDefinitions.Add(new ColumnDefinition());
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var titleText = new TextBlock { Text = camera.Name, FontSize = 15, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(38, 50, 56)), VerticalAlignment = VerticalAlignment.Center };
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var flowTimeText = new TextBlock
+            {
+                Text = "模型调用：-- ms", FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(96, 125, 139)),
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 10, 0)
+            };
+            var titleText = new TextBlock { Text = camera.Name, TextTrimming = TextTrimming.CharacterEllipsis, FontSize = 15, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(38, 50, 56)), VerticalAlignment = VerticalAlignment.Center };
             header.Children.Add(titleText);
-            Grid.SetColumn(statusBorder, 1);
+            Grid.SetColumn(flowTimeText, 1);
+            header.Children.Add(flowTimeText);
+            Grid.SetColumn(statusBorder, 2);
             header.Children.Add(statusBorder);
             var imageBorder = new Border { Background = new SolidColorBrush(Color.FromRgb(25, 31, 35)), CornerRadius = new CornerRadius(5), Child = viewer };
             var grid = new Grid();
@@ -658,7 +745,7 @@ namespace OpenIVS2
             Grid.SetRow(imageBorder, 1);
             grid.Children.Add(imageBorder);
             var border = new Border { Background = Brushes.White, CornerRadius = new CornerRadius(7), Margin = new Thickness(5), Padding = new Thickness(8), BorderBrush = new SolidColorBrush(Color.FromRgb(224, 230, 233)), BorderThickness = new Thickness(1), Child = grid };
-            _cameraCards[camera.Slot] = new CameraCardControls { Viewer = viewer, TitleText = titleText, StatusBorder = statusBorder, StatusText = statusText };
+            _cameraCards[camera.Slot] = new CameraCardControls { Viewer = viewer, TitleText = titleText, StatusBorder = statusBorder, StatusText = statusText, FlowTimeText = flowTimeText };
             return border;
         }
 

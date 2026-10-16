@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using DLCV.SequenceGraph;
@@ -20,6 +21,8 @@ namespace OpenIVS2.Services
         private readonly object _sync = new object();
         private readonly Dictionary<string, int> _deviceIds;
         private readonly Dictionary<string, ModelEntry> _models = new Dictionary<string, ModelEntry>(StringComparer.OrdinalIgnoreCase);
+
+        internal Action<string, long, long> ModelCallCompleted { get; set; }
 
         public DlcvFlowRunner(Dictionary<string, int> deviceIds)
         {
@@ -48,7 +51,14 @@ namespace OpenIVS2.Services
             }
             using (var source = ToMat(image))
             using (var rgb = ToRgb(source))
-                return model.Infer(rgb);
+            {
+                // 只测模型 API 调用，图像准备、通知和临时 Mat 释放均在计时区间外。
+                var started = Stopwatch.GetTimestamp();
+                var result = model.Infer(rgb);
+                var completed = Stopwatch.GetTimestamp();
+                ModelCallCompleted?.Invoke(face, started, completed);
+                return result;
+            }
         }
 
         public IFlowHandle AcquireFlow(string flowPath)
