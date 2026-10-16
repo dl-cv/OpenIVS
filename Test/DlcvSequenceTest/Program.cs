@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using OpenIVS2.Services;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +19,7 @@ namespace DlcvSequenceTest
 
         private static int Main()
         {
+            Run(() => FlowTimingTests.Run(Assert));
             Run(TestCanvasPositionArrayLoads);
             Run(TestCycleIsRejected);
             Run(TestOneToSixCameraGraphsValidate);
@@ -191,6 +194,14 @@ namespace DlcvSequenceTest
             var modbus = new MockModbusClient();
             var host = new SequenceHost();
             host.LoadWithoutStart(BuildPipelineGraph(3), flowRunner, display, modbus, path => path);
+            var timings = new System.Collections.Concurrent.ConcurrentDictionary<string, double>();
+            var tracker = new FlowTimingTracker();
+            flowRunner.ModelCallCompleted = tracker.RecordModelCall;
+            host.Executor.ProgressSink = (type, evt, id, nodeType) =>
+            {
+                var elapsed = tracker.OnProgress(evt, id, nodeType);
+                if (elapsed.HasValue) timings[id] = elapsed.Value;
+            };
             host.Executor.CameraFactory = cameraFactory;
             host.Start();
             try
@@ -205,6 +216,8 @@ namespace DlcvSequenceTest
                 Assert(flowRunner.AObservedBWait, "A推理期间B已经开始等待图像");
                 Assert(flowRunner.BObservedCWait, "B推理期间C已经开始等待图像");
                 Assert(display.UpdateCount == 3, "三个相机画面均已更新");
+                Assert(timings.Count == 3 && new[] { "run_A", "run_B", "run_C" }.All(id => timings.ContainsKey(id) && timings[id] >= 0),
+                    "真实 Sequence 进度事件消费三个独立模型调用耗时");
                 Assert(modbus.WriteHistory.Count == 1 &&
                     modbus.WriteHistory[0].Address == 500 &&
                     modbus.WriteHistory[0].Value == 0,
@@ -597,6 +610,7 @@ namespace DlcvSequenceTest
         private sealed class PipelineFlowRunner : IAiFlowRunner
         {
             private readonly TrackingCameraFactory _cameras;
+            public Action<string, long, long> ModelCallCompleted { get; set; }
             public bool AObservedBWait { get; private set; }
             public bool BObservedCWait { get; private set; }
 
@@ -619,7 +633,11 @@ namespace DlcvSequenceTest
             {
                 if (face == "A") AObservedBWait = _cameras.BWaitStarted.Wait(2000);
                 if (face == "B") BObservedCWait = _cameras.CWaitStarted.Wait(2000);
-                return new Dictionary<string, object> { { "ok", true }, { "face", face } };
+                var started = Stopwatch.GetTimestamp();
+                var result = new Dictionary<string, object> { { "ok", true }, { "face", face } };
+                var completed = Stopwatch.GetTimestamp();
+                ModelCallCompleted?.Invoke(face, started, completed);
+                return result;
             }
 
             public IFlowHandle AcquireFlow(string path) { return AcquireFlow(path, null); }

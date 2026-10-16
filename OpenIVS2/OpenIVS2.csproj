@@ -103,6 +103,7 @@
     <Compile Include="Services\CameraStartupCheck.cs" />
     <Compile Include="Services\OpenIvsCameraHandle.cs" />
     <Compile Include="Services\DlcvFlowRunner.cs" />
+    <Compile Include="Services\FlowTimingTracker.cs" />
     <Compile Include="Services\UiDisplaySink.cs" />
     <Compile Include="Services\ResultEvaluator.cs" />
     <Compile Include="Services\ImageSaveService.cs" />

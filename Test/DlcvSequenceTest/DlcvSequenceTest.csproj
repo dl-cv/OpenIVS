@@ -61,6 +61,10 @@
     <Compile Include="..\..\OpenIVS2\Services\CameraStartupCheck.cs">
       <Link>CameraStartupCheck.cs</Link>
     </Compile>
+    <Compile Include="FlowTimingTests.cs" />
+    <Compile Include="..\..\OpenIVS2\Services\FlowTimingTracker.cs">
+      <Link>FlowTimingTracker.cs</Link>
+    </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
