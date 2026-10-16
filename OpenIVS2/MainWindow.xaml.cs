@@ -729,8 +729,7 @@ namespace OpenIVS2
             {
                 Text = "模型调用：-- ms", FontSize = 11,
                 Foreground = new SolidColorBrush(Color.FromRgb(96, 125, 139)),
-                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 10, 0),
-                ToolTip = "Model.Infer 调用耗时（含结果解析），不含图像准备、流程调度、日志、绘制和保存"
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 10, 0)
             };
             var titleText = new TextBlock { Text = camera.Name, TextTrimming = TextTrimming.CharacterEllipsis, FontSize = 15, FontWeight = FontWeights.SemiBold, Foreground = new SolidColorBrush(Color.FromRgb(38, 50, 56)), VerticalAlignment = VerticalAlignment.Center };
             header.Children.Add(titleText);
