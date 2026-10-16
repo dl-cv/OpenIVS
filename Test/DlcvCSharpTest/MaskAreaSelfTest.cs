@@ -25,31 +25,50 @@ namespace DlcvCSharpTest
             {
                 foreach (var scenario in new[] { "resize", "unchanged-size", "empty-mask", "no-mask" })
                 {
-                    check(scenario, () =>
+                    foreach (var areaCase in new[] { "provided", "zero", "missing", "null" })
                     {
-                        mask.SetTo(scenario == "empty-mask" ? Scalar.Black : Scalar.White);
-                        bool withMask = scenario != "no-mask";
-                        double size = scenario == "unchanged-size" ? 4 : 2.8;
-                        var obj = new JObject
+                        check(scenario + "-" + areaCase, () =>
                         {
-                            ["category_id"] = 0, ["category_name"] = "target", ["score"] = 0.9,
-                            ["area"] = 99, ["bbox"] = new JArray(0, 0, size, size), ["with_mask"] = withMask,
-                            ["mask"] = new JObject { ["width"] = 4, ["height"] = 4, ["mask_ptr"] = mask.Data.ToInt64() }
-                        };
-                        var raw = new JObject { ["sample_results"] = new JArray(new JObject { ["results"] = new JArray(obj) }) };
-                        var result = model.ParseToStructResult(raw).SampleResults[0].Results[0];
-                        using (result.Mask)
-                        {
-                            int expectedSize = (int)size; // 保留 C# 历史截断规则。
-                            double expectedArea = !withMask ? 99 : scenario == "empty-mask" ? 0 : expectedSize * expectedSize;
-                            if (result.Area != expectedArea) throw new Exception("area=" + result.Area + ", expected=" + expectedArea);
-                            var json = (JObject)normalizeJson.Invoke(model, new object[] { obj, false });
-                            if (json.Value<double>("area") != expectedArea) throw new Exception("JSON area=" + json["area"] + ", expected=" + expectedArea);
-                            if (obj.Value<double>("area") != 99) throw new Exception("输入面积被修改");
-                            if (withMask && (result.Mask.Width != expectedSize || result.Mask.Height != expectedSize)) throw new Exception("mask geometry changed");
-                            if (withMask && result.Area != MaskRleUtils.CalculateMaskArea(MaskRleUtils.MatToMaskInfo(result.Mask))) throw new Exception("RLE area mismatch");
-                        }
-                    });
+                            mask.SetTo(scenario == "empty-mask" ? Scalar.Black : Scalar.White);
+                            bool withMask = scenario != "no-mask";
+                            bool hasArea = areaCase == "provided" || areaCase == "zero";
+                            double size = scenario == "unchanged-size" ? 4 : 2.8;
+                            var obj = new JObject
+                            {
+                                ["category_id"] = 0, ["category_name"] = "target", ["score"] = 0.9,
+                                ["bbox"] = new JArray(0, 0, size, size), ["with_mask"] = withMask,
+                                ["mask"] = new JObject { ["width"] = 4, ["height"] = 4, ["mask_ptr"] = mask.Data.ToInt64() }
+                            };
+                            if (hasArea) obj["area"] = areaCase == "provided" ? 123.5 : 0;
+                            else if (areaCase == "null") obj["area"] = JValue.CreateNull();
+                            var original = obj.DeepClone();
+                            var raw = new JObject { ["sample_results"] = new JArray(new JObject { ["results"] = new JArray(obj) }) };
+                            var result = model.ParseToStructResult(raw).SampleResults[0].Results[0];
+                            using (result.Mask)
+                            {
+                                int expectedSize = (int)size; // 保留 C# 历史截断规则。
+                                int expectedMaskArea = scenario == "empty-mask" ? 0 : expectedSize * expectedSize;
+                                double expectedArea = withMask ? expectedMaskArea : 0;
+                                if (hasArea) expectedArea = areaCase == "provided" ? 123.5 : 0;
+                                double expectedJsonArea = !hasArea && !withMask ? size * size : expectedArea;
+                                if (result.Area != expectedArea) throw new Exception("area=" + result.Area + ", expected=" + expectedArea);
+                                var json = (JObject)normalizeJson.Invoke(model, new object[] { obj, false });
+                                if (Math.Abs(json.Value<double>("area") - expectedJsonArea) > 0.00001) throw new Exception("JSON area=" + json["area"] + ", expected=" + expectedJsonArea);
+                                if (!JToken.DeepEquals(obj, original)) throw new Exception("输入结果被修改");
+                                var expectedBbox = obj["bbox"].ToObject<List<double>>();
+                                var jsonBbox = json["bbox"].ToObject<List<double>>();
+                                if (jsonBbox.Count != expectedBbox.Count || result.Bbox.Count != expectedBbox.Count) throw new Exception("bbox 长度被修改");
+                                for (int i = 0; i < expectedBbox.Count; i++)
+                                {
+                                    if (jsonBbox[i] != expectedBbox[i] || result.Bbox[i] != expectedBbox[i]) throw new Exception("bbox[" + i + "] 被修改");
+                                }
+                                if (hasArea && !JToken.DeepEquals(json["area"], obj["area"])) throw new Exception("JSON 未保留 SDK 面积字段");
+                                if (!withMask && !result.Mask.Empty()) throw new Exception("关闭 mask 后仍返回掩码");
+                                if (withMask && (result.Mask.Width != expectedSize || result.Mask.Height != expectedSize)) throw new Exception("mask geometry changed");
+                                if (withMask && MaskRleUtils.CalculateMaskArea(MaskRleUtils.MatToMaskInfo(result.Mask)) != expectedMaskArea) throw new Exception("RLE area mismatch");
+                            }
+                        });
+                    }
                 }
             }
             using (var model = new Model())
@@ -61,7 +80,7 @@ namespace DlcvCSharpTest
                         int sourceSize = sparse ? 2 : 4;
                         int outputSize = sparse ? 3 : 2;
                         int sourceArea = sparse ? 1 : 16;
-                        int expectedArea = sparse ? 1 : 4;
+                        int expectedMaskArea = sparse ? 1 : 4;
                         using (var mask = new Mat(sourceSize, sourceSize, MatType.CV_8UC1, sparse ? Scalar.Black : Scalar.White))
                         {
                             if (sparse) mask.Set(1, 1, (byte)255);
@@ -76,10 +95,12 @@ namespace DlcvCSharpTest
                             using (parsed.Mask)
                             {
                                 var json = (JObject)normalizeJson.Invoke(model, new object[] { obj, false });
-                                if (parsed.Area != expectedArea || json.Value<double>("area") != expectedArea)
-                                    throw new Exception("结构化与 JSON 面积必须为 " + expectedArea + ", got " + parsed.Area + "/" + json["area"]);
+                                if (parsed.Area != sourceArea || json.Value<double>("area") != sourceArea)
+                                    throw new Exception("结构化与 JSON 面积必须保留 " + sourceArea + ", got " + parsed.Area + "/" + json["area"]);
                                 if (parsed.Mask.Width != outputSize || parsed.Mask.Height != outputSize)
                                     throw new Exception("输出掩码尺寸错误");
+                                if (Cv2.CountNonZero(parsed.Mask) != expectedMaskArea)
+                                    throw new Exception("输出掩码像素错误");
                                 if (Cv2.CountNonZero(mask) != sourceArea || obj.Value<double>("area") != sourceArea)
                                     throw new Exception("输入掩码或面积被修改");
                             }
