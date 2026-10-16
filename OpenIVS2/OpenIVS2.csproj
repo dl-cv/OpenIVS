@@ -100,6 +100,7 @@
     <Compile Include="Services\SettingsService.cs" />
     <Compile Include="Services\SequenceGraphBuilder.cs" />
     <Compile Include="Services\OpenIvsCameraResourceFactory.cs" />
+    <Compile Include="Services\CameraStartupCheck.cs" />
     <Compile Include="Services\OpenIvsCameraHandle.cs" />
     <Compile Include="Services\DlcvFlowRunner.cs" />
     <Compile Include="Services\UiDisplaySink.cs" />
