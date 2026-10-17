@@ -685,7 +685,7 @@ namespace DlcvModules
                     {
                         if (!rectCache.TryGetValue(maskRleToken, out rr))
                         {
-                            if (!MaskRleUtils.TryComputeMinAreaRectFromMaskInfo(maskRleToken, out rr)) continue;
+                            if (!TryComputeLargestComponentRect(maskRleToken, out rr)) continue;
                             rectCache[maskRleToken] = rr;
                         }
                     }
@@ -728,6 +728,47 @@ namespace DlcvModules
             }
 
             return new ModuleIO(images, outResults);
+        }
+
+        private static bool TryComputeLargestComponentRect(JToken maskInfo, out RotatedRect rotatedRect)
+        {
+            rotatedRect = default(RotatedRect);
+            using (var mask = MaskRleUtils.MaskInfoToMat(maskInfo))
+            using (var labels = new Mat())
+            using (var stats = new Mat())
+            using (var centroids = new Mat())
+            using (var largest = new Mat())
+            {
+                if (mask.Empty()) return false;
+                int count = Cv2.ConnectedComponentsWithStats(mask, labels, stats, centroids,
+                    PixelConnectivity.Connectivity8, MatType.CV_32S);
+                if (count <= 1) return false;
+
+                // 按前景像素面积选主区域，避免邻行或噪声扩大后续裁图。
+                int maxLabel = 1;
+                int maxArea = 0;
+                for (int label = 1; label < count; label++)
+                {
+                    int area = stats.At<int>(label, (int)ConnectedComponentsTypes.Area);
+                    if (area > maxArea)
+                    {
+                        maxArea = area;
+                        maxLabel = label;
+                    }
+                }
+                Cv2.Compare(labels, Scalar.All(maxLabel), largest, CmpType.EQ);
+
+                // 与 Python 节点一致，对足够大的主区域轻微腐蚀，去除边缘突起。
+                int kernelSize = Math.Max(1, Math.Min(2, Math.Min(mask.Cols, mask.Rows) / 30));
+                if (maxArea > 100 && kernelSize > 1)
+                {
+                    using (var kernel = Cv2.GetStructuringElement(MorphShapes.Ellipse, new Size(kernelSize, kernelSize)))
+                    {
+                        Cv2.Erode(largest, largest, kernel);
+                    }
+                }
+                return MaskRleUtils.TryComputeMinAreaRect(largest, out rotatedRect);
+            }
         }
 
         private static double NormalizeAngleLe90Rad(double aRad)
