@@ -1,0 +1,49 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Newtonsoft.Json.Linq;
+
+namespace DlcvModules
+{
+    public class WireSequenceCheck : BaseModule
+    {
+        static WireSequenceCheck()
+        {
+            ModuleRegistry.Register("post_process/wire_sequence_check", typeof(WireSequenceCheck));
+        }
+
+        public WireSequenceCheck(int nodeId, string title = null,
+            Dictionary<string, object> properties = null, ExecutionContext context = null)
+            : base(nodeId, title, properties, context) { }
+
+        public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
+        {
+            if (!(OriginalImageClassification.Property(Properties, "categories", new JArray()) is JArray categories)
+                || categories.Any(item => item.Type != JTokenType.String))
+                throw new ArgumentException("categories 必须为有序字符串列表");
+            JToken direction = OriginalImageClassification.Property(Properties, "direction", new JValue("horizontal"));
+            if (direction.Type != JTokenType.String || ((string)direction != "horizontal" && (string)direction != "vertical"))
+                throw new ArgumentException("direction 必须为 horizontal 或 vertical");
+            var groups = OriginalImageClassification.Collect(imageList, resultList, true);
+            var images = new List<ModuleImage>();
+            var results = new JArray();
+            foreach (var group in groups)
+            {
+                var ordered = new List<KeyValuePair<double, string>>();
+                foreach (var detection in group.Detections)
+                {
+                    if (detection.Value["category_name"]?.Type != JTokenType.String)
+                        throw new ArgumentException("检测结果必须包含字符串 category_name");
+                    var center = OriginalImageClassification.Center(detection);
+                    ordered.Add(new KeyValuePair<double, string>((string)direction == "horizontal" ? center.X : center.Y,
+                        detection.Value.Value<string>("category_name")));
+                }
+                // OrderBy 保留同坐标项的输入顺序，不能去重或按类别集合比较。
+                bool ok = ordered.OrderBy(item => item.Key).Select(item => item.Value).SequenceEqual(categories.Values<string>(), StringComparer.Ordinal);
+                results.Add(OriginalImageClassification.Result(group, images.Count, "post_process/wire_sequence_check", ok, ok ? "OK" : "NG", false));
+                images.Add(group.Image);
+            }
+            return new ModuleIO(images, results);
+        }
+    }
+}
