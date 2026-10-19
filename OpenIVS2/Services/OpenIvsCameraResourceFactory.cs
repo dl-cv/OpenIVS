@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using DLCV.Camera;
 using DLCV.SequenceGraph;
 
@@ -57,6 +58,13 @@ namespace OpenIVS2.Services
             {
                 try { handle.Release(); } catch { }
             }
+        }
+
+        internal static IEnumerable<string> EnumerateCameraIds()
+        {
+            return CameraUtils.EnumerateDevices()
+                .SelectMany(device => new[] { device.SerialNumber, device.UserId, device.ToString() })
+                .ToList();
         }
 
         private static DeviceInfoWrapper FindDevice(string cameraId)
