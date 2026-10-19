@@ -10,11 +10,12 @@
 #include <utility>
 #include <vector>
 
+#include "dlcv_infer.h"
 #include "flow/FlowGraphModel.h"
 #include "flow/ModuleRegistry.h"
 
 // DLL 图级测试：MergeResults 的两路 image 都来自节点 3，results 分别来自 3/4。
-static dlcv_infer::flow::Json BuildAlgorithmSharedInputFlow(bool distance, bool keepDetections) {
+static dlcv_infer::flow::Json BuildAlgorithmSharedInputFlow(bool distance, bool keepDetections, bool expectedOk, bool invalidDistance) {
     using dlcv_infer::flow::Json;
     auto input = [](const char* type, int link) { return Json{{"type", type}, {"link", link}}; };
     auto output = [](const char* type, Json links) { return Json{{"type", type}, {"links", std::move(links)}}; };
@@ -28,12 +29,12 @@ static dlcv_infer::flow::Json BuildAlgorithmSharedInputFlow(bool distance, bool 
         {{"id", 1}, {"order", 1}, {"type", "input/frontend_image"},
             {"outputs", {output("image_chan", {11})}}},
         build(3, "A", 9, 9, {output("image_chan", {31, 51, 53, 81, 83}), output("result_chan", {52, 82})}),
-        build(4, "B", 12, 13, {output("image_chan", Json::array()), output("result_chan", {54, 84})}),
+        build(4, invalidDistance ? "A" : "B", 12, 13, {output("image_chan", Json::array()), output("result_chan", {54, 84})}),
         {{"id", 5}, {"order", 5}, {"type", "post_process/merge_results"},
             {"inputs", {input("image_chan", 51), input("result_chan", 52), input("image_chan", 53), input("result_chan", 54)}},
             {"outputs", {output("image_chan", {61}), output("result_chan", {62})}}},
         {{"id", 6}, {"order", 6}, {"type", distance ? "post_process/offset_distance" : "post_process/wire_sequence_check"},
-            {"properties", distance ? Json{{"rules", {{{"operator", "<"}, {"value", 4}}}}} : Json{{"categories", {"B", "A"}}}},
+            {"properties", distance ? Json{{"rules", {{{"operator", "<"}, {"value", expectedOk ? 6 : 4}}}}} : Json{{"categories", expectedOk ? Json::array({"A", "B"}) : Json::array({"B", "A"})}}},
             {"inputs", {input("image_chan", 61), input("result_chan", 62)}},
             {"outputs", {output("image_chan", {71}), output("result_chan", {72})}}}
     });
@@ -89,7 +90,8 @@ int RunAlgorithmModulesSelfTest() {
                 check(cv::norm(inputImages[i].OriginalImage, pixels[i], cv::NORM_INF) == 0, "original pixels mutated");
             return output;
         };
-        auto expect = [&](const ModuleIO& out, const std::vector<std::string>& labels, bool distance) {
+        auto expect = [&](const ModuleIO& out, const std::vector<std::string>& labels, bool distance,
+            const std::vector<std::string>& reasons = {}) {
             check(out.ImageList.size() == labels.size() && out.ResultList.size() == labels.size(), "output count");
             for (size_t i = 0; i < labels.size(); ++i) {
                 const auto& image = out.ImageList[i];
@@ -102,7 +104,13 @@ int RunAlgorithmModulesSelfTest() {
                     entry.at("origin_index") == image.OriginalIndex, "output identity");
                 check(entry.at("transform") == identity.ToJson(), "result transform");
                 check(entry.at("originating_module") == (distance ? "post_process/offset_distance" : "post_process/wire_sequence_check"), "module type");
-                check(entry.at("ok") == ok && entry.at("reason") == labels[i], "inspection status");
+                check(entry.at("ok") == ok, "inspection status");
+                check(entry.at("reason").is_string() && !entry.at("reason").get<std::string>().empty(), "reason must remain a nonempty string");
+                if (distance) {
+                    const auto text = labels[i].substr(3);
+                    check(entry.at("reason") == (text == "Nan" ? "距离：NaN" : "距离：" + text + " px"), "distance reason matches label precision");
+                }
+                if (!reasons.empty()) check(entry.at("reason") == reasons.at(i), "wire sequence reason");
                 check(result.size() == 1 && result[0].at("category_name") == labels[i] &&
                     result[0].at("category_id") == (ok ? 0 : 1) && result[0].at("score") == 1.0, "classification");
                 check(result[0].at("bbox") == (distance ? Json::array({150.0, 100.0, 300.0, 200.0, 0.0}) :
@@ -117,6 +125,20 @@ int RunAlgorithmModulesSelfTest() {
         };
         const Json rb{{"categories", {"红", "蓝"}}};
         const Json pair = Json::array({det("A", 10, 10), det("B", 13, 14)});
+        // reason 与分类独立：原始 entry 保持字符串，保留完整排序、重复和空序列。
+        const Json rgb{{"categories", {"红", "绿", "蓝"}}};
+        const Json rbg = Json::array({local(Json::array({det("绿", 30), det("红", 10), det("蓝", 20)}))});
+        expect(run(false, images, rbg, rgb), {"NG"}, false, {"期望线序：红 → 绿 → 蓝\n当前线序：红 → 蓝 → 绿"});
+        expect(run(false, images, rbg, {{"categories", {"红", "蓝", "绿"}}}), {"OK"}, false,
+            {"期望线序：红 → 蓝 → 绿\n当前线序：红 → 蓝 → 绿"});
+        expect(run(false, images, Json::array({local(Json::array({det("蓝", 0, 80), det("红", 100, 20)}))}),
+            {{"categories", {"红", "蓝"}}, {"direction", "vertical"}}), {"OK"}, false,
+            {"期望线序：红 → 蓝\n当前线序：红 → 蓝"});
+        expect(run(false, images, Json::array({local(Json::array({det("红", 10), det("红", 20), det("蓝", 30)}))}),
+            {{"categories", {"红", "红", "蓝"}}}), {"OK"}, false, {"期望线序：红 → 红 → 蓝\n当前线序：红 → 红 → 蓝"});
+        expect(run(false, images, Json::array()), {"OK"}, false, {"期望线序：（空）\n当前线序：（空）"});
+        expect(run(false, images, Json::array(), rgb), {"NG"}, false, {"期望线序：红 → 绿 → 蓝\n当前线序：（空）"});
+        expect(run(false, images, rbg), {"NG"}, false, {"期望线序：（空）\n当前线序：红 → 蓝 → 绿"});
         expect(run(false, images, Json::array({local(Json::array({det("蓝", 80), det("红", 20)}))}), rb), {"OK"}, false);
         expect(run(false, images, Json::array({local(Json::array({det("蓝", 0, 80), det("红", 100, 20)}))}),
             {{"categories", {"红", "蓝"}}, {"direction", "vertical"}}), {"OK"}, false);
@@ -282,13 +304,18 @@ int RunAlgorithmModulesSelfTest() {
         expect(run(false, separate, Json::array()), {"OK", "OK"}, false);
 
         // 通过公开 DLL API 执行，避免仅验证 EXE 内独立注册表。
-        for (bool distance : {false, true}) for (bool keepDetections : {false, true}) {
+        for (bool distance : {false, true}) for (bool keepDetections : {false, true}) for (int outcome = 0; outcome < (distance ? 3 : 2); ++outcome) {
+            const bool expectedOk = outcome == 1;
+            const bool invalidDistance = outcome == 2;
             const auto path = std::filesystem::temp_directory_path() /
                 (std::string("algorithm-shared-input-") + (distance ? "offset" : "wire") + (keepDetections ? "-keep.json" : ".json"));
+            auto archivePath = path;
+            archivePath.replace_extension(".dvst");
+            const auto pipeline = BuildAlgorithmSharedInputFlow(distance, keepDetections, expectedOk, invalidDistance).dump(2);
             {
                 std::ofstream file(path, std::ios::binary);
                 check(static_cast<bool>(file), "cannot write synthetic flow");
-                file << BuildAlgorithmSharedInputFlow(distance, keepDetections).dump(2);
+                file << pipeline;
                 file.close();
                 check(static_cast<bool>(file), "cannot save synthetic flow");
             }
@@ -297,10 +324,12 @@ int RunAlgorithmModulesSelfTest() {
             check(loaded.value("code", 1) == 0, "DLL graph load: " + loaded.dump());
             const auto root = model.InferInternal({original}, Json::object());
             check(root.value("code", 1) == 0, "DLL graph infer: " + root.dump());
-            const std::string label = distance ? "NG-5" : "NG";
-            auto verify = [&](const Json& result) {
-                check(result.is_object() && result.contains("ok") && result.at("ok") == false, "graph inspection status");
-                check(result.at("reason") == label || result.at("reason") == Json::array({label}), "graph reason");
+            const std::string label = distance ? (invalidDistance ? "NG-Nan" : (expectedOk ? "OK-5" : "NG-5")) : (expectedOk ? "OK" : "NG");
+            const std::string reason = distance ? (invalidDistance ? "距离：NaN" : "距离：5 px") :
+                (expectedOk ? "期望线序：A → B\n当前线序：A → B" : "期望线序：B → A\n当前线序：A → B");
+            auto verify = [&](const Json& result, bool normalized = false) {
+                check(result.is_object() && result.contains("ok") && result.at("ok") == expectedOk, "graph inspection status");
+                check(result.at("reason") == reason || result.at("reason") == Json::array({reason}), "graph reason");
                 const auto& detections = result.at("result_list");
                 check(detections.is_array() && detections.size() == (keepDetections ? 3 : 1), "graph detection count");
                 bool classification = false, a = false, b = false;
@@ -308,17 +337,35 @@ int RunAlgorithmModulesSelfTest() {
                     const auto name = detection.at("category_name").get<std::string>();
                     if (name == label) {
                         classification = true;
-                        check(detection.at("score") == 1.0 && detection.at("category_id") == 1, "graph classification");
-                        check(detection.at("bbox") == (distance ? Json::array({150, 100, 300, 200, 0}) :
-                            Json::array({0, 0, 300, 200})), "graph full-image bbox");
+                        check(detection.at("score") == 1.0 && detection.at("category_id") == (expectedOk ? 0 : 1), "graph classification");
+                        check(detection.at("bbox") == (distance ? (normalized ? Json::array({150, 100, 300, 200}) :
+                            Json::array({150, 100, 300, 200, 0})) : Json::array({0, 0, 300, 200})), "graph full-image bbox");
+                        if (normalized && distance)
+                            check(detection.at("with_angle") == true && detection.at("angle") == 0, "public rotated bbox");
                     } else if (name == "A") a = true;
                     else if (name == "B") b = true;
                     else check(false, "unexpected graph detection");
                 }
-                check(classification && (!keepDetections || (a && b)), "graph retained original detections");
+                check(classification && (!keepDetections || (a && (b == !invalidDistance))), "graph retained original detections");
             };
             verify(root);
             verify(model.InferOneOutJson(original, Json::object()));
+            {
+                const Json header{{"file_list", {"pipeline.json"}}, {"file_size", {pipeline.size()}}};
+                std::ofstream archive(archivePath, std::ios::binary);
+                check(static_cast<bool>(archive), "cannot write synthetic archive");
+                archive << "DV\n" << header.dump() << "\n" << pipeline;
+                archive.close();
+                check(static_cast<bool>(archive), "cannot save synthetic archive");
+            }
+            dlcv_infer::Model publicModel(archivePath.string(), 0);
+            const auto publicJson = publicModel.InferOneOutJson(original, Json::object());
+            verify(publicJson, true);
+            check(publicJson.at("reason") == Json::array({reason}), "public JSON reason normalization");
+            bool inspectionOk = !expectedOk;
+            std::vector<std::string> inspectionReasons;
+            check(dlcv_infer::Model::GetLastInspectionStatus(inspectionOk, inspectionReasons), "public DLL inspection available");
+            check(inspectionOk == expectedOk && inspectionReasons == std::vector<std::string>{reason}, "public DLL inspection matches output");
         }
         std::cout << "algorithm-modules-selftest passed: " << checks << " assertions" << std::endl;
         return 0;

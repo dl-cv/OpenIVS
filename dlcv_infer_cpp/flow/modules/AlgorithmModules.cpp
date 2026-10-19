@@ -192,7 +192,8 @@ std::array<double, 2> AlgorithmCenter(const AlgorithmDetection& detection) {
     return center;
 }
 
-void AppendAlgorithmClassification(ModuleIO& output, const AlgorithmGroup& group, bool ok, const std::string& label, bool distance) {
+void AppendAlgorithmClassification(ModuleIO& output, const AlgorithmGroup& group, bool ok, const std::string& label,
+    const std::string& reason, bool distance) {
     const auto& image = group.Original;
     const int width = image.OriginalImage.cols, height = image.OriginalImage.rows;
     const Json bbox = distance ? Json::array({width / 2.0, height / 2.0, double(width), double(height), 0.0}) :
@@ -200,9 +201,19 @@ void AppendAlgorithmClassification(ModuleIO& output, const AlgorithmGroup& group
     output.ResultList.push_back({{"type", "local"},
         {"originating_module", distance ? "post_process/offset_distance" : "post_process/wire_sequence_check"},
         {"index", output.ImageList.size()}, {"origin_index", image.OriginalIndex},
-        {"transform", image.TransformState.ToJson()}, {"ok", ok}, {"reason", label},
+        {"transform", image.TransformState.ToJson()}, {"ok", ok}, {"reason", reason},
         {"sample_results", Json::array({{{"category_name", label}, {"category_id", ok ? 0 : 1}, {"score", 1.0}, {"bbox", bbox}}})}});
     output.ImageList.push_back(image);
+}
+
+std::string AlgorithmSequenceText(const Json& sequence) {
+    if (sequence.empty()) return "（空）";
+    std::string text;
+    for (size_t i = 0; i < sequence.size(); ++i) {
+        if (i != 0) text += " → ";
+        text += sequence[i].get<std::string>();
+    }
+    return text;
 }
 
 class WireSequenceCheckModule final : public BaseModule {
@@ -230,7 +241,9 @@ public:
             Json sequence = Json::array();
             for (const auto& item : ordered) sequence.push_back(item.second);
             const bool ok = sequence == categories;
-            AppendAlgorithmClassification(output, group, ok, ok ? "OK" : "NG", false);
+            const std::string reason = "期望线序：" + AlgorithmSequenceText(categories) +
+                "\n当前线序：" + AlgorithmSequenceText(sequence);
+            AppendAlgorithmClassification(output, group, ok, ok ? "OK" : "NG", reason, false);
         }
         return output;
     }
@@ -266,7 +279,8 @@ public:
                 text.erase(text.find_last_not_of('0') + 1);
                 if (text.back() == '.') text.pop_back();
             }
-            AppendAlgorithmClassification(output, group, ok, std::string(ok ? "OK-" : "NG-") + text, true);
+            const std::string reason = std::isfinite(distance) ? "距离：" + text + " px" : "距离：NaN";
+            AppendAlgorithmClassification(output, group, ok, std::string(ok ? "OK-" : "NG-") + text, reason, true);
         }
         return output;
     }
