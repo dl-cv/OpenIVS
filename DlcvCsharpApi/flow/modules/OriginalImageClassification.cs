@@ -6,7 +6,7 @@ using OpenCvSharp;
 
 namespace DlcvModules
 {
-    // 两个原图分类节点共用的归组、坐标和输出契约；不改写上游 wrapper 或结果。
+    // 不改写上游 wrapper 或结果，避免影响其他分支。
     internal static class OriginalImageClassification
     {
         internal sealed class Detection
@@ -142,7 +142,7 @@ namespace DlcvModules
                 else if (box["cx"] != null && box["cy"] != null && box["w"] != null && box["h"] != null)
                     bbox = new JArray(box["cx"], box["cy"], box["w"], box["h"], box["angle"] ?? box["theta"] ?? new JValue(0));
             }
-            if (!(bbox is JArray array) || (array.Count != 4 && array.Count != 5)) throw new ArgumentException("bbox 必须为轴对齐框或旋转框");
+            if (!(bbox is JArray array) || (array.Count != 4 && array.Count != 5)) throw new ArgumentException("bbox 必须为普通矩形框或旋转框");
             var values = new double[array.Count];
             for (int i = 0; i < values.Length; i++)
                 if (!TryNumber(array[i], out values[i])) throw new ArgumentException("bbox 必须包含有限坐标");

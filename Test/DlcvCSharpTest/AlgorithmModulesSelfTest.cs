@@ -284,7 +284,7 @@ namespace DlcvCSharpTest
             {
                 var entries = new JArray(Entry(new JArray(Det("A", 10), Det("B", 13, 14))));
                 foreach (string op in new[] { ">", "<" })
-                    Require(Label(Execute(Offset, Images(image), entries, new JObject { ["rules"] = new JArray(Rule(op, 5)) })) == "NG-5", "严格阈值边界");
+                    Require(Label(Execute(Offset, Images(image), entries, new JObject { ["rules"] = new JArray(Rule(op, 5)) })) == "NG-5", "距离等于阈值时判 NG");
                 Require(Label(Execute(Offset, Images(image), entries, new JObject { ["rules"] = new JArray(Rule(">", 4), Rule("<", 6)) })) == "OK-5", "AND 成功");
                 Require(Label(Execute(Offset, Images(image), entries, new JObject { ["rules"] = new JArray(Rule(">", 4), Rule("<", 5)) })) == "NG-5", "AND 失败");
                 var culture = CultureInfo.CurrentCulture;
