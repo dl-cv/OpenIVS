@@ -48,6 +48,7 @@
 #include "RegionMaskSelfTest.h"
 #include "MaskAreaSelfTest.h"
 #include "SlidingMergeSelfTest.h"
+#include "AlgorithmModulesSelfTest.h"
 #include "../common/NativeSharedIndexTestHelper.h"
 
 namespace {
@@ -5525,6 +5526,10 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"algorithm-modules-selftest") {
+        return RunAlgorithmModulesSelfTest();
+    }
+
     if (argc >= 2 && std::wstring(argv[1]) == L"category-count-check-selftest") {
         return RunCategoryCountCheckSelfTest();
     }
@@ -5653,6 +5658,7 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  poly-filter-selftest\n";
     std::cout << "  count-results-selftest\n";
     std::cout << "  category-count-check-selftest\n";
+    std::cout << "  algorithm-modules-selftest\n";
     std::cout << "  image-generation-expand-selftest\n";
     std::cout << "  cross-model-label-merge-selftest\n";
     std::cout << "  load-three-models <extractModelPath> <componentModelPath> <icModelPath>\n";

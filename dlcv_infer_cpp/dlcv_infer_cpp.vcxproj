@@ -193,6 +193,7 @@
     <ClCompile Include="flow\modules\FeatureModules.cpp" />
     <ClCompile Include="flow\modules\PostProcessModules.cpp" />
     <ClCompile Include="flow\modules\ForegroundBackgroundStatisticsModule.cpp" />
+    <ClCompile Include="flow\modules\AlgorithmModules.cpp" />
     <ClCompile Include="flow\modules\BarcodeReaderModule.cpp" />
     <ClCompile Include="flow\modules\RegionStrokeVisualizeTemplateModules.cpp" />
   </ItemGroup>

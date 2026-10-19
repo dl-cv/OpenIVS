@@ -97,6 +97,11 @@ namespace DlcvCSharpTest
 
                 if (args != null && args.Length >= 1 && args[0] == "barcode-selftest") return BarcodeReaderSelfTest.Run(args);
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "algorithm-modules-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return AlgorithmModulesSelfTest.Run();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "foreground-background-statistics-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return ForegroundBackgroundStatisticsSelfTest.Run();
@@ -2545,6 +2550,7 @@ namespace DlcvCSharpTest
             Console.WriteLine("  benchmark <名称> <图片> [--batch-size N] [--warmup N] [--runs N] [--threads N] [--threshold F] [--with-mask true|false]");
             Console.WriteLine("  consistency-test <名称> <图片> [--batch-size N] [--warmup N] [--runs N] [--threads N] [--threshold F] [--with-mask true|false]");
             Console.WriteLine("  free-model <名称> | free-all-models | device-info | gpu-info | dog-info | keep-max-clock | help");
+            Console.WriteLine("独立无模型回归：algorithm-modules-selftest（顺序比对与偏移量计算，不与 --then 串联）");
         }
 
         private static void RunWorkflowLoadModel(WorkflowContext context, WorkflowArguments args)

@@ -34,6 +34,10 @@ class NativeUiCaptureSourceTest(unittest.TestCase):
         self.assertIn("float.IsNaN(labelFontScale) || labelFontScale < 0.3f || labelFontScale > 5.0f", options)
         self.assertIn("imagePanel1.LabelFontScale = uiTestOptions.LabelFontScale;", read_source("DlcvDemo/MainWindow.cs"))
 
+    def test_csharp_summary_preserves_multiline_reasons(self):
+        source = read_source("DlcvDemo/MainWindow.cs")
+        self.assertIn('reason.Replace("\\r\\n", "\\n").Replace("\\n", Environment.NewLine)', source)
+
     def test_csharp_waits_only_after_success(self):
         source = read_source("DlcvDemo/MainWindow.cs")
         self.assertIn("UiTestExitCode == 0 && uiTestOptions.CaptureDelayMs > 0", source)
