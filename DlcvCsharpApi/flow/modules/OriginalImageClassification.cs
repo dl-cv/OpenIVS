@@ -148,10 +148,16 @@ namespace DlcvModules
                 if (!TryNumber(array[i], out values[i])) throw new ArgumentException("bbox 必须包含有限坐标");
             if (xyxy ? values[2] <= values[0] || values[3] <= values[1] : values[2] <= 0 || values[3] <= 0)
                 throw new ArgumentException("bbox 宽高必须大于零");
-            // OpenIVS 四项数组为 XYWH；五项为 cx/cy/w/h/angle（弧度）。
+            bool rotated = values.Length == 5;
+            if (!xyxy && !rotated && detection.Value["with_angle"]?.Type == JTokenType.Boolean && detection.Value.Value<bool>("with_angle"))
+            {
+                if (!TryNumber(detection.Value["angle"], out double angle)) throw new ArgumentException("旋转框 angle 必须为有限数值");
+                rotated = angle > -99;
+            }
+            // 四项旋转框使用独立 angle，前两项已经是中心坐标。
             double x = values[0], y = values[1];
             if (xyxy) { x = x / 2 + values[2] / 2; y = y / 2 + values[3] / 2; }
-            else if (values.Length == 4) { x += values[2] / 2; y += values[3] / 2; }
+            else if (!rotated) { x += values[2] / 2; y += values[3] / 2; }
             double[] matrix = detection.CurrentToOriginal;
             var center = new Point2d(matrix[0] * x + matrix[1] * y + matrix[2], matrix[3] * x + matrix[4] * y + matrix[5]);
             if (!Finite(center.X) || !Finite(center.Y)) throw new ArgumentException("bbox 原图中心必须为有限坐标");

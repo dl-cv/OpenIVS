@@ -26,6 +26,10 @@ namespace DlcvCSharpTest
             check("旧流程类型兼容且输出新主标识与原因", TestLegacySequence);
             check("顺序水平竖直、重复及完整列表", TestSequence);
             check("中心排序、稳定同坐标与旋转框", TestCenters);
+            check("四项旋转框距离小于阈值判 NG", () => TestFourValueRotatedDistance("<", "NG-20"));
+            check("四项旋转框距离大于阈值判 OK", () => TestFourValueRotatedDistance(">", "OK-20"));
+            check("四项旋转框按真实中心排序", TestFourValueRotatedSequence);
+            check("独立角度有效性、哨兵值及非旋转框", TestIndependentAngles);
             check("各 local 独立逆变换、原图输出、不改输入", TestTransforms);
             check("不同原图身份、相同像素与索引不混合", TestOriginals);
             check("共享 wrapper 旧 origin 别名", TestSharedAlias);
@@ -134,6 +138,62 @@ namespace DlcvCSharpTest
                     var a = Det("A", 10); a["bbox"] = bbox;
                     Require(Label(Execute(Offset, Images(image), new JArray(Entry(new JArray(a, Det("B", 13, 14)))))) == "OK-5", "bbox 表示");
                 }
+            }
+        }
+
+        private static void TestFourValueRotatedDistance(string op, string expected)
+        {
+            using (var image = Image())
+            {
+                var a = Det("A", 0); a["bbox"] = new JArray(10, 20, 10, 2); a["with_angle"] = true; a["angle"] = 0;
+                var b = Det("B", 0); b["bbox"] = new JArray(30, 20, 2, 2); b["with_angle"] = true; b["angle"] = 0;
+                var properties = new JObject { ["rules"] = new JArray(Rule(op, 18)) };
+                var output = Execute(Offset, Images(image), new JArray(Entry(new JArray(a, b))), properties);
+                RequireReason(output, expected, "距离：20 px");
+            }
+        }
+
+        private static void TestFourValueRotatedSequence()
+        {
+            using (var image = Image())
+            {
+                var a = Det("A", 0); a["bbox"] = new JArray(10, 20, 10, 2); a["with_angle"] = true; a["angle"] = 0;
+                var b = Det("B", 0); b["bbox"] = new JArray(12, 20, 2, 2); b["with_angle"] = true; b["angle"] = 0;
+                RequireReason(Execute(SequenceType, Images(image), new JArray(Entry(new JArray(b, a))), Sequence("A", "B")),
+                    "OK", "期望顺序：A → B\n当前顺序：A → B");
+            }
+        }
+
+        private static void TestIndependentAngles()
+        {
+            using (var image = Image())
+            {
+                var a = Det("A", 0); a["bbox"] = new JArray(10, 20, 10, 2);
+                var b = Det("B", 0); b["bbox"] = new JArray(30, 20, 2, 2);
+                var entries = new JArray(Entry(new JArray(a, b)));
+                Require(Label(Execute(Offset, Images(image), entries)) == "OK-16", "普通四项框仍为 XYWH");
+                foreach (JToken flag in new JToken[] { new JValue(false), new JValue("true"), new JValue(1), JValue.CreateNull() })
+                {
+                    a["with_angle"] = flag; a["angle"] = JValue.CreateNull();
+                    Require(Label(Execute(Offset, Images(image), entries)) == "OK-16", "非布尔 true 不读取独立角度");
+                }
+                a["with_angle"] = true;
+                foreach (JToken angle in new JToken[] { null, JValue.CreateNull(), new JValue(true), new JValue(double.NaN),
+                    new JValue(double.PositiveInfinity), new JValue("bad") })
+                {
+                    if (angle == null) a.Remove("angle"); else a["angle"] = angle;
+                    Require(Label(Execute(Offset, Images(image), entries)) == "NG-Nan", "无效独立角度输出 NG-Nan");
+                    Reject(() => Execute(SequenceType, Images(image), entries));
+                }
+                foreach (double angle in new[] { -100.0, -99.0, -98.999, 0.0 })
+                {
+                    a["angle"] = angle;
+                    Require(Label(Execute(Offset, Images(image), entries)) == (angle > -99 ? "OK-21.023796" : "OK-16"),
+                        "独立角度大于 -99 才按旋转框中心");
+                }
+                a["bbox"] = new JArray(10, 20, 10, 2, 0); a["angle"] = JValue.CreateNull();
+                b["bbox"] = new JArray(30, 20, 2, 2, 0);
+                Require(Label(Execute(Offset, Images(image), entries)) == "OK-20", "五项旋转框不读取独立角度");
             }
         }
 
