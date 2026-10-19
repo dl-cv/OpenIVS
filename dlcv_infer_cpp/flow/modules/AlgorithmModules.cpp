@@ -199,7 +199,7 @@ void AppendAlgorithmClassification(ModuleIO& output, const AlgorithmGroup& group
     const Json bbox = distance ? Json::array({width / 2.0, height / 2.0, double(width), double(height), 0.0}) :
         Json::array({0, 0, width, height});
     output.ResultList.push_back({{"type", "local"},
-        {"originating_module", distance ? "post_process/offset_distance" : "post_process/wire_sequence_check"},
+        {"originating_module", distance ? "post_process/offset_distance" : "post_process/sequence_check"},
         {"index", output.ImageList.size()}, {"origin_index", image.OriginalIndex},
         {"transform", image.TransformState.ToJson()}, {"ok", ok}, {"reason", reason},
         {"sample_results", Json::array({{{"category_name", label}, {"category_id", ok ? 0 : 1}, {"score", 1.0}, {"bbox", bbox}}})}});
@@ -216,7 +216,7 @@ std::string AlgorithmSequenceText(const Json& sequence) {
     return text;
 }
 
-class WireSequenceCheckModule final : public BaseModule {
+class SequenceCheckModule final : public BaseModule {
 public:
     using BaseModule::BaseModule;
 
@@ -241,8 +241,8 @@ public:
             Json sequence = Json::array();
             for (const auto& item : ordered) sequence.push_back(item.second);
             const bool ok = sequence == categories;
-            const std::string reason = "期望线序：" + AlgorithmSequenceText(categories) +
-                "\n当前线序：" + AlgorithmSequenceText(sequence);
+            const std::string reason = "期望顺序：" + AlgorithmSequenceText(categories) +
+                "\n当前顺序：" + AlgorithmSequenceText(sequence);
             AppendAlgorithmClassification(output, group, ok, ok ? "OK" : "NG", reason, false);
         }
         return output;
@@ -313,7 +313,9 @@ private:
 
 } // namespace
 
-DLCV_FLOW_REGISTER_MODULE("post_process/wire_sequence_check", WireSequenceCheckModule)
+DLCV_FLOW_REGISTER_MODULE("post_process/sequence_check", SequenceCheckModule)
+// 仅兼容旧流程类型；分类输出统一使用新主标识。
+DLCV_FLOW_REGISTER_MODULE("post_process/wire_sequence_check", SequenceCheckModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/offset_distance", OffsetDistanceModule)
 
 } // namespace flow

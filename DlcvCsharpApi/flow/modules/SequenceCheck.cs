@@ -5,14 +5,16 @@ using Newtonsoft.Json.Linq;
 
 namespace DlcvModules
 {
-    public class WireSequenceCheck : BaseModule
+    public class SequenceCheck : BaseModule
     {
-        static WireSequenceCheck()
+        static SequenceCheck()
         {
-            ModuleRegistry.Register("post_process/wire_sequence_check", typeof(WireSequenceCheck));
+            ModuleRegistry.Register("post_process/sequence_check", typeof(SequenceCheck));
+            // 仅兼容旧流程类型；分类输出统一使用新主标识。
+            ModuleRegistry.Register("post_process/wire_sequence_check", typeof(SequenceCheck));
         }
 
-        public WireSequenceCheck(int nodeId, string title = null,
+        public SequenceCheck(int nodeId, string title = null,
             Dictionary<string, object> properties = null, ExecutionContext context = null)
             : base(nodeId, title, properties, context) { }
 
@@ -41,9 +43,9 @@ namespace DlcvModules
                 // OrderBy 保留同坐标项的输入顺序，不能去重或按类别集合比较。
                 var current = ordered.OrderBy(item => item.Key).Select(item => item.Value).ToList();
                 bool ok = current.SequenceEqual(categories.Values<string>(), StringComparer.Ordinal);
-                string reason = "期望线序：" + (categories.Count == 0 ? "（空）" : string.Join(" → ", categories.Values<string>()))
-                    + "\n当前线序：" + (current.Count == 0 ? "（空）" : string.Join(" → ", current));
-                results.Add(OriginalImageClassification.Result(group, images.Count, "post_process/wire_sequence_check", ok, ok ? "OK" : "NG", false, reason));
+                string reason = "期望顺序：" + (categories.Count == 0 ? "（空）" : string.Join(" → ", categories.Values<string>()))
+                    + "\n当前顺序：" + (current.Count == 0 ? "（空）" : string.Join(" → ", current));
+                results.Add(OriginalImageClassification.Result(group, images.Count, "post_process/sequence_check", ok, ok ? "OK" : "NG", false, reason));
                 images.Add(group.Image);
             }
             return new ModuleIO(images, results);

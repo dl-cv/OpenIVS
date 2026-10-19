@@ -9,7 +9,8 @@ namespace DlcvCSharpTest
 {
     internal static class AlgorithmModulesSelfTest
     {
-        private const string Wire = "post_process/wire_sequence_check";
+        private const string SequenceType = "post_process/sequence_check";
+        private const string LegacySequenceType = "post_process/wire_sequence_check";
         private const string Offset = "post_process/offset_distance";
 
         public static int Run()
@@ -21,8 +22,9 @@ namespace DlcvCSharpTest
                 try { test(); Console.WriteLine("通过 " + name); }
                 catch (Exception ex) { failures++; Console.WriteLine("失败 " + name + ": " + ex.Message); }
             };
-            check("两个节点注册", () => { Require(ModuleRegistry.Get(Wire) != null, Wire + " 未注册"); Require(ModuleRegistry.Get(Offset) != null, Offset + " 未注册"); });
-            check("线序水平竖直、重复及完整列表", TestSequence);
+            check("两个节点注册", () => { Require(ModuleRegistry.Get(SequenceType) != null, SequenceType + " 未注册"); Require(ModuleRegistry.Get(Offset) != null, Offset + " 未注册"); });
+            check("旧流程类型兼容且输出新主标识与原因", TestLegacySequence);
+            check("顺序水平竖直、重复及完整列表", TestSequence);
             check("中心排序、稳定同坐标与旋转框", TestCenters);
             check("各 local 独立逆变换、原图输出、不改输入", TestTransforms);
             check("不同原图身份、相同像素与索引不混合", TestOriginals);
@@ -74,6 +76,27 @@ namespace DlcvCSharpTest
             throw new InvalidOperationException("应拒绝非法输入");
         }
 
+        private static void TestLegacySequence()
+        {
+            using (var image = Image())
+            {
+                foreach (bool empty in new[] { false, true })
+                foreach (bool ok in new[] { true, false })
+                {
+                    var results = new JArray(Entry(empty ? new JArray() : new JArray(Det("蓝", 20), Det("红", 10))));
+                    var properties = empty ? (ok ? Sequence() : Sequence("红")) : (ok ? Sequence("红", "蓝") : Sequence("蓝", "红"));
+                    var output = Execute(LegacySequenceType, Images(image), results, properties);
+                    var canonical = Execute(SequenceType, Images(image), results, properties);
+                    string expected = empty ? (ok ? "（空）" : "红") : (ok ? "红 → 蓝" : "蓝 → 红");
+                    string current = empty ? "（空）" : "红 → 蓝";
+                    RequireReason(output, ok ? "OK" : "NG", "期望顺序：" + expected + "\n当前顺序：" + current);
+                    Require(output.ResultList[0].Value<string>("originating_module") == SequenceType, "旧类型输出新主标识");
+                    Require(JToken.DeepEquals(output.ResultList, canonical.ResultList), "新旧类型结果一致");
+                    Require(ReferenceEquals(output.ImageList[0].OriginalImage, image), "旧类型输出原图");
+                }
+            }
+        }
+
         private static void TestSequence()
         {
             using (var image = Image())
@@ -84,15 +107,15 @@ namespace DlcvCSharpTest
                     var dets = direction == "horizontal"
                         ? new JArray(Det("蓝", 80, 0), Det("红", 20, 100), Det("红", 50, 50))
                         : new JArray(Det("蓝", 0, 80), Det("红", 100, 20), Det("红", 50, 50));
-                    Require(Label(Execute(Wire, Images(image), new JArray(Entry(dets)), properties)) == "OK", direction);
+                    Require(Label(Execute(SequenceType, Images(image), new JArray(Entry(dets)), properties)) == "OK", direction);
                     foreach (var expected in new[] { Sequence("红", "蓝"), Sequence("蓝", "红", "红"), Sequence("红", "红", "蓝", "蓝"), Sequence() })
                     {
                         expected["direction"] = direction;
-                        Require(Label(Execute(Wire, Images(image), new JArray(Entry(dets)), expected)) == "NG", "完整列表不匹配");
+                        Require(Label(Execute(SequenceType, Images(image), new JArray(Entry(dets)), expected)) == "NG", "完整列表不匹配");
                     }
                 }
-                Require(Label(Execute(Wire, Images(image), new JArray(Entry(new JArray(Det(" A ", 10)))), Sequence("A"))) == "NG", "不得裁剪类别");
-                Require(Label(Execute(Wire, Images(image), new JArray(Entry(new JArray(Det("a", 10)))), Sequence("A"))) == "NG", "大小写敏感");
+                Require(Label(Execute(SequenceType, Images(image), new JArray(Entry(new JArray(Det(" A ", 10)))), Sequence("A"))) == "NG", "不得裁剪类别");
+                Require(Label(Execute(SequenceType, Images(image), new JArray(Entry(new JArray(Det("a", 10)))), Sequence("A"))) == "NG", "大小写敏感");
             }
         }
 
@@ -102,8 +125,8 @@ namespace DlcvCSharpTest
             {
                 var wide = Det("B", 0); wide["bbox"] = new JArray(0, 0, 100, 20);
                 var rotated = Det("C", 0); rotated["bbox"] = new JArray(20, 10, 4, 2, Math.PI / 4);
-                Require(Label(Execute(Wire, Images(image), new JArray(Entry(new JArray(wide, Det("A", 10), rotated))), Sequence("A", "C", "B"))) == "OK", "按中心而非左边缘");
-                Require(Label(Execute(Wire, Images(image), new JArray(Entry(new JArray(Det("B", 10), Det("A", 10)))), Sequence("B", "A"))) == "OK", "同坐标稳定排序");
+                Require(Label(Execute(SequenceType, Images(image), new JArray(Entry(new JArray(wide, Det("A", 10), rotated))), Sequence("A", "C", "B"))) == "OK", "按中心而非左边缘");
+                Require(Label(Execute(SequenceType, Images(image), new JArray(Entry(new JArray(Det("B", 10), Det("A", 10)))), Sequence("B", "A"))) == "OK", "同坐标稳定排序");
                 foreach (JToken bbox in new JToken[] { new JArray(9, 9, 2, 2), new JArray(10, 10, 2, 2, 0.5),
                     new JObject { ["x1"] = 9, ["y1"] = 9, ["x2"] = 11, ["y2"] = 11 },
                     new JObject { ["cx"] = 10, ["cy"] = 10, ["w"] = 2, ["h"] = 2, ["theta"] = 0.5 } })
@@ -123,16 +146,16 @@ namespace DlcvCSharpTest
                 var wrappers = new List<ModuleImage> { new ModuleImage(null, image, new TransformationState(160, 120), 7), new ModuleImage(null, image, first, 8) };
                 var entries = new JArray(Entry(new JArray(Det("B", 106, 13)), 1, second), Entry(new JArray(Det("A", 0, 0)), 0, first));
                 JToken before = entries.DeepClone();
-                foreach (string type in new[] { Wire, Offset })
+                foreach (string type in new[] { SequenceType, Offset })
                 {
-                    var output = Execute(type, wrappers, entries, type == Wire ? Sequence("A", "B") : null);
-                    Require(Label(output) == (type == Wire ? "OK" : "OK-5"), "每个结果独立变换");
+                    var output = Execute(type, wrappers, entries, type == SequenceType ? Sequence("A", "B") : null);
+                    Require(Label(output) == (type == SequenceType ? "OK" : "OK-5"), "每个结果独立变换");
                     Require(output.ImageList.Count == 1 && ReferenceEquals(output.ImageList[0].ImageObject, image) && ReferenceEquals(output.ImageList[0].OriginalImage, image), "输出原图");
                     var result = output.ResultList[0];
                     Require(result.Value<int>("origin_index") == 7 && result.Value<int>("index") == 0 && result.Value<bool>("ok"), "首个原图索引");
-                    Require(result.Value<string>("reason") == (type == Wire ? "期望线序：A → B\n当前线序：A → B" : "距离：5 px") && result.Value<string>("originating_module") == type, "判定元数据");
+                    Require(result.Value<string>("reason") == (type == SequenceType ? "期望顺序：A → B\n当前顺序：A → B" : "距离：5 px") && result.Value<string>("originating_module") == type, "判定元数据");
                     Require(JToken.DeepEquals(result["transform"], JObject.FromObject(new TransformationState(160, 120).ToDict())), "输出恒等变换");
-                    Require(JToken.DeepEquals(result["sample_results"][0]["bbox"], type == Wire ? new JArray(0, 0, 160, 120) : new JArray(80.0, 60.0, 160.0, 120.0, 0.0)), "全幅分类框");
+                    Require(JToken.DeepEquals(result["sample_results"][0]["bbox"], type == SequenceType ? new JArray(0, 0, 160, 120) : new JArray(80.0, 60.0, 160.0, 120.0, 0.0)), "全幅分类框");
                     Require(result["sample_results"][0].Value<double>("score") == 1 && result["sample_results"][0].Value<int>("category_id") == 0, "分类分数");
                 }
                 Require(JToken.DeepEquals(entries, before) && wrappers[0].ImageObject == null && ReferenceEquals(wrappers[1].TransformState, first) && Cv2.Mean(image).Val0 == 3, "不得修改输入");
@@ -149,7 +172,7 @@ namespace DlcvCSharpTest
                 var entries = new JArray(Entry(new JArray(Det("A", 10), Det("B", 13, 14))), alias);
                 var output = Execute(Offset, wrappers, entries);
                 Require(output.ImageList.Count == 2 && Label(output) == "OK-5" && Label(output, 1) == "OK-10", "相同索引和像素也不能混合不同 Mat");
-                Require(Label(Execute(Wire, wrappers, entries, Sequence("A", "B")), 1) == "OK", "线序分组");
+                Require(Label(Execute(SequenceType, wrappers, entries, Sequence("A", "B")), 1) == "OK", "顺序分组");
                 var onlyOrigin = Entry(new JArray(Det("A", 10), Det("B", 13, 14))); onlyOrigin.Remove("index"); onlyOrigin["origin_index"] = 7;
                 Require(Label(Execute(Offset, Images(one, 7), new JArray(onlyOrigin))) == "OK-5", "origin 回退");
                 Reject(() => Execute(Offset, wrappers, new JArray(onlyOrigin)));
@@ -164,8 +187,8 @@ namespace DlcvCSharpTest
                 var wrappers = new List<ModuleImage> { shared, shared };
                 var a = Entry(new JArray(Det("A", 10))); a["origin_index"] = 0;
                 var b = Entry(new JArray(Det("B", 13, 14)), 1); b["origin_index"] = 1;
-                foreach (string type in new[] { Wire, Offset })
-                    Require(Label(Execute(type, wrappers, new JArray(a, b), type == Wire ? Sequence("A", "B") : null)) == (type == Wire ? "OK" : "OK-5"), "共享 wrapper 旧索引");
+                foreach (string type in new[] { SequenceType, Offset })
+                    Require(Label(Execute(type, wrappers, new JArray(a, b), type == SequenceType ? Sequence("A", "B") : null)) == (type == SequenceType ? "OK" : "OK-5"), "共享 wrapper 旧索引");
             }
         }
 
@@ -243,7 +266,7 @@ namespace DlcvCSharpTest
                 var first = Det("A", 0); first["bbox"] = new JObject { ["x1"] = 1e308, ["y1"] = 0, ["x2"] = 1.1e308, ["y2"] = 2 };
                 var second = Det("B", 0); second["bbox"] = new JObject { ["x1"] = 1.2e308, ["y1"] = 0, ["x2"] = 1.3e308, ["y2"] = 2 };
                 var large = new JArray(Entry(new JArray(second, first)));
-                Require(Label(Execute(Wire, Images(image), large, Sequence("A", "B"))) == "OK", "大数中心排序");
+                Require(Label(Execute(SequenceType, Images(image), large, Sequence("A", "B"))) == "OK", "大数中心排序");
                 var limits = new JObject { ["rules"] = new JArray(Rule(">", 1e307), Rule("<", 3e307)) };
                 Require(Label(Execute(Offset, Images(image), large, limits)).StartsWith("OK-", StringComparison.Ordinal), "大数中心及距离不溢出");
             }
@@ -254,13 +277,13 @@ namespace DlcvCSharpTest
             using (var image = Image())
             {
                 var sequence = new JArray(Entry(new JArray(Det("蓝", 30), Det("红", 10), Det("绿", 20))));
-                RequireReason(Execute(Wire, Images(image), sequence, Sequence("红", "绿", "蓝")), "OK", "期望线序：红 → 绿 → 蓝\n当前线序：红 → 绿 → 蓝");
-                RequireReason(Execute(Wire, Images(image), sequence, Sequence("红", "蓝", "绿")), "NG", "期望线序：红 → 蓝 → 绿\n当前线序：红 → 绿 → 蓝");
-                RequireReason(Execute(Wire, Images(image)), "OK", "期望线序：（空）\n当前线序：（空）");
-                RequireReason(Execute(Wire, Images(image), null, Sequence("红")), "NG", "期望线序：红\n当前线序：（空）");
-                RequireReason(Execute(Wire, Images(image), sequence), "NG", "期望线序：（空）\n当前线序：红 → 绿 → 蓝");
+                RequireReason(Execute(SequenceType, Images(image), sequence, Sequence("红", "绿", "蓝")), "OK", "期望顺序：红 → 绿 → 蓝\n当前顺序：红 → 绿 → 蓝");
+                RequireReason(Execute(SequenceType, Images(image), sequence, Sequence("红", "蓝", "绿")), "NG", "期望顺序：红 → 蓝 → 绿\n当前顺序：红 → 绿 → 蓝");
+                RequireReason(Execute(SequenceType, Images(image)), "OK", "期望顺序：（空）\n当前顺序：（空）");
+                RequireReason(Execute(SequenceType, Images(image), null, Sequence("红")), "NG", "期望顺序：红\n当前顺序：（空）");
+                RequireReason(Execute(SequenceType, Images(image), sequence), "NG", "期望顺序：（空）\n当前顺序：红 → 绿 → 蓝");
                 var duplicate = new JArray(Entry(new JArray(Det(" 红 ", 10), Det(" 红 ", 20))));
-                RequireReason(Execute(Wire, Images(image), duplicate, Sequence(" 红 ", " 红 ")), "OK", "期望线序： 红  →  红 \n当前线序： 红  →  红 ");
+                RequireReason(Execute(SequenceType, Images(image), duplicate, Sequence(" 红 ", " 红 ")), "OK", "期望顺序： 红  →  红 \n当前顺序： 红  →  红 ");
                 // 使用精确中点，reason 必须复用标签格式而不是另行 F6 舍入。
                 var a = Det("A", 0); a["bbox"] = new JArray(0.0, 0.0, 2, 2, 0);
                 var b = Det("B", 0); b["bbox"] = new JArray(1.0 / 128, 0.0, 2, 2, 0);
@@ -288,11 +311,11 @@ namespace DlcvCSharpTest
 
         private static void TestEmpty()
         {
-            foreach (string type in new[] { Wire, Offset }) Require(Execute(type).ResultList.Count == 0 && Execute(type).ImageList.Count == 0, "空输入");
+            foreach (string type in new[] { SequenceType, Offset }) Require(Execute(type).ResultList.Count == 0 && Execute(type).ImageList.Count == 0, "空输入");
             using (var image = Image())
             {
-                Require(Label(Execute(Wire, Images(image))) == "OK", "空列表相等");
-                Require(Label(Execute(Wire, Images(image), null, Sequence("A"))) == "NG", "缺检测");
+                Require(Label(Execute(SequenceType, Images(image))) == "OK", "空列表相等");
+                Require(Label(Execute(SequenceType, Images(image), null, Sequence("A"))) == "NG", "缺检测");
                 Require(Label(Execute(Offset, Images(image))) == "NG-Nan", "空规则仍需两类");
                 var entries = new JArray(new JObject { ["type"] = "aggregate" }, Entry(new JArray(Det("A", 10), Det("B", 13, 14))));
                 Require(Label(Execute(Offset, Images(image), entries)) == "OK-5", "忽略非 local");
@@ -320,7 +343,7 @@ namespace DlcvCSharpTest
                     var a = Det("A", 10, 10, 1); a["bbox"] = bad;
                     var entries = new JArray(Entry(new JArray(a, Det("A", 10), Det("B", 13, 14))));
                     Require(Label(Execute(Offset, Images(image), entries)) == "NG-Nan", "无效 top1 bbox");
-                    Reject(() => Execute(Wire, Images(image), entries));
+                    Reject(() => Execute(SequenceType, Images(image), entries));
                 }
             }
         }
@@ -331,10 +354,10 @@ namespace DlcvCSharpTest
             {
                 foreach (JToken rules in new JToken[] { JValue.CreateNull(), new JObject(), new JValue("[]"), new JArray(new JObject()), new JArray(Rule(">=", 0)), new JArray(Rule(">", -1)), new JArray(Rule("<", double.NaN)), new JArray(new JObject { ["operator"] = ">", ["value"] = true }) })
                     Reject(() => Execute(Offset, Images(image), null, new JObject { ["rules"] = rules }));
-                Reject(() => Execute(Wire, Images(image), null, new JObject { ["categories"] = "A" }));
-                Reject(() => Execute(Wire, Images(image), null, new JObject { ["categories"] = new JArray(1) }));
-                Reject(() => Execute(Wire, Images(image), null, new JObject { ["direction"] = "Horizontal" }));
-                foreach (string type in new[] { Wire, Offset })
+                Reject(() => Execute(SequenceType, Images(image), null, new JObject { ["categories"] = "A" }));
+                Reject(() => Execute(SequenceType, Images(image), null, new JObject { ["categories"] = new JArray(1) }));
+                Reject(() => Execute(SequenceType, Images(image), null, new JObject { ["direction"] = "Horizontal" }));
+                foreach (string type in new[] { SequenceType, Offset })
                 {
                     var entry = Entry(new JArray(Det("A", 10), Det("B", 13, 14))); entry["image_index"] = 1;
                     Reject(() => Execute(type, Images(image), new JArray(entry)));
@@ -351,7 +374,7 @@ namespace DlcvCSharpTest
         {
             using (var image = Image())
             {
-                foreach (string type in new[] { Wire, Offset })
+                foreach (string type in new[] { SequenceType, LegacySequenceType, Offset })
                 foreach (bool ok in new[] { true, false })
                 {
                     var context = new DlcvModules.ExecutionContext(); context.Set("frontend_image_mat", image);
@@ -364,10 +387,10 @@ namespace DlcvCSharpTest
                         {'id':6,'type':'output/return_json','inputs':[{'type':'image_chan','link':9},{'type':'result_chan','link':10}]}
                     ]");
                     nodes[4]["type"] = type;
-                    nodes[4]["properties"] = type == Wire ? (ok ? Sequence("A", "B") : Sequence("B", "A"))
+                    nodes[4]["properties"] = type != Offset ? (ok ? Sequence("A", "B") : Sequence("B", "A"))
                         : new JObject { ["rules"] = ok ? new JArray() : new JArray(Rule("<", 5)) };
                     string label = (ok ? "OK" : "NG") + (type == Offset ? "-5" : "");
-                    string reason = type == Wire ? (ok ? "期望线序：A → B" : "期望线序：B → A") + "\n当前线序：A → B" : "距离：5 px";
+                    string reason = type != Offset ? (ok ? "期望顺序：A → B" : "期望顺序：B → A") + "\n当前顺序：A → B" : "距离：5 px";
                     var output = new GraphExecutor(nodes.ToObject<List<Dictionary<string, object>>>(), context).Run();
                     Require(Label(new ModuleIO((List<ModuleImage>)output[5]["image_list"], (JArray)output[5]["result_list"])) == label, "真实端口和共享图像支路");
                     var payload = context.Get<Dictionary<string, object>>("frontend_json");
@@ -375,6 +398,7 @@ namespace DlcvCSharpTest
                     var last = JObject.FromObject(payload["last"]);
                     Require(last.Value<string>("okng") == (ok ? "OK" : "NG") && last["by_image"][0].Value<bool>("ok") == ok, "return_json 判定");
                     var classification = ((JArray)output[5]["result_list"])[0];
+                    Require(classification.Value<string>("originating_module") == (type == Offset ? Offset : SequenceType), "图输出使用新主标识");
                     Require(classification.Value<bool>("ok") == ok && classification.Value<string>("reason") == reason, "节点分类 ok/reason");
                     Require(JToken.DeepEquals(last["by_image"][0]["reason"], classification["reason"]), "return_json reason");
                     Require(last["by_image"][0]["results"][0].Value<string>("category_name") == label, "return_json 分类");
