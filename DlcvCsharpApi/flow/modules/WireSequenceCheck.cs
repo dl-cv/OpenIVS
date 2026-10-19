@@ -39,8 +39,11 @@ namespace DlcvModules
                         detection.Value.Value<string>("category_name")));
                 }
                 // OrderBy 保留同坐标项的输入顺序，不能去重或按类别集合比较。
-                bool ok = ordered.OrderBy(item => item.Key).Select(item => item.Value).SequenceEqual(categories.Values<string>(), StringComparer.Ordinal);
-                results.Add(OriginalImageClassification.Result(group, images.Count, "post_process/wire_sequence_check", ok, ok ? "OK" : "NG", false));
+                var current = ordered.OrderBy(item => item.Key).Select(item => item.Value).ToList();
+                bool ok = current.SequenceEqual(categories.Values<string>(), StringComparer.Ordinal);
+                string reason = "期望线序：" + (categories.Count == 0 ? "（空）" : string.Join(" → ", categories.Values<string>()))
+                    + "\n当前线序：" + (current.Count == 0 ? "（空）" : string.Join(" → ", current));
+                results.Add(OriginalImageClassification.Result(group, images.Count, "post_process/wire_sequence_check", ok, ok ? "OK" : "NG", false, reason));
                 images.Add(group.Image);
             }
             return new ModuleIO(images, results);

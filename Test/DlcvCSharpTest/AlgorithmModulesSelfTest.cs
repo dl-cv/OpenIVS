@@ -31,6 +31,7 @@ namespace DlcvCSharpTest
             check("偏移两类 score top1、同分保留首项", TestTopScores);
             check("严格阈值、AND、原始距离及文化无关标签", TestRules);
             check("六位小数精确中点及大数中心", TestExactFormatting);
+            check("OK/NG reason 文本与图像输出一致", TestReasons);
             check("空输入、空检测及非 local", TestEmpty);
             check("无效类别分数框输出 NG-Nan", TestInvalidDetections);
             check("无效属性、索引与变换显式拒绝", TestInvalidInputs);
@@ -129,7 +130,7 @@ namespace DlcvCSharpTest
                     Require(output.ImageList.Count == 1 && ReferenceEquals(output.ImageList[0].ImageObject, image) && ReferenceEquals(output.ImageList[0].OriginalImage, image), "输出原图");
                     var result = output.ResultList[0];
                     Require(result.Value<int>("origin_index") == 7 && result.Value<int>("index") == 0 && result.Value<bool>("ok"), "首个原图索引");
-                    Require(result.Value<string>("reason") == Label(output) && result.Value<string>("originating_module") == type, "判定元数据");
+                    Require(result.Value<string>("reason") == (type == Wire ? "期望线序：A → B\n当前线序：A → B" : "距离：5 px") && result.Value<string>("originating_module") == type, "判定元数据");
                     Require(JToken.DeepEquals(result["transform"], JObject.FromObject(new TransformationState(160, 120).ToDict())), "输出恒等变换");
                     Require(JToken.DeepEquals(result["sample_results"][0]["bbox"], type == Wire ? new JArray(0, 0, 160, 120) : new JArray(80.0, 60.0, 160.0, 120.0, 0.0)), "全幅分类框");
                     Require(result["sample_results"][0].Value<double>("score") == 1 && result["sample_results"][0].Value<int>("category_id") == 0, "分类分数");
@@ -248,6 +249,43 @@ namespace DlcvCSharpTest
             }
         }
 
+        private static void TestReasons()
+        {
+            using (var image = Image())
+            {
+                var sequence = new JArray(Entry(new JArray(Det("蓝", 30), Det("红", 10), Det("绿", 20))));
+                RequireReason(Execute(Wire, Images(image), sequence, Sequence("红", "绿", "蓝")), "OK", "期望线序：红 → 绿 → 蓝\n当前线序：红 → 绿 → 蓝");
+                RequireReason(Execute(Wire, Images(image), sequence, Sequence("红", "蓝", "绿")), "NG", "期望线序：红 → 蓝 → 绿\n当前线序：红 → 绿 → 蓝");
+                RequireReason(Execute(Wire, Images(image)), "OK", "期望线序：（空）\n当前线序：（空）");
+                RequireReason(Execute(Wire, Images(image), null, Sequence("红")), "NG", "期望线序：红\n当前线序：（空）");
+                RequireReason(Execute(Wire, Images(image), sequence), "NG", "期望线序：（空）\n当前线序：红 → 绿 → 蓝");
+                var duplicate = new JArray(Entry(new JArray(Det(" 红 ", 10), Det(" 红 ", 20))));
+                RequireReason(Execute(Wire, Images(image), duplicate, Sequence(" 红 ", " 红 ")), "OK", "期望线序： 红  →  红 \n当前线序： 红  →  红 ");
+                // 使用精确中点，reason 必须复用标签格式而不是另行 F6 舍入。
+                var a = Det("A", 0); a["bbox"] = new JArray(0.0, 0.0, 2, 2, 0);
+                var b = Det("B", 0); b["bbox"] = new JArray(1.0 / 128, 0.0, 2, 2, 0);
+                var distance = new JArray(Entry(new JArray(a, b)));
+                RequireReason(Execute(Offset, Images(image), distance), "OK-0.007812", "距离：0.007812 px");
+                var rules = new JObject { ["rules"] = new JArray(Rule("<", 1.0 / 128)) };
+                RequireReason(Execute(Offset, Images(image), distance, rules), "NG-0.007812", "距离：0.007812 px");
+                RequireReason(Execute(Offset, Images(image)), "NG-Nan", "距离：NaN");
+            }
+        }
+
+        private static void RequireReason(ModuleIO output, string label, string reason)
+        {
+            bool ok = label.StartsWith("OK", StringComparison.Ordinal);
+            var entry = output.ResultList[0];
+            Require(Label(output) == label && entry.Value<bool>("ok") == ok, "reason 不改变标签或判断");
+            Require(entry["reason"]?.Type == JTokenType.String && entry.Value<string>("reason") == reason, "原图分类 reason 文本");
+            var context = new DlcvModules.ExecutionContext();
+            new ReturnJson(2, context: context).Process(output.ImageList, output.ResultList);
+            var payload = context.Get<Dictionary<string, object>>("frontend_json");
+            var last = JObject.FromObject(payload["last"]);
+            Require(last.Value<string>("okng") == (ok ? "OK" : "NG") && last["by_image"][0].Value<bool>("ok") == ok, "图输出判断");
+            Require(JToken.DeepEquals(last["by_image"][0]["reason"], entry["reason"]), "图输出 reason 类型与文本一致");
+        }
+
         private static void TestEmpty()
         {
             foreach (string type in new[] { Wire, Offset }) Require(Execute(type).ResultList.Count == 0 && Execute(type).ImageList.Count == 0, "空输入");
@@ -314,6 +352,7 @@ namespace DlcvCSharpTest
             using (var image = Image())
             {
                 foreach (string type in new[] { Wire, Offset })
+                foreach (bool ok in new[] { true, false })
                 {
                     var context = new DlcvModules.ExecutionContext(); context.Set("frontend_image_mat", image);
                     var nodes = JArray.Parse(@"[
@@ -324,15 +363,21 @@ namespace DlcvCSharpTest
                         {'id':5,'inputs':[{'type':'image_chan','link':7},{'type':'result_chan','link':8}],'outputs':[{'type':'image_chan','links':[9]},{'type':'result_chan','links':[10]}]},
                         {'id':6,'type':'output/return_json','inputs':[{'type':'image_chan','link':9},{'type':'result_chan','link':10}]}
                     ]");
-                    nodes[4]["type"] = type; nodes[4]["properties"] = type == Wire ? Sequence("A", "B") : new JObject();
+                    nodes[4]["type"] = type;
+                    nodes[4]["properties"] = type == Wire ? (ok ? Sequence("A", "B") : Sequence("B", "A"))
+                        : new JObject { ["rules"] = ok ? new JArray() : new JArray(Rule("<", 5)) };
+                    string label = (ok ? "OK" : "NG") + (type == Offset ? "-5" : "");
+                    string reason = type == Wire ? (ok ? "期望线序：A → B" : "期望线序：B → A") + "\n当前线序：A → B" : "距离：5 px";
                     var output = new GraphExecutor(nodes.ToObject<List<Dictionary<string, object>>>(), context).Run();
-                    Require(Label(new ModuleIO((List<ModuleImage>)output[5]["image_list"], (JArray)output[5]["result_list"])) == (type == Wire ? "OK" : "OK-5"), "真实端口和共享图像支路");
+                    Require(Label(new ModuleIO((List<ModuleImage>)output[5]["image_list"], (JArray)output[5]["result_list"])) == label, "真实端口和共享图像支路");
                     var payload = context.Get<Dictionary<string, object>>("frontend_json");
                     Require(payload != null, "return_json 输出");
                     var last = JObject.FromObject(payload["last"]);
-                    Require(last.Value<string>("okng") == "OK" && last["by_image"][0].Value<bool>("ok"), "return_json 判定");
-                    Require(last["by_image"][0].Value<string>("reason") == (type == Wire ? "OK" : "OK-5"), "return_json reason");
-                    Require(last["by_image"][0]["results"][0].Value<string>("category_name") == (type == Wire ? "OK" : "OK-5"), "return_json 分类");
+                    Require(last.Value<string>("okng") == (ok ? "OK" : "NG") && last["by_image"][0].Value<bool>("ok") == ok, "return_json 判定");
+                    var classification = ((JArray)output[5]["result_list"])[0];
+                    Require(classification.Value<bool>("ok") == ok && classification.Value<string>("reason") == reason, "节点分类 ok/reason");
+                    Require(JToken.DeepEquals(last["by_image"][0]["reason"], classification["reason"]), "return_json reason");
+                    Require(last["by_image"][0]["results"][0].Value<string>("category_name") == label, "return_json 分类");
                 }
             }
         }

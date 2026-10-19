@@ -31,7 +31,8 @@ namespace DlcvModules
                 string text = OriginalImageClassification.Finite(distance)
                     ? FormatDistance(distance) : "Nan";
                 string label = (ok ? "OK-" : "NG-") + text;
-                results.Add(OriginalImageClassification.Result(group, images.Count, "post_process/offset_distance", ok, label, true));
+                string reason = OriginalImageClassification.Finite(distance) ? "距离：" + text + " px" : "距离：NaN";
+                results.Add(OriginalImageClassification.Result(group, images.Count, "post_process/offset_distance", ok, label, true, reason));
                 images.Add(group.Image);
             }
             return new ModuleIO(images, results);
