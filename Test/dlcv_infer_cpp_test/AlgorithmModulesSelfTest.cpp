@@ -15,7 +15,7 @@
 #include "flow/ModuleRegistry.h"
 
 // DLL 图级测试：MergeResults 的两路 image 都来自节点 3，results 分别来自 3/4。
-static dlcv_infer::flow::Json BuildAlgorithmSharedInputFlow(bool distance, bool keepDetections, bool expectedOk, bool invalidDistance, bool legacy) {
+static dlcv_infer::flow::Json BuildAlgorithmSharedInputFlow(bool distance, bool keepDetections, bool expectedOk, bool invalidDistance, bool legacy, bool reference = false) {
     using dlcv_infer::flow::Json;
     auto input = [](const char* type, int link) { return Json{{"type", type}, {"link", link}}; };
     auto output = [](const char* type, Json links) { return Json{{"type", type}, {"links", std::move(links)}}; };
@@ -38,6 +38,13 @@ static dlcv_infer::flow::Json BuildAlgorithmSharedInputFlow(bool distance, bool 
             {"inputs", {input("image_chan", 61), input("result_chan", 62)}},
             {"outputs", {output("image_chan", {71}), output("result_chan", {72})}}}
     });
+    if (reference) {
+        nodes[0]["outputs"][0]["links"].push_back(12);
+        nodes[4]["inputs"].push_back(input("image_chan", 13));
+        nodes[4]["properties"]["categories"] = expectedOk ? Json::array({"B", "A"}) : Json::array({"A", "B"});
+        nodes.push_back({{"id", 2}, {"order", 2}, {"type", "pre_process/image_flip"},
+            {"inputs", {input("image_chan", 12)}}, {"outputs", {output("image_chan", {13})}}});
+    }
     if (keepDetections) nodes.push_back({{"id", 7}, {"order", 7}, {"type", "post_process/merge_results"},
         {"inputs", {input("image_chan", 71), input("result_chan", 72), input("image_chan", 81), input("result_chan", 82),
             input("image_chan", 83), input("result_chan", 84)}},
@@ -125,6 +132,24 @@ int RunAlgorithmModulesSelfTest() {
             catch (const std::invalid_argument&) { rejected = true; }
             check(rejected, "invalid input must throw invalid_argument");
         };
+        for (const bool vertical : {false, true}) {
+            auto module = sequence(1, "", Json{{"categories", {"B", "A"}},
+                {"direction", vertical ? "vertical" : "horizontal"}}, nullptr);
+            auto state = identity;
+            state.CropBox = {30, 20, 200, 150};
+            state.AffineMatrix2x3 = vertical ? std::vector<double>{0, 1, -20, -1, 0, 330}
+                : std::vector<double>{-1, 0, 330, 0, 1, -20};
+            auto crop = identity;
+            crop.AffineMatrix2x3 = {1, 0, -100, 0, 1, 0};
+            const auto entries = Json::array({local(Json::array({det("A", 40)})), local(Json::array({det("B", 10)}), 0, crop.ToJson())});
+            module->ExtraInputsIn.emplace_back(std::vector<ModuleImage>{ModuleImage(cv::Mat(), original, state, 7), ModuleImage()}, Json::array());
+            expect(module->Process(images, entries), {"OK"}, false, {"期望顺序：B → A\n当前顺序：B → A"});
+            check(module->ExtraInputsIn[0].ImageList[0].ImageObject.empty(), "reference pixels must stay lazy");
+            module->ExtraInputsIn.clear();
+            module->ExtraInputsIn.emplace_back();
+            module->Properties["categories"] = {"A", "B"};
+            expect(module->Process(images, entries), {"OK"}, false);
+        }
         const Json rb{{"categories", {"红", "蓝"}}};
         const Json pair = Json::array({det("A", 10, 10), det("B", 13, 14)});
         // reason 与分类独立：原始 entry 保持字符串，保留完整排序、重复和空序列。
@@ -317,6 +342,7 @@ int RunAlgorithmModulesSelfTest() {
 
         // 通过公开 DLL API 执行，避免仅验证 EXE 内独立注册表。
         for (bool distance : {false, true}) for (int alias = 0; alias < (distance ? 1 : 2); ++alias)
+        for (int reference = 0; reference < (distance ? 1 : 2); ++reference)
         for (bool keepDetections : {false, true}) for (int outcome = 0; outcome < (distance ? 3 : 2); ++outcome) {
             const bool expectedOk = outcome == 1;
             const bool invalidDistance = outcome == 2;
@@ -324,7 +350,7 @@ int RunAlgorithmModulesSelfTest() {
                 (std::string("algorithm-shared-input-") + (distance ? "offset" : "sequence") + (alias ? "-legacy" : "") + (keepDetections ? "-keep.json" : ".json"));
             auto archivePath = path;
             archivePath.replace_extension(".dvst");
-            const auto pipeline = BuildAlgorithmSharedInputFlow(distance, keepDetections, expectedOk, invalidDistance, alias != 0).dump(2);
+            const auto pipeline = BuildAlgorithmSharedInputFlow(distance, keepDetections, expectedOk, invalidDistance, alias != 0, reference != 0).dump(2);
             {
                 std::ofstream file(path, std::ios::binary);
                 check(static_cast<bool>(file), "cannot write synthetic flow");
@@ -339,7 +365,8 @@ int RunAlgorithmModulesSelfTest() {
             check(root.value("code", 1) == 0, "DLL graph infer: " + root.dump());
             const std::string label = distance ? (invalidDistance ? "NG-Nan" : (expectedOk ? "OK-5" : "NG-5")) : (expectedOk ? "OK" : "NG");
             const std::string reason = distance ? (invalidDistance ? "距离：NaN" : "距离：5 px") :
-                (expectedOk ? "期望顺序：A → B\n当前顺序：A → B" : "期望顺序：B → A\n当前顺序：A → B");
+                (reference ? (expectedOk ? "期望顺序：B → A\n当前顺序：B → A" : "期望顺序：A → B\n当前顺序：B → A") :
+                (expectedOk ? "期望顺序：A → B\n当前顺序：A → B" : "期望顺序：B → A\n当前顺序：A → B"));
             auto verify = [&](const Json& result, bool normalized = false) {
                 check(result.is_object() && result.contains("ok") && result.at("ok") == expectedOk, "graph inspection status");
                 check(result.at("reason") == reason || result.at("reason") == Json::array({reason}), "graph reason");

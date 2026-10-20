@@ -228,6 +228,14 @@ public:
             if (!name.is_string()) throw std::invalid_argument("categories 必须为有序字符串列表");
         if (direction != "horizontal" && direction != "vertical") throw std::invalid_argument("direction 必须为 horizontal 或 vertical");
         const size_t axis = direction == "horizontal" ? 0 : 1;
+        std::vector<double> originalToReference;
+        if (!ExtraInputsIn.empty() && !ExtraInputsIn[0].ImageList.empty()) {
+            const auto& reference = ExtraInputsIn[0].ImageList.front();
+            if (reference.OriginalImage.empty()) throw std::invalid_argument("参考图像必须包含非空原图");
+            AlgorithmInverse(Json{{"transform", reference.TransformState.ToJson()}}, reference);
+            // C++ 仿射已经包含裁剪平移，不再次减去 CropBox。
+            originalToReference = reference.TransformState.AffineMatrix2x3;
+        }
         ModuleIO output;
         for (const auto& group : AlgorithmGroups(imageList, resultList, true)) {
             std::vector<std::pair<double, std::string>> ordered;
@@ -235,7 +243,15 @@ public:
                 const auto& value = *detection.Value;
                 if (!value.contains("category_name") || !value.at("category_name").is_string())
                     throw std::invalid_argument("检测结果必须包含字符串 category_name");
-                ordered.emplace_back(AlgorithmCenter(detection)[axis], value.at("category_name").get<std::string>());
+                auto center = AlgorithmCenter(detection);
+                if (!originalToReference.empty()) {
+                    const auto& a = originalToReference;
+                    center = {a[0] * center[0] + a[1] * center[1] + a[2],
+                              a[3] * center[0] + a[4] * center[1] + a[5]};
+                    if (!std::isfinite(center[0]) || !std::isfinite(center[1]))
+                        throw std::invalid_argument("参考图像中心必须为有限坐标");
+                }
+                ordered.emplace_back(center[axis], value.at("category_name").get<std::string>());
             }
             std::stable_sort(ordered.begin(), ordered.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
             Json sequence = Json::array();
