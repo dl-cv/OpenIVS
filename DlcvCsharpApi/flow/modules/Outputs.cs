@@ -197,10 +197,11 @@ namespace DlcvModules
             var images = imageList ?? new List<ModuleImage>();
             var results = resultList ?? new JArray();
 
-            bool emitPoly = ShouldEmitPoly();
+            bool includeMask = ShouldIncludeMask();
+            bool emitPoly = includeMask && ShouldEmitPoly();
             List<Dictionary<string, object>> byImage = CanUseAlignedFastPath(images, results)
-                ? BuildByImageAligned(images, results, emitPoly)
-                : BuildByImageMapped(images, results, emitPoly);
+                ? BuildByImageAligned(images, results, emitPoly, includeMask)
+                : BuildByImageMapped(images, results, emitPoly, includeMask);
 
             var payload = new Dictionary<string, object> { { "by_image", byImage } };
             var okValues = new List<bool>();
@@ -232,6 +233,15 @@ namespace DlcvModules
             }
 
             return new ModuleIO(images, results);
+        }
+
+        private bool ShouldIncludeMask()
+        {
+            try
+            {
+                return Context?.Get<JObject>("infer_params", null)?["with_mask"]?.Value<bool>() ?? true;
+            }
+            catch { return true; } // Same default as FlowGraphModel.ReadWithMaskFlag.
         }
 
         private bool ShouldEmitPoly()
@@ -297,7 +307,7 @@ namespace DlcvModules
             return true;
         }
 
-        private static List<Dictionary<string, object>> BuildByImageAligned(List<ModuleImage> images, JArray results, bool emitPoly)
+        private static List<Dictionary<string, object>> BuildByImageAligned(List<ModuleImage> images, JArray results, bool emitPoly, bool includeMask)
         {
             var byImage = new List<Dictionary<string, object>>(images != null ? images.Count : 0);
             if (images == null || results == null) return byImage;
@@ -309,13 +319,13 @@ namespace DlcvModules
 
                 var entry = results[i] as JObject;
                 var dets = entry != null ? entry["sample_results"] as JArray : null;
-                var outResults = BuildOutResults(wrap, dets, emitPoly);
+                var outResults = BuildOutResults(wrap, dets, emitPoly, includeMask);
                 byImage.Add(BuildImageEntry(wrap, outResults, entry));
             }
             return byImage;
         }
 
-        private static List<Dictionary<string, object>> BuildByImageMapped(List<ModuleImage> images, JArray results, bool emitPoly)
+        private static List<Dictionary<string, object>> BuildByImageMapped(List<ModuleImage> images, JArray results, bool emitPoly, bool includeMask)
         {
             var byImage = new List<Dictionary<string, object>>(images != null ? images.Count : 0);
             if (images == null || results == null) return byImage;
@@ -383,7 +393,7 @@ namespace DlcvModules
                     }
                 }
 
-                var outResults = BuildOutResults(wrap, dets, emitPoly);
+                var outResults = BuildOutResults(wrap, dets, emitPoly, includeMask);
                 byImage.Add(BuildImageEntry(wrap, outResults, metadata));
             }
 
@@ -478,7 +488,7 @@ namespace DlcvModules
             return item;
         }
 
-        private static List<Dictionary<string, object>> BuildOutResults(ModuleImage wrap, JArray dets, bool emitPoly)
+        private static List<Dictionary<string, object>> BuildOutResults(ModuleImage wrap, JArray dets, bool emitPoly, bool includeMask)
         {
             var outResults = new List<Dictionary<string, object>>(dets != null ? dets.Count : 0);
             if (wrap == null || dets == null || dets.Count == 0) return outResults;
@@ -489,13 +499,13 @@ namespace DlcvModules
             {
                 if (d is JObject detObj)
                 {
-                    AppendOutResult(detObj, tC2O, isAxisAlignedTransform, emitPoly, outResults);
+                    AppendOutResult(detObj, tC2O, isAxisAlignedTransform, emitPoly, includeMask, outResults);
                 }
             }
             return outResults;
         }
 
-        private static List<Dictionary<string, object>> BuildOutResults(ModuleImage wrap, List<JObject> dets, bool emitPoly)
+        private static List<Dictionary<string, object>> BuildOutResults(ModuleImage wrap, List<JObject> dets, bool emitPoly, bool includeMask)
         {
             var outResults = new List<Dictionary<string, object>>(dets != null ? dets.Count : 0);
             if (wrap == null || dets == null || dets.Count == 0) return outResults;
@@ -506,7 +516,7 @@ namespace DlcvModules
             {
                 var detObj = dets[i];
                 if (detObj == null) continue;
-                AppendOutResult(detObj, tC2O, isAxisAlignedTransform, emitPoly, outResults);
+                AppendOutResult(detObj, tC2O, isAxisAlignedTransform, emitPoly, includeMask, outResults);
             }
             return outResults;
         }
@@ -516,6 +526,7 @@ namespace DlcvModules
             double[] tC2O,
             bool isAxisAlignedTransform,
             bool emitPoly,
+            bool includeMask,
             List<Dictionary<string, object>> outResults)
         {
             var item = new Dictionary<string, object>(9)
@@ -552,9 +563,11 @@ namespace DlcvModules
             }
 
             var maskInfo = detObj["mask_rle"];
-            if (maskInfo != null && maskInfo.Type != JTokenType.Null)
+            if (includeMask && maskInfo != null && maskInfo.Type != JTokenType.Null)
             {
-                item["mask_rle"] = maskInfo;
+                item["mask_rle"] = !isRot && item.TryGetValue("bbox", out object globalBox)
+                    ? MapMaskToOriginal(maskInfo, bboxLocal, tC2O, (List<int>)globalBox)
+                    : maskInfo;
                 if (emitPoly && TryBuildMaskPoly(maskInfo, bboxLocal, tC2O, out List<object> poly))
                 {
                     item["poly"] = poly;
@@ -581,6 +594,51 @@ namespace DlcvModules
             }
 
             outResults.Add(item);
+        }
+
+        // Mask remains bbox-relative; only its axes must follow the original image.
+        // Axis permutations use native transpose/flip without resizing or a full-image canvas.
+        private static JToken MapMaskToOriginal(JToken maskInfo, JArray bbox, double[] t, List<int> globalBox)
+        {
+            bool diagonal = Math.Abs(t[1]) < 1e-8 && Math.Abs(t[3]) < 1e-8;
+            bool swapped = Math.Abs(t[0]) < 1e-8 && Math.Abs(t[4]) < 1e-8;
+            // Positive axis scaling and translation are already handled by the output bbox.
+            if (diagonal && t[0] > 0 && t[4] > 0) return maskInfo;
+            int width = globalBox[2] - globalBox[0];
+            int height = globalBox[3] - globalBox[1];
+            if (width <= 0 || height <= 0) return maskInfo;
+
+            using (var local = MaskRleUtils.MaskInfoToMat(maskInfo))
+            using (var mapped = new Mat())
+            {
+                if (local.Empty()) return maskInfo;
+                if (diagonal || swapped)
+                {
+                    bool flipX = (swapped ? t[1] : t[0]) < 0;
+                    bool flipY = (swapped ? t[3] : t[4]) < 0;
+                    if (swapped) Cv2.Transpose(local, mapped);
+                    if (flipX || flipY)
+                        Cv2.Flip(swapped ? mapped : local, mapped, flipX && flipY ? FlipMode.XY : flipX ? FlipMode.Y : FlipMode.X);
+                }
+                else
+                {
+                    // Pixel centres -> local bbox -> original bbox ROI. Nearest-neighbour
+                    // preserves the binary mask; memory is proportional to the result bbox.
+                    double sx = bbox[2].Value<double>() / local.Width;
+                    double sy = bbox[3].Value<double>() / local.Height;
+                    double x = bbox[0].Value<double>() + sx * 0.5;
+                    double y = bbox[1].Value<double>() + sy * 0.5;
+                    using (var matrix = new Mat(2, 3, MatType.CV_64FC1))
+                    {
+                        matrix.Set(0, 0, t[0] * sx); matrix.Set(0, 1, t[1] * sy);
+                        matrix.Set(1, 0, t[3] * sx); matrix.Set(1, 1, t[4] * sy);
+                        matrix.Set(0, 2, t[0] * x + t[1] * y + t[2] - globalBox[0] - 0.5);
+                        matrix.Set(1, 2, t[3] * x + t[4] * y + t[5] - globalBox[1] - 0.5);
+                        Cv2.WarpAffine(local, mapped, matrix, new Size(width, height), InterpolationFlags.Nearest, BorderTypes.Constant, Scalar.Black);
+                    }
+                }
+                return MaskRleUtils.MatToMaskInfo(mapped);
+            }
         }
 
         private static bool TryMapLocalBboxToAabb(JArray bboxLocal, double[] t, bool isAxisAlignedTransform, out List<int> aabb)

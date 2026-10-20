@@ -59,6 +59,7 @@ public partial class Utils
 - `Bbox` 长度约定：水平框 ≥4（`x,y,w,h`），旋转框 ≥4（`cx,cy,w,h`，`angle` 单独字段）。
 - `Angle` 有效值范围：`> -99.0f` 视为有效；`-100.0f` 视为无效。
 - `Mask` 为空时（`Mask == null || Mask.Empty()`），`WithMask` 应为 `false`。
+- DVST/DVSO 水平框输出的 `Mask` / `mask_rle` 相对于原图 `Bbox`，方向与原图一致；局部旋转、翻转在输出时还原。mask 栅格尺寸可与框不同，显示时按框缩放；无变换、纯平移及正向轴缩放保留原 RLE。`with_mask=false` 不生成对外 mask 或 poly。
 - 统计与业务扩展均通过 `ExtraInfo` 读取，完整字段语义见 [结果标准](模块、流程与模型推理标准文档.md) 3.3.1。
 - `ExtraInfo` 为 `JObject`，没有扩展时可为 `null`；键缺失、JSON `null`、数值 `0` 保持区别，构造与结构化转 JSON 不增加默认统计键。
 - `ToString()` 按通用扩展对象输出均值、中值与其他扩展，空侧显示 `null`，有效零值仍显示数值，未输出的统计组不显示。

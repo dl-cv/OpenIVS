@@ -97,6 +97,8 @@ namespace DlcvCSharpTest
 
                 if (args != null && args.Length >= 1 && args[0] == "barcode-selftest") return BarcodeReaderSelfTest.Run(args);
 
+                if (args != null && args.Length >= 1 && args[0] == "flow-mask-transform-selftest") return FlowMaskTransformSelfTest.Run();
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "algorithm-modules-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return AlgorithmModulesSelfTest.Run();
