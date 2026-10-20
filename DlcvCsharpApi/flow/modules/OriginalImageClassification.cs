@@ -96,7 +96,7 @@ namespace DlcvModules
             return (int)value;
         }
 
-        private static double[] ReadMatrix(JToken token, Mat original)
+        internal static double[] ReadMatrix(JToken token, Mat original)
         {
             var identity = new double[] { 1, 0, 0, 0, 1, 0 };
             if (token == null || token.Type == JTokenType.Null) return identity;

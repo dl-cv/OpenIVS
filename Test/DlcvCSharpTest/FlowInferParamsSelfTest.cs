@@ -64,6 +64,47 @@ namespace DlcvCSharpTest
                 return 1;
             }
 
+            Type cliType = Assembly.LoadFrom(ResolveDemoAssemblyPath()).GetType("DlcvDemo.CliRunner", true);
+            MethodInfo resolveThreshold = cliType.GetMethod("ResolveModelThreshold", BindingFlags.Static | BindingFlags.NonPublic);
+            foreach (string taskType in new[] { "分类", "cls" })
+            {
+                var info = new JObject { ["task_type"] = taskType, ["threshold"] = 0.5 };
+                foreach (var input in new[] { info, new JObject { ["model_info"] = info } })
+                {
+                    if ((double)resolveThreshold.Invoke(null, new object[] { input }) != 0.0)
+                    {
+                        Console.WriteLine("分类默认阈值不应使用模型内保存值");
+                        return 1;
+                    }
+                }
+            }
+
+            var defaultCls = (JObject)method.Invoke(new ClsModel(2), null);
+            if (defaultCls["threshold"] == null || defaultCls.Value<double>("threshold") != 0.0)
+            {
+                Console.WriteLine("分类必须显式关闭默认分数过滤: " + defaultCls);
+                return 1;
+            }
+            foreach (double threshold in new[] { 0.0, 0.5 })
+            {
+                var cls = new ClsModel(3, properties: new Dictionary<string, object>
+                {
+                    ["threshold"] = threshold, ["top_k"] = 2L
+                });
+                var explicitCls = (JObject)method.Invoke(cls, null);
+                if (explicitCls.Value<double>("threshold") != threshold || explicitCls.Value<int>("top_k") != 2)
+                {
+                    Console.WriteLine("分类显式阈值或 TOP_K 被覆盖: " + explicitCls);
+                    return 1;
+                }
+            }
+            var defaultDet = (JObject)method.Invoke(new DetModel(4), null);
+            if (defaultDet["threshold"] != null)
+            {
+                Console.WriteLine("检测默认参数不应改变: " + defaultDet);
+                return 1;
+            }
+
             Console.WriteLine("流程推理参数类型自测通过: " + parameters.ToString(Newtonsoft.Json.Formatting.None));
             return 0;
         }

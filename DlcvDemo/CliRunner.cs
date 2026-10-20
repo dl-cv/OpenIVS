@@ -539,7 +539,7 @@ namespace DlcvDemo
             Console.Out.WriteLine("  \"C# 测试程序.exe\" --help");
             Console.Out.WriteLine("  \"C# 测试程序.exe\" --version");
             Console.Out.WriteLine();
-            Console.Out.WriteLine("Omitted --threshold uses the saved model value; explicit values take priority.");
+            Console.Out.WriteLine("Omitted --threshold disables score filtering for classification; other models use the saved value. Explicit values take priority.");
             Console.Out.WriteLine("Flow archives: --threshold filters final output only; model-node thresholds come from the flow.");
             Console.Out.WriteLine("Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed");
         }
@@ -565,6 +565,8 @@ namespace DlcvDemo
         internal static double ResolveModelThreshold(JObject modelInfo)
         {
             JObject info = modelInfo?["model_info"] as JObject ?? modelInfo;
+            string taskType = info?["task_type"]?.Value<string>();
+            if (taskType == "分类" || taskType == "cls") return 0.0;
             JToken token = info?["threshold"];
             if (token == null || (token.Type != JTokenType.Float && token.Type != JTokenType.Integer))
             {

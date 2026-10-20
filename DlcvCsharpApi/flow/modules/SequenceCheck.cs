@@ -26,6 +26,18 @@ namespace DlcvModules
             JToken direction = OriginalImageClassification.Property(Properties, "direction", new JValue("horizontal"));
             if (direction.Type != JTokenType.String || ((string)direction != "horizontal" && (string)direction != "vertical"))
                 throw new ArgumentException("direction 必须为 horizontal 或 vertical");
+            double[] originalToReference = null;
+            var references = ExtraInputsIn.Count > 0 ? ExtraInputsIn[0]?.ImageList : null;
+            if (references != null && references.Count > 0)
+            {
+                var reference = references[0];
+                if (reference?.OriginalImage == null || reference.OriginalImage.Empty())
+                    throw new ArgumentException("参考图像必须包含非空原图");
+                var state = reference.TransformState;
+                OriginalImageClassification.ReadMatrix(state == null ? null : JObject.FromObject(state.ToDict()), reference.OriginalImage);
+                // C# 仿射已经包含裁剪平移，不再次减去 crop_box。
+                originalToReference = state?.AffineMatrix2x3;
+            }
             var groups = OriginalImageClassification.Collect(imageList, resultList, true);
             var images = new List<ModuleImage>();
             var results = new JArray();
@@ -37,6 +49,15 @@ namespace DlcvModules
                     if (detection.Value["category_name"]?.Type != JTokenType.String)
                         throw new ArgumentException("检测结果必须包含字符串 category_name");
                     var center = OriginalImageClassification.Center(detection);
+                    if (originalToReference != null)
+                    {
+                        var a = originalToReference;
+                        double x = a[0] * center.X + a[1] * center.Y + a[2];
+                        double y = a[3] * center.X + a[4] * center.Y + a[5];
+                        if (!OriginalImageClassification.Finite(x) || !OriginalImageClassification.Finite(y))
+                            throw new ArgumentException("参考图像中心必须为有限坐标");
+                        center = new OpenCvSharp.Point2d(x, y);
+                    }
                     ordered.Add(new KeyValuePair<double, string>((string)direction == "horizontal" ? center.X : center.Y,
                         detection.Value.Value<string>("category_name")));
                 }

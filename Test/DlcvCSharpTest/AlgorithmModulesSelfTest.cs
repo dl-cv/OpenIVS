@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using DlcvModules;
@@ -22,6 +22,7 @@ namespace DlcvCSharpTest
                 try { test(); Console.WriteLine("通过 " + name); }
                 catch (Exception ex) { failures++; Console.WriteLine("失败 " + name + ": " + ex.Message); }
             };
+            check("参考图像坐标排序、空输入与仅首张", TestReferenceImage);
             check("两个节点注册", () => { Require(ModuleRegistry.Get(SequenceType) != null, SequenceType + " 未注册"); Require(ModuleRegistry.Get(Offset) != null, Offset + " 未注册"); });
             check("旧流程类型兼容且输出新主标识与原因", TestLegacySequence);
             check("顺序水平竖直、重复及完整列表", TestSequence);
@@ -430,11 +431,40 @@ namespace DlcvCSharpTest
             }
         }
 
+        private static void TestReferenceImage()
+        {
+            using (var image = Image())
+            foreach (bool vertical in new[] { false, true })
+            {
+                var props = Sequence("B", "A").ToObject<Dictionary<string, object>>();
+                props["direction"] = vertical ? "vertical" : "horizontal";
+                var module = new SequenceCheck(1, properties: props);
+                var state = new TransformationState(160, 120, new[] { 30, 20, 100, 80 },
+                    vertical ? new double[] { 0, 1, -20, -1, 0, 160 } : new double[] { -1, 0, 160, 0, 1, -20 });
+                var reference = new ModuleImage(null, image, state);
+                var entries = new JArray(Entry(new JArray(Det("A", 40))),
+                    Entry(new JArray(Det("B", 10)), state: new TransformationState(160, 120,
+                        affine2x3: new double[] { 1, 0, -100, 0, 1, 0 })));
+                var before = entries.DeepClone();
+                module.ExtraInputsIn.Add(new ModuleChannel(new List<ModuleImage> { reference, null }, null));
+                var output = module.Process(Images(image), entries);
+                Require(Label(output) == "OK", "参考图像应将 B 排在 A 前面");
+                Require(output.ResultList[0].Value<string>("reason") == "期望顺序：B → A\n当前顺序：B → A", "参考顺序 reason");
+                Require(ReferenceEquals(output.ImageList[0].OriginalImage, image), "仍输出原图");
+                Require(JToken.DeepEquals(before, entries), "输入结果不变");
+                module.ExtraInputsIn.Clear();
+                module.ExtraInputsIn.Add(new ModuleChannel(null, null));
+                module.Properties["categories"] = new JArray("A", "B");
+                Require(Label(module.Process(Images(image), entries)) == "OK", "空参考输入沿用原图排序");
+            }
+        }
+
         private static void TestGraph()
         {
             using (var image = Image())
             {
                 foreach (string type in new[] { SequenceType, LegacySequenceType, Offset })
+                foreach (bool reference in type == Offset ? new[] { false } : new[] { false, true })
                 foreach (bool ok in new[] { true, false })
                 {
                     var context = new DlcvModules.ExecutionContext(); context.Set("frontend_image_mat", image);
@@ -449,8 +479,18 @@ namespace DlcvCSharpTest
                     nodes[4]["type"] = type;
                     nodes[4]["properties"] = type != Offset ? (ok ? Sequence("A", "B") : Sequence("B", "A"))
                         : new JObject { ["rules"] = ok ? new JArray() : new JArray(Rule("<", 5)) };
+                    foreach (var node in nodes) node["order"] = node["id"].DeepClone();
+                    if (reference)
+                    {
+                        ((JArray)nodes[0]["outputs"][0]["links"]).Add(11);
+                        ((JArray)nodes[4]["inputs"]).Add(new JObject { ["name"] = "reference_image", ["type"] = "image_chan", ["link"] = 12 });
+                        nodes[4]["properties"] = ok ? Sequence("B", "A") : Sequence("A", "B");
+                        nodes.Add(JObject.Parse(@"{'id':7,'order':4,'type':'pre_process/image_flip',
+                            'inputs':[{'type':'image_chan','link':11}], 'outputs':[{'type':'image_chan','links':[12]}]}"));
+                    }
                     string label = (ok ? "OK" : "NG") + (type == Offset ? "-5" : "");
                     string reason = type != Offset ? (ok ? "期望顺序：A → B" : "期望顺序：B → A") + "\n当前顺序：A → B" : "距离：5 px";
+                    if (reference) reason = (ok ? "期望顺序：B → A" : "期望顺序：A → B") + "\n当前顺序：B → A";
                     var output = new GraphExecutor(nodes.ToObject<List<Dictionary<string, object>>>(), context).Run();
                     Require(Label(new ModuleIO((List<ModuleImage>)output[5]["image_list"], (JArray)output[5]["result_list"])) == label, "真实端口和共享图像支路");
                     var payload = context.Get<Dictionary<string, object>>("frontend_json");
