@@ -1102,7 +1102,7 @@ namespace DlcvDemo
                 }
                 if (!string.IsNullOrWhiteSpace(reason))
                 {
-                    sb.AppendLine(I18n.T("流程输出原因：") + reason);
+                    sb.AppendLine(I18n.T("流程输出原因：") + reason.Replace("\r\n", "\n").Replace("\n", Environment.NewLine));
                 }
                 if (objects.Count == 0)
                 {
