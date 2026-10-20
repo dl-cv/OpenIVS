@@ -509,6 +509,8 @@ namespace DlcvModules
 		{
 			var p = new JObject();
 			TryAddParam(p, "threshold");
+			// 省略参数会启用 SDK 模型内阈值；分类默认显式关闭分数过滤。
+			if (this is ClsModel && p["threshold"] == null) p["threshold"] = 0.0;
 			TryAddParam(p, "iou_threshold");
 			TryAddParam(p, "top_k");
 			TryAddParam(p, "return_polygon");

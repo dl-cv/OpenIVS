@@ -246,6 +246,7 @@ public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 - `Infer` 内部调用 `InferBatch(new List<Mat> { image })`。
 - `InferOneOutJson` 内部调用 `InferInternalCore(..., emitPoly: true)` 以保留 `poly` 字段。
 - `output/return_json` 产生按图 `ok/reason` 时，`Infer` / `InferBatch` 将其写入对应 `CSharpSampleResult.Ok/Reason`，`InferOneOutJson` 将其写入单图包装对象。
+- C# 分类节点默认显式传入 `threshold=0`，按 `top_k` 截取 SDK 返回结果；节点显式设置阈值时保留 `score >= threshold`。省略阈值不再使用模型内保存的 0.5。
 - 流程中的 `model/*` 节点始终使用流程文件自身的 `properties.threshold`；入口 `paramsJson.threshold` 不会改写节点属性。
 - 入口 `threshold` 仅在流程执行完成后过滤最终对外结果，保留 `score >= threshold` 的对象；未传入有限数值时不做额外过滤，无有限数值 `score` 的非标准条目保留。
 
@@ -540,7 +541,7 @@ using (var model = ModelFactory.CreateFromIndex(existingIndex))
 
 | 字段名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `threshold` | float | 普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型的最终对外结果阈值 |
+| `threshold` | float | 分类为 0（不按分数过滤）；其他普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型的最终对外结果阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |

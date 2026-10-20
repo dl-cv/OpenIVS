@@ -2266,6 +2266,13 @@ namespace dlcv_infer_csharp
                     }
                 }
 
+                string taskType = _cachedModelInfo?["model_info"]?["task_type"]?.Value<string>();
+                if ((taskType == "分类" || taskType == "cls") &&
+                    (inferRequest["threshold"] == null || inferRequest["threshold"].Type == JTokenType.Null))
+                {
+                    inferRequest["threshold"] = 0.0;
+                }
+
                 // JSON 序列化
                 string jsonStr = inferRequest.ToString();
 
