@@ -350,13 +350,12 @@ namespace DlcvModules
                 int idx = entry["index"]?.Value<int?>() ?? -1;
                 int oidx = entry["origin_index"]?.Value<int?>() ?? -1;
                 string tSig = SerializeTransformKey(entry["transform"] as JObject);
-                if (idx >= 0) indexToMeta[idx] = entry;
-                if (oidx >= 0) originToMeta[oidx] = entry;
-                if (!string.IsNullOrEmpty(tSig)) MergeTransformMetadata(transToMeta, tSig, entry);
-                if (dets.Count == 0) continue;
-
+                if (idx >= 0) MergeMetadata(indexToMeta, idx, entry);
+                if (oidx >= 0) MergeMetadata(originToMeta, oidx, entry);
+                if (!string.IsNullOrEmpty(tSig)) MergeMetadata(transToMeta, tSig, entry);
                 List<JObject> idxBucket = idx >= 0 ? GetOrCreateDetBucket(indexToDets, idx) : null;
                 List<JObject> orgBucket = oidx >= 0 ? GetOrCreateDetBucket(originToDets, oidx) : null;
+                if (dets.Count == 0) continue;
                 List<JObject> transBucket = !string.IsNullOrEmpty(tSig) ? GetOrCreateDetBucket(transToDets, tSig) : null;
 
                 foreach (var d in dets)
@@ -410,10 +409,9 @@ namespace DlcvModules
             return list;
         }
 
-        private static void MergeTransformMetadata(Dictionary<string, JObject> map, string key, JObject source)
+        private static void MergeMetadata<TKey>(Dictionary<TKey, JObject> map, TKey key, JObject source)
         {
-            if (map == null || string.IsNullOrEmpty(key) || source == null ||
-                (!source.ContainsKey("ok") && !source.ContainsKey("reason")))
+            if (map == null || source == null)
             {
                 return;
             }
@@ -437,6 +435,12 @@ namespace DlcvModules
                 AppendUniqueReasons(reasons, target["reason"]);
                 AppendUniqueReasons(reasons, source["reason"]);
                 target["reason"] = reasons.Count > 0 ? (JToken)reasons : JValue.CreateNull();
+            }
+            if (source["extra_info"] is JObject extraInfo)
+            {
+                var merged = target["extra_info"] as JObject ?? new JObject();
+                foreach (var property in extraInfo.Properties()) merged[property.Name] = property.Value.DeepClone();
+                target["extra_info"] = merged;
             }
         }
 
@@ -485,6 +489,7 @@ namespace DlcvModules
                     ? metadata["reason"].DeepClone()
                     : JValue.CreateNull();
             }
+            if (metadata?["extra_info"] is JObject extraInfo) item["extra_info"] = extraInfo.DeepClone();
             return item;
         }
 

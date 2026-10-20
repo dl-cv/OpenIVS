@@ -144,18 +144,25 @@ namespace dlcv_infer_csharp
             /// </summary>
             public string Reason { get; set; }
 
+            public JObject ExtraInfo { get; set; }
+
             public CSharpSampleResult(List<CSharpObjectResult> results)
             {
                 Results = results;
                 Ok = null;
                 Reason = null;
+                ExtraInfo = null;
             }
 
             public CSharpSampleResult(List<CSharpObjectResult> results, bool? ok, string reason)
+                : this(results, ok, reason, null) { }
+
+            public CSharpSampleResult(List<CSharpObjectResult> results, bool? ok, string reason, JObject extraInfo)
             {
                 Results = results;
                 Ok = ok;
                 Reason = reason;
+                ExtraInfo = extraInfo;
             }
 
             public override String ToString()

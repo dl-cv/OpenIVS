@@ -58,6 +58,7 @@ struct InspectionStatusSnapshot final {
     bool HasOk = false;
     bool Ok = false;
     std::vector<std::string> Reasons;
+    Json ExtraInfo;
 };
 
 thread_local std::vector<InspectionStatusSnapshot> g_lastInspectionStatuses;
@@ -71,6 +72,8 @@ void SetLastInferTiming(double dlcvInferMs, double totalInferMs, std::vector<dlc
 InspectionStatusSnapshot ParseInspectionStatus(const Json& token) {
     InspectionStatusSnapshot status;
     try {
+        if (token.is_object() && token.contains("extra_info") && token.at("extra_info").is_object())
+            status.ExtraInfo = token.at("extra_info");
         if (!token.is_object() || !token.contains("ok") || !token.at("ok").is_boolean()) {
             return status;
         }
@@ -102,7 +105,7 @@ void SetLastInspectionStatusesFromFlowRoot(const Json& flowRoot, size_t expected
 
     try {
         const InspectionStatusSnapshot rootStatus = ParseInspectionStatus(flowRoot);
-        if (rootStatus.HasOk) {
+        if (rootStatus.HasOk || !rootStatus.ExtraInfo.is_null()) {
             if (g_lastInspectionStatuses.empty()) g_lastInspectionStatuses.resize(1);
             g_lastInspectionStatuses[0] = rootStatus;
             return;
@@ -114,7 +117,7 @@ void SetLastInspectionStatusesFromFlowRoot(const Json& flowRoot, size_t expected
         const Json& resultList = flowRoot.at("result_list");
         for (size_t i = 0; i < resultList.size(); ++i) {
             const InspectionStatusSnapshot status = ParseInspectionStatus(resultList.at(i));
-            if (!status.HasOk) continue;
+            if (!status.HasOk && status.ExtraInfo.is_null()) continue;
             if (i >= g_lastInspectionStatuses.size()) g_lastInspectionStatuses.resize(i + 1);
             g_lastInspectionStatuses[i] = status;
         }
@@ -126,15 +129,17 @@ void SetLastInspectionStatusesFromFlowRoot(const Json& flowRoot, size_t expected
 Json WrapNormalizedFlowJsonWithInspectionStatus(
     Json normalized,
     const InspectionStatusSnapshot& status) {
-    if (!status.HasOk) return normalized;
+    if (!status.HasOk && status.ExtraInfo.is_null()) return normalized;
 
     Json reason = Json();
     if (!status.Reasons.empty()) reason = status.Reasons;
-    return Json::object({
-        {"result_list", std::move(normalized)},
-        {"ok", status.Ok},
-        {"reason", std::move(reason)}
-    });
+    Json out = Json::object({{"result_list", std::move(normalized)}});
+    if (status.HasOk) {
+        out["ok"] = status.Ok;
+        out["reason"] = std::move(reason);
+    }
+    if (!status.ExtraInfo.is_null()) out["extra_info"] = status.ExtraInfo;
+    return out;
 }
 
 #ifndef _WIN32
@@ -888,7 +893,8 @@ Json ExtractFlowResultListToken(const Json& flowRoot) {
 std::vector<dlcv_infer::SampleResult> ConvertFlowResultListTokenToSampleResults(
     const Json& resultListToken,
     size_t expectedImageCount,
-    bool emitMaskOutput) {
+    bool emitMaskOutput,
+    const Json& root) {
 
     std::vector<dlcv_infer::SampleResult> sampleResults;
     if (!resultListToken.is_array()) {
@@ -915,13 +921,15 @@ std::vector<dlcv_infer::SampleResult> ConvertFlowResultListTokenToSampleResults(
         sampleResults.reserve(std::max(expectedImageCount, resultListToken.size()));
         for (const auto& token : resultListToken) {
             if (token.is_object() && token.contains("result_list") && token.at("result_list").is_array()) {
-                sampleResults.emplace_back(ConvertFlowResultListToObjects(token.at("result_list"), emitMaskOutput));
+                sampleResults.emplace_back(ConvertFlowResultListToObjects(token.at("result_list"), emitMaskOutput),
+                    token.contains("extra_info") && token.at("extra_info").is_object() ? token.at("extra_info") : Json());
             } else {
                 sampleResults.emplace_back(std::vector<dlcv_infer::ObjectResult>{});
             }
         }
     } else {
-        sampleResults.emplace_back(ConvertFlowResultListToObjects(resultListToken, emitMaskOutput));
+        sampleResults.emplace_back(ConvertFlowResultListToObjects(resultListToken, emitMaskOutput),
+            root.contains("extra_info") && root.at("extra_info").is_object() ? root.at("extra_info") : Json());
     }
 
     if (expectedImageCount > 0 && sampleResults.size() < expectedImageCount) {
@@ -3194,7 +3202,7 @@ namespace dlcv_infer {
             const bool emitMaskOutput = ResolveWithMaskOutputFlag(params_json, true);
             const Json resultListToken = ExtractFlowResultListToken(flowRoot);
             std::vector<SampleResult> sampleResults =
-                ConvertFlowResultListTokenToSampleResults(resultListToken, 1, emitMaskOutput);
+                ConvertFlowResultListTokenToSampleResults(resultListToken, 1, emitMaskOutput, flowRoot);
             return Result(std::move(sampleResults));
         }
 
@@ -3279,7 +3287,7 @@ namespace dlcv_infer {
             const bool emitMaskOutput = ResolveWithMaskOutputFlag(params_json, true);
             const Json resultListToken = ExtractFlowResultListToken(flowRoot);
             std::vector<SampleResult> sampleResults =
-                ConvertFlowResultListTokenToSampleResults(resultListToken, image_list.size(), emitMaskOutput);
+                ConvertFlowResultListTokenToSampleResults(resultListToken, image_list.size(), emitMaskOutput, flowRoot);
             return Result(std::move(sampleResults));
         }
 

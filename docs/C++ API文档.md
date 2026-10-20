@@ -48,7 +48,8 @@ struct ObjectResult {
 
 struct SampleResult {
     std::vector<ObjectResult> results;
-    explicit SampleResult(std::vector<ObjectResult> results = {});
+    json extraInfo;
+    explicit SampleResult(std::vector<ObjectResult> results, json extra = nullptr);
 };
 
 struct Result {
@@ -85,6 +86,8 @@ if (extra.is_object() && extra.contains("with_mean")) {
 ```
 
 中值读取 `with_median`、`foreground_median`、`background_median`，背景均值读取 `background_mean`。`extraInfo` 是 C++ 值对象，由其析构函数管理内存，不调用 C 字符串释放函数。跨 DLL 使用时应配套使用当前公开头文件与库。
+
+`SampleResult.extraInfo` 是图片级扩展，与目标的 `ObjectResult.extraInfo` 分开。距离模块将未舍入 double 写入 `sample.extraInfo["distance"]`，无法计算时为 JSON `null`；JSON 单图包装对象使用同层 `extra_info.distance`，批量时位于各图容器内。原单参数构造仍有效，没有扩展时为 JSON `null`。多个输出按键合并图片扩展，其他字段保留，同名键使用后面的值。C++ 调用方须配套更新头文件与库并重新编译。
 
 ### 2.2 流程图相关数据结构
 

@@ -69,6 +69,7 @@
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\PostProcessModules.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\ForegroundBackgroundStatisticsModule.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\AlgorithmModules.cpp" />
+    <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\OutputModules.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\BarcodeReaderModule.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\SlidingModules.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\RegionStrokeVisualizeTemplateModules.cpp" />

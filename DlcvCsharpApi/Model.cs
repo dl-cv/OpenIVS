@@ -2722,7 +2722,7 @@ namespace dlcv_infer_csharp
                     }
 
                     if (dvsContainer != null &&
-                        (dvsContainer.ContainsKey("ok") || dvsContainer.ContainsKey("reason")))
+                        (dvsContainer.ContainsKey("ok") || dvsContainer.ContainsKey("reason") || dvsContainer["extra_info"] is JObject))
                     {
                         var payload = new JObject
                         {
@@ -2740,6 +2740,7 @@ namespace dlcv_infer_csharp
                                 ? dvsContainer["reason"].DeepClone()
                                 : JValue.CreateNull();
                         }
+                        if (dvsContainer["extra_info"] is JObject extraInfo) payload["extra_info"] = extraInfo.DeepClone();
                         return payload;
                     }
 

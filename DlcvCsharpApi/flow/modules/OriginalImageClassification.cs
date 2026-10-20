@@ -19,6 +19,7 @@ namespace DlcvModules
         {
             public ModuleImage Image;
             public readonly List<Detection> Detections = new List<Detection>();
+            public readonly JObject ExtraInfo = new JObject();
         }
 
         internal static List<Group> Collect(List<ModuleImage> images, JArray results, bool allowNullSamples)
@@ -45,6 +46,8 @@ namespace DlcvModules
                 if (!(token is JObject entry)) throw new ArgumentException("result_list 必须包含对象");
                 if (entry.Value<string>("type") != "local") continue;
                 Group group = groups[SelectGroup(images, wrapperGroups, entry)];
+                if (entry["extra_info"] is JObject extraInfo)
+                    foreach (var property in extraInfo.Properties()) group.ExtraInfo[property.Name] = property.Value.DeepClone();
                 double[] matrix = ReadMatrix(entry["transform"], group.Image.OriginalImage);
                 JToken samples = entry["sample_results"];
                 if (samples == null || (allowNullSamples && samples.Type == JTokenType.Null)) samples = new JArray();
