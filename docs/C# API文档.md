@@ -92,16 +92,19 @@ public partial class Utils
         public List<CSharpObjectResult> Results { get; set; }
         public bool? Ok { get; set; }
         public string Reason { get; set; }
+        public JObject ExtraInfo { get; set; }
 
         public CSharpSampleResult(List<CSharpObjectResult> results);
         public CSharpSampleResult(List<CSharpObjectResult> results, bool? ok, string reason);
+        public CSharpSampleResult(List<CSharpObjectResult> results, bool? ok, string reason, JObject extraInfo);
     }
 }
 ```
 
 - `Ok` 为流程对当前图片的显式判定状态；流程未产生判定状态时为 `null`。
-- `Reason` 为失败原因文本；没有原因时为 `null`。
+- `Reason` 为流程判定原因文本；没有原因时为 `null`。
 - 普通模型和未使用判定模块的旧流程保持 `Ok=null`、`Reason=null`。
+- `ExtraInfo` 保存图片级扩展；距离模块的未舍入距离读取 `sample.ExtraInfo["distance"]`，可计算时为 double，无法计算时为 JSON `null`。JSON 单图包装对象使用同层 `extra_info.distance`；批量时位于各图容器内。距离不放入目标的 `ExtraInfo`，原单参数及三参数构造保持有效，没有扩展时为 `null`。
 
 ### 2.3 CSharpResult
 

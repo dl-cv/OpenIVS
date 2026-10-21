@@ -821,7 +821,7 @@ namespace DlcvModules
                     resultArray = new JArray();
                 }
 
-                if (resultTuple.Item1.ContainsKey("ok") || resultTuple.Item1.ContainsKey("reason"))
+                if (resultTuple.Item1.ContainsKey("ok") || resultTuple.Item1.ContainsKey("reason") || resultTuple.Item1["extra_info"] is JObject)
                 {
                     var payload = new JObject
                     {
@@ -1148,6 +1148,7 @@ namespace DlcvModules
             {
                 target["reason"] = source["reason"] != null ? source["reason"].DeepClone() : JValue.CreateNull();
             }
+            if (source["extra_info"] is JObject extraInfo) target["extra_info"] = extraInfo.DeepClone();
         }
 
         private static void MergeStatusFields(JObject target, Dictionary<string, object> source)
@@ -1177,6 +1178,12 @@ namespace DlcvModules
                 target["reason"] = reasons.Count > 0
                     ? (JToken)new JArray(reasons)
                     : JValue.CreateNull();
+            }
+            if (source.TryGetValue("extra_info", out object extraValue) && ToStatusToken(extraValue) is JObject extraInfo)
+            {
+                var merged = target["extra_info"] as JObject ?? new JObject();
+                foreach (var property in extraInfo.Properties()) merged[property.Name] = property.Value.DeepClone();
+                target["extra_info"] = merged;
             }
         }
 
@@ -1370,7 +1377,8 @@ namespace DlcvModules
                 samples.Add(new Utils.CSharpSampleResult(
                     new List<Utils.CSharpObjectResult>(),
                     ReadStatusOk(rootStatus != null ? rootStatus["ok"] : null),
-                    ReadStatusReason(rootStatus != null ? rootStatus["reason"] : null)));
+                    ReadStatusReason(rootStatus != null ? rootStatus["reason"] : null),
+                    rootStatus?["extra_info"] is JObject extraInfo ? (JObject)extraInfo.DeepClone() : null));
                 return new Utils.CSharpResult(samples, JsonTextFromToken(rootStatus));
             }
 
@@ -1416,7 +1424,8 @@ namespace DlcvModules
                 return new Utils.CSharpSampleResult(
                     objects,
                     ReadStatusOk(status != null ? status["ok"] : null),
-                    ReadStatusReason(status != null ? status["reason"] : null));
+                    ReadStatusReason(status != null ? status["reason"] : null),
+                    status?["extra_info"] is JObject emptyExtra ? (JObject)emptyExtra.DeepClone() : null);
             }
 
             foreach (var token in list)
@@ -1438,7 +1447,8 @@ namespace DlcvModules
             return new Utils.CSharpSampleResult(
                 objects,
                 ReadStatusOk(status != null ? status["ok"] : null),
-                ReadStatusReason(status != null ? status["reason"] : null));
+                ReadStatusReason(status != null ? status["reason"] : null),
+                status?["extra_info"] is JObject extraInfo ? (JObject)extraInfo.DeepClone() : null);
         }
         private void ParseNewFormatEntry(JObject entry, List<Utils.CSharpObjectResult> objects, bool includeMask = true)
         {

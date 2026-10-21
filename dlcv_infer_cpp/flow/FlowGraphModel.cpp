@@ -388,6 +388,7 @@ static FlowBatchResult AggregateFrontendResults(ExecutionContext& ctx, int image
             const int targetIndex = ResolvePerImageTargetIndex(item, i, imageCount);
             if (targetIndex < 0 || targetIndex >= imageCount) continue;
             AppendResultsDedup(batch.PerImageResults[static_cast<size_t>(targetIndex)], item.Results);
+            batch.PerImageStatuses[static_cast<size_t>(targetIndex)].ExtraInfo.update(item.ExtraInfo);
             if (item.HasOk) {
                 FlowInspectionStatus& status = batch.PerImageStatuses[static_cast<size_t>(targetIndex)];
                 if (!status.HasOk) {
@@ -904,11 +905,13 @@ Json FlowGraphModel::InferOneOutJson(const cv::Mat& image, const Json& paramsJso
     Json root = InferInternal(std::vector<cv::Mat>{ image }, paramsJson);
     try {
         if (root.is_object() && root.contains("result_list") && root.at("result_list").is_array()) {
-            if (root.contains("ok") && root.at("ok").is_boolean()) {
+            if ((root.contains("ok") && root.at("ok").is_boolean()) ||
+                (root.contains("extra_info") && root.at("extra_info").is_object())) {
                 Json out = Json::object();
                 out["result_list"] = root.at("result_list");
-                out["ok"] = root.at("ok");
+                if (root.contains("ok")) out["ok"] = root.at("ok");
                 if (root.contains("reason")) out["reason"] = root.at("reason");
+                if (root.contains("extra_info")) out["extra_info"] = root.at("extra_info");
                 return out;
             }
             return root.at("result_list");
