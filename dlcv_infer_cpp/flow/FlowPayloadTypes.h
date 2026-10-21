@@ -93,12 +93,14 @@ struct FlowByImageEntry final {
     bool HasOk = false;
     bool Ok = false;
     Json Reason;
+    Json ExtraInfo = Json::object();
 
     Json ToJson() const {
         Json out = Json::object();
         out["origin_index"] = OriginIndex;
         out["original_size"] = Json::array({ OriginalWidth, OriginalHeight });
         out["results"] = FlowResultItemsToJsonArray(Results);
+        if (ExtraInfo.is_object() && !ExtraInfo.empty()) out["extra_info"] = ExtraInfo;
         if (HasOk) {
             out["ok"] = Ok;
             out["reason"] = Reason.is_null() || (Reason.is_array() && Reason.empty())
@@ -110,6 +112,7 @@ struct FlowByImageEntry final {
     static FlowByImageEntry FromJson(const Json& src) {
         FlowByImageEntry out;
         if (!src.is_object()) return out;
+        if (src.contains("extra_info") && src.at("extra_info").is_object()) out.ExtraInfo = src.at("extra_info");
         try { out.OriginIndex = src.value("origin_index", -1); } catch (...) { out.OriginIndex = -1; }
         try {
             if (src.contains("original_size") && src.at("original_size").is_array() && src.at("original_size").size() >= 2) {
@@ -173,6 +176,7 @@ struct FlowInspectionStatus final {
     bool HasOk = false;
     bool Ok = false;
     Json Reason;
+    Json ExtraInfo = Json::object();
 };
 
 struct FlowBatchResult final {
@@ -184,6 +188,8 @@ struct FlowBatchResult final {
         if (PerImageResults.size() <= 1) {
             out["result_list"] = PerImageResults.empty()
                 ? Json::array() : FlowResultItemsToJsonArray(PerImageResults[0]);
+            if (!PerImageStatuses.empty() && !PerImageStatuses[0].ExtraInfo.empty())
+                out["extra_info"] = PerImageStatuses[0].ExtraInfo;
             if (!PerImageStatuses.empty() && PerImageStatuses[0].HasOk) {
                 out["ok"] = PerImageStatuses[0].Ok;
                 const Json& reason = PerImageStatuses[0].Reason;
@@ -196,6 +202,8 @@ struct FlowBatchResult final {
         Json batch = Json::array();
         for (size_t i = 0; i < PerImageResults.size(); ++i) {
             Json one = Json::object({ {"result_list", FlowResultItemsToJsonArray(PerImageResults[i])} });
+            if (i < PerImageStatuses.size() && !PerImageStatuses[i].ExtraInfo.empty())
+                one["extra_info"] = PerImageStatuses[i].ExtraInfo;
             if (i < PerImageStatuses.size() && PerImageStatuses[i].HasOk) {
                 one["ok"] = PerImageStatuses[i].Ok;
                 one["reason"] = PerImageStatuses[i].Reason.is_array() && !PerImageStatuses[i].Reason.empty()

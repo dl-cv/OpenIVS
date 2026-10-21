@@ -354,6 +354,7 @@ namespace dlcv_infer_csharp
                     ["index"] = i,
                     ["sample_results"] = sampleResults
                 };
+                if (sample.ExtraInfo != null && sample.ExtraInfo.HasValues) entry["extra_info"] = sample.ExtraInfo.DeepClone();
                 array.Add(entry);
 
             }

@@ -321,8 +321,10 @@ namespace dlcv_infer {
 
     struct SampleResult {
         std::vector<ObjectResult> results;
+        json extraInfo;
 
-        explicit SampleResult(std::vector<ObjectResult> r) : results(std::move(r)) {}
+        explicit SampleResult(std::vector<ObjectResult> r, json extra = nullptr)
+            : results(std::move(r)), extraInfo(std::move(extra)) {}
     };
 
     struct Result {

@@ -92,6 +92,7 @@ struct AlgorithmDetection {
 struct AlgorithmGroup {
     ModuleImage Original;
     std::vector<AlgorithmDetection> Detections;
+    Json ExtraInfo = Json::object();
 };
 
 size_t AlgorithmSelectGroup(const std::vector<ModuleImage>& images, const std::vector<size_t>& groups, const Json& entry) {
@@ -143,6 +144,7 @@ std::vector<AlgorithmGroup> AlgorithmGroups(const std::vector<ModuleImage>& imag
         if (!entry.is_object()) throw std::invalid_argument("result_list 必须包含对象");
         if (!entry.contains("type") || entry.at("type") != "local") continue;
         auto& group = groups.at(AlgorithmSelectGroup(images, imageGroups, entry));
+        if (entry.contains("extra_info") && entry.at("extra_info").is_object()) group.ExtraInfo.update(entry.at("extra_info"));
         const auto inverse = AlgorithmInverse(entry, group.Original);
         if (!entry.contains("sample_results")) continue;
         const auto& detections = entry.at("sample_results");
@@ -228,6 +230,14 @@ public:
             if (!name.is_string()) throw std::invalid_argument("categories 必须为有序字符串列表");
         if (direction != "horizontal" && direction != "vertical") throw std::invalid_argument("direction 必须为 horizontal 或 vertical");
         const size_t axis = direction == "horizontal" ? 0 : 1;
+        std::vector<double> originalToReference;
+        if (!ExtraInputsIn.empty() && !ExtraInputsIn[0].ImageList.empty()) {
+            const auto& reference = ExtraInputsIn[0].ImageList.front();
+            if (reference.OriginalImage.empty()) throw std::invalid_argument("参考图像必须包含非空原图");
+            AlgorithmInverse(Json{{"transform", reference.TransformState.ToJson()}}, reference);
+            // C++ 仿射已经包含裁剪平移，不再次减去 CropBox。
+            originalToReference = reference.TransformState.AffineMatrix2x3;
+        }
         ModuleIO output;
         for (const auto& group : AlgorithmGroups(imageList, resultList, true)) {
             std::vector<std::pair<double, std::string>> ordered;
@@ -235,7 +245,15 @@ public:
                 const auto& value = *detection.Value;
                 if (!value.contains("category_name") || !value.at("category_name").is_string())
                     throw std::invalid_argument("检测结果必须包含字符串 category_name");
-                ordered.emplace_back(AlgorithmCenter(detection)[axis], value.at("category_name").get<std::string>());
+                auto center = AlgorithmCenter(detection);
+                if (!originalToReference.empty()) {
+                    const auto& a = originalToReference;
+                    center = {a[0] * center[0] + a[1] * center[1] + a[2],
+                              a[3] * center[0] + a[4] * center[1] + a[5]};
+                    if (!std::isfinite(center[0]) || !std::isfinite(center[1]))
+                        throw std::invalid_argument("参考图像中心必须为有限坐标");
+                }
+                ordered.emplace_back(center[axis], value.at("category_name").get<std::string>());
             }
             std::stable_sort(ordered.begin(), ordered.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
             Json sequence = Json::array();
@@ -248,6 +266,17 @@ public:
         return output;
     }
 };
+
+std::string AlgorithmDistanceText(double distance) {
+    if (distance == 0) return "0";
+    std::ostringstream stream;
+    stream.imbue(std::locale::classic());
+    stream << std::fixed << std::setprecision(6) << distance;
+    std::string text = stream.str();
+    text.erase(text.find_last_not_of('0') + 1);
+    if (text.back() == '.') text.pop_back();
+    return text;
+}
 
 class OffsetDistanceModule final : public BaseModule {
 public:
@@ -270,17 +299,24 @@ public:
             const double distance = Distance(group);
             bool ok = std::isfinite(distance);
             for (const auto& rule : parsed) ok = ok && (rule.first == ">" ? distance > rule.second : distance < rule.second);
-            std::string text = "Nan";
+            std::string reason = "距离：NaN";
             if (std::isfinite(distance)) {
-                std::ostringstream stream;
-                stream.imbue(std::locale::classic());
-                stream << std::fixed << std::setprecision(6) << distance;
-                text = stream.str();
-                text.erase(text.find_last_not_of('0') + 1);
-                if (text.back() == '.') text.pop_back();
+                reason = "距离：" + AlgorithmDistanceText(distance);
+                for (const auto& rule : parsed) {
+                    const bool passes = rule.first == ">" ? distance > rule.second : distance < rule.second;
+                    if (ok || !passes)
+                        reason += std::string("，") + (distance == rule.second ? "等于" : distance > rule.second ? "大于" : "小于")
+                            + AlgorithmDistanceText(rule.second);
+                }
             }
-            const std::string reason = std::isfinite(distance) ? "距离：" + text + " px" : "距离：NaN";
-            AppendAlgorithmClassification(output, group, ok, std::string(ok ? "OK-" : "NG-") + text, reason, true);
+            const auto& image = group.Original;
+            Json extraInfo = group.ExtraInfo;
+            extraInfo["distance"] = std::isfinite(distance) ? Json(distance) : Json();
+            output.ResultList.push_back({{"type", "local"}, {"originating_module", "post_process/offset_distance"},
+                {"index", output.ImageList.size()}, {"origin_index", image.OriginalIndex},
+                {"transform", image.TransformState.ToJson()}, {"ok", ok}, {"reason", reason},
+                {"extra_info", std::move(extraInfo)}, {"sample_results", Json::array()}});
+            output.ImageList.push_back(image);
         }
         return output;
     }

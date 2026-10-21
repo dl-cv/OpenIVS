@@ -13,9 +13,10 @@
 #include "dlcv_infer.h"
 #include "flow/FlowGraphModel.h"
 #include "flow/ModuleRegistry.h"
+#include "flow/FlowPayloadTypes.h"
 
 // DLL 图级测试：MergeResults 的两路 image 都来自节点 3，results 分别来自 3/4。
-static dlcv_infer::flow::Json BuildAlgorithmSharedInputFlow(bool distance, bool keepDetections, bool expectedOk, bool invalidDistance, bool legacy) {
+static dlcv_infer::flow::Json BuildAlgorithmSharedInputFlow(bool distance, bool keepDetections, bool expectedOk, bool invalidDistance, bool legacy, bool reference = false) {
     using dlcv_infer::flow::Json;
     auto input = [](const char* type, int link) { return Json{{"type", type}, {"link", link}}; };
     auto output = [](const char* type, Json links) { return Json{{"type", type}, {"links", std::move(links)}}; };
@@ -32,15 +33,21 @@ static dlcv_infer::flow::Json BuildAlgorithmSharedInputFlow(bool distance, bool 
         build(4, invalidDistance ? "A" : "B", 12, 13, {output("image_chan", Json::array()), output("result_chan", {54, 84})}),
         {{"id", 5}, {"order", 5}, {"type", "post_process/merge_results"},
             {"inputs", {input("image_chan", 51), input("result_chan", 52), input("image_chan", 53), input("result_chan", 54)}},
-            {"outputs", {output("image_chan", {61}), output("result_chan", {62})}}},
+            {"outputs", {output("image_chan", {61}), output("result_chan", {62, 85})}}},
         {{"id", 6}, {"order", 6}, {"type", distance ? "post_process/offset_distance" : (legacy ? "post_process/wire_sequence_check" : "post_process/sequence_check")},
             {"properties", distance ? Json{{"rules", {{{"operator", "<"}, {"value", expectedOk ? 6 : 4}}}}} : Json{{"categories", expectedOk ? Json::array({"A", "B"}) : Json::array({"B", "A"})}}},
             {"inputs", {input("image_chan", 61), input("result_chan", 62)}},
             {"outputs", {output("image_chan", {71}), output("result_chan", {72})}}}
     });
+    if (reference) {
+        nodes[0]["outputs"][0]["links"].push_back(12);
+        nodes[4]["inputs"].push_back(input("image_chan", 13));
+        nodes[4]["properties"]["categories"] = expectedOk ? Json::array({"B", "A"}) : Json::array({"A", "B"});
+        nodes.push_back({{"id", 2}, {"order", 2}, {"type", "pre_process/image_flip"},
+            {"inputs", {input("image_chan", 12)}}, {"outputs", {output("image_chan", {13})}}});
+    }
     if (keepDetections) nodes.push_back({{"id", 7}, {"order", 7}, {"type", "post_process/merge_results"},
-        {"inputs", {input("image_chan", 71), input("result_chan", 72), input("image_chan", 81), input("result_chan", 82),
-            input("image_chan", 83), input("result_chan", 84)}},
+        {"inputs", {input("image_chan", 71), input("result_chan", 72), input("image_chan", 81), input("result_chan", 85)}},
         {"outputs", {output("image_chan", {91}), output("result_chan", {92})}}});
     nodes.push_back({{"id", 8}, {"order", 8}, {"type", "output/return_json"},
         {"inputs", {input("image_chan", keepDetections ? 91 : 71), input("result_chan", keepDetections ? 92 : 72)}},
@@ -75,7 +82,7 @@ int RunAlgorithmModulesSelfTest() {
         };
         int runNumber = 0;
         auto run = [&](bool distance, const std::vector<ModuleImage>& inputImages, const Json& entries,
-            const Json& props = Json::object(), bool legacy = false) {
+            const Json& props = dlcv_infer::flow::Json::object(), bool legacy = false) {
             const Json before = entries;
             const Json propertiesBefore = props;
             std::vector<cv::Mat> pixels;
@@ -109,14 +116,14 @@ int RunAlgorithmModulesSelfTest() {
                 check(entry.at("ok") == ok, "inspection status");
                 check(entry.at("reason").is_string() && !entry.at("reason").get<std::string>().empty(), "reason must remain a nonempty string");
                 if (distance) {
-                    const auto text = labels[i].substr(3);
-                    check(entry.at("reason") == (text == "Nan" ? "距离：NaN" : "距离：" + text + " px"), "distance reason matches label precision");
+                    check(entry.at("reason") == labels[i].substr(3), "distance reason precision");
+                    check(result.is_array() && result.empty(), "distance must not generate detections");
+                } else {
+                    check(result.size() == 1 && result[0].at("category_name") == labels[i] &&
+                        result[0].at("category_id") == (ok ? 0 : 1) && result[0].at("score") == 1.0, "sequence classification");
+                    check(result[0].at("bbox") == Json::array({0, 0, 300, 200}), "sequence full-image bbox");
                 }
                 if (!reasons.empty()) check(entry.at("reason") == reasons.at(i), "sequence reason");
-                check(result.size() == 1 && result[0].at("category_name") == labels[i] &&
-                    result[0].at("category_id") == (ok ? 0 : 1) && result[0].at("score") == 1.0, "classification");
-                check(result[0].at("bbox") == (distance ? Json::array({150.0, 100.0, 300.0, 200.0, 0.0}) :
-                    Json::array({0, 0, 300, 200})), "full-image bbox");
             }
         };
         auto rejects = [&](bool distance, const std::vector<ModuleImage>& imgs, const Json& entries, const Json& props) {
@@ -125,8 +132,79 @@ int RunAlgorithmModulesSelfTest() {
             catch (const std::invalid_argument&) { rejected = true; }
             check(rejected, "invalid input must throw invalid_argument");
         };
+        for (const bool vertical : {false, true}) {
+            auto module = sequence(1, "", Json{{"categories", {"B", "A"}},
+                {"direction", vertical ? "vertical" : "horizontal"}}, nullptr);
+            auto state = identity;
+            state.CropBox = {30, 20, 200, 150};
+            state.AffineMatrix2x3 = vertical ? std::vector<double>{0, 1, -20, -1, 0, 330}
+                : std::vector<double>{-1, 0, 330, 0, 1, -20};
+            auto crop = identity;
+            crop.AffineMatrix2x3 = {1, 0, -100, 0, 1, 0};
+            const auto entries = Json::array({local(Json::array({det("A", 40)})), local(Json::array({det("B", 10)}), 0, crop.ToJson())});
+            module->ExtraInputsIn.emplace_back(std::vector<ModuleImage>{ModuleImage(cv::Mat(), original, state, 7), ModuleImage()}, Json::array());
+            expect(module->Process(images, entries), {"OK"}, false, {"期望顺序：B → A\n当前顺序：B → A"});
+            check(module->ExtraInputsIn[0].ImageList[0].ImageObject.empty(), "reference pixels must stay lazy");
+            module->ExtraInputsIn.clear();
+            module->ExtraInputsIn.emplace_back();
+            module->Properties["categories"] = {"A", "B"};
+            expect(module->Process(images, entries), {"OK"}, false);
+        }
         const Json rb{{"categories", {"红", "蓝"}}};
         const Json pair = Json::array({det("A", 10, 10), det("B", 13, 14)});
+        check(dlcv_infer::SampleResult(std::vector<dlcv_infer::ObjectResult>{}).extraInfo.is_null(), "original sample constructor leaves metadata absent");
+        for (const Json& distance : std::vector<Json>{1.0000004, 0.0, Json()}) {
+            auto entry = local(distance.is_null() ? Json::array() :
+                Json::array({det("A", 0, 0), det("B", distance.get<double>(), 0)}));
+            entry["extra_info"] = {{"source", "sample"}, {"distance", -1}, {"other", {{"value", 7}}}};
+            const auto out = run(true, images, Json::array({entry}));
+            const auto& extra = out.ResultList[0]["extra_info"];
+            check(extra["source"] == "sample" && extra["other"]["value"] == 7, "distance preserves original image metadata");
+            check(distance.is_null() ? extra["distance"].is_null() :
+                extra["distance"].is_number_float() && std::abs(extra["distance"].get<double>() - distance.get<double>()) < 1e-12,
+                "distance metadata is unrounded double or null");
+            check(entry["extra_info"]["distance"] == -1, "input metadata unchanged");
+        }
+        for (bool useOrigin : {false, true}) {
+            ExecutionContext context;
+            const std::vector<ModuleImage> mappedImages{ModuleImage(original, original, identity, 0),
+                ModuleImage(original, original, identity, 1)};
+            Json mappedEntries = Json::array({local(Json::array(), 0, identity.ToJson()),
+                local(Json::array({det("A", 10)}), 1, identity.ToJson()),
+                local(Json::array({det("B", 13, 14)}), 1, identity.ToJson())});
+            mappedEntries[0]["ok"] = false;
+            mappedEntries[0]["reason"] = "距离：5";
+            mappedEntries[0]["extra_info"] = {{"distance", 5.0}, {"source", "sample"}};
+            for (auto& entry : mappedEntries) {
+                entry["origin_index"] = entry["index"];
+                if (useOrigin) entry.erase("index");
+            }
+            auto returnJson = ModuleRegistry::Get("output/return_json");
+            check(static_cast<bool>(returnJson), "return_json not registered");
+            returnJson(2, "", Json::object(), &context)->Process(mappedImages, mappedEntries);
+            const auto payloads = context.Get<std::vector<FlowFrontendByNodePayload>>("frontend_payloads_by_node", {});
+            check(payloads.size() == 1 && payloads[0].Payload.ByImage.size() == 2, "mapped output count");
+            const auto& byImage = payloads[0].Payload.ByImage;
+            check(byImage[0].Results.empty() && byImage[1].Results.size() == 2, "explicit empty result must not copy same-transform detections");
+            check(byImage[0].HasOk && !byImage[0].Ok && byImage[0].Reason == "距离：5", "empty mapped inspection");
+            check(byImage[0].ExtraInfo == Json{{"distance", 5.0}, {"source", "sample"}}, "empty mapped image metadata");
+            check(!byImage[1].ExtraInfo.contains("distance"), "other image must not inherit same-transform distance");
+        }
+        for (bool metadataFirst : {false, true}) {
+            ExecutionContext context;
+            auto status = local(Json::array());
+            status["ok"] = false;
+            status["extra_info"] = {{"distance", 5.0}};
+            auto other = local(Json::array());
+            other["extra_info"] = {{"source", "sample"}};
+            auto returnJson = ModuleRegistry::Get("output/return_json");
+            returnJson(2, "", Json::object(), &context)->Process(images,
+                metadataFirst ? Json::array({other, status}) : Json::array({status, other}));
+            const auto payloads = context.Get<std::vector<FlowFrontendByNodePayload>>("frontend_payloads_by_node", {});
+            check(payloads.size() == 1 && payloads[0].Payload.ByImage.size() == 1 &&
+                payloads[0].Payload.ByImage[0].ExtraInfo == Json{{"distance", 5.0}, {"source", "sample"}},
+                "image metadata merges in either order without losing other fields");
+        }
         // reason 与分类独立：原始 entry 保持字符串，保留完整排序、重复和空序列。
         const Json rgb{{"categories", {"红", "绿", "蓝"}}};
         const Json rbg = Json::array({local(Json::array({det("绿", 30), det("红", 10), det("蓝", 20)}))});
@@ -172,24 +250,36 @@ int RunAlgorithmModulesSelfTest() {
         }
         expect(run(false, {}, Json::array()), {}, false);
         expect(run(true, {}, Json::array()), {}, true);
-        expect(run(true, images, Json::array()), {"NG-Nan"}, true);
-        expect(run(true, images, Json::array({local(pair)})), {"OK-5"}, true);
+        expect(run(true, images, Json::array()), {"NG;距离：NaN"}, true);
+        expect(run(true, images, Json::array({local(pair)})), {"OK;距离：5"}, true);
         for (const Json& rules : std::vector<Json>{Json::array(), {{{"operator", ">"}, {"value", 4}}},
             {{{"operator", "<"}, {"value", 6}}}, {{{"operator", ">"}, {"value", 4}}, {{"operator", "<"}, {"value", 6}}}})
-            expect(run(true, images, Json::array({local(pair)}), {{"rules", rules}}), {"OK-5"}, true);
+            expect(run(true, images, Json::array({local(pair)}), {{"rules", rules}}),
+                {std::string("OK;距离：5") + (rules.empty() ? "" : rules.size() == 2 ? "，大于4，小于6" :
+                    rules[0]["operator"] == ">" ? "，大于4" : "，小于6")}, true);
         for (const Json& rules : std::vector<Json>{{{{"operator", ">"}, {"value", 5}}},
             {{{"operator", "<"}, {"value", 5}}}, {{{"operator", ">"}, {"value", 4}}, {{"operator", "<"}, {"value", 5}}}})
-            expect(run(true, images, Json::array({local(pair)}), {{"rules", rules}}), {"NG-5"}, true);
+            expect(run(true, images, Json::array({local(pair)}), {{"rules", rules}}), {"NG;距离：5，等于5"}, true);
+        expect(run(true, images, Json::array({local(pair)}),
+            {{"rules", {{{"operator", ">"}, {"value", 6}}, {{"operator", "<"}, {"value", 4}}}}}),
+            {"NG;距离：5，小于6，大于4"}, true);
+        const Json rangeEntries = Json::array({local(Json::array({det("A", 0, 0), det("B", 45.115263, 0)}))});
+        expect(run(true, images, rangeEntries,
+            {{"rules", {{{"operator", ">"}, {"value", 0}}, {{"operator", "<"}, {"value", 30}}}}}),
+            {"NG;距离：45.115263，大于30"}, true);
+        expect(run(true, images, rangeEntries,
+            {{"rules", {{{"operator", ">"}, {"value", 0}}, {{"operator", "<"}, {"value", 50}}}}}),
+            {"OK;距离：45.115263，大于0，小于50"}, true);
         expect(run(true, images, Json::array({local(Json::array({det("A", 10), det("B", 11.0000004)}))}),
-            {{"rules", {{{"operator", ">"}, {"value", 1}}}}}), {"OK-1"}, true);
-        expect(run(true, images, Json::array({local(Json::array({det("A", 10, 10), det("B", 11, 11)}))})), {"OK-1.414214"}, true);
-        expect(run(true, images, Json::array({local(Json::array({det("A", 10), det("B", 10)}))})), {"OK-0"}, true);
+            {{"rules", {{{"operator", ">"}, {"value", 1}}}}}), {"OK;距离：1，大于1"}, true);
+        expect(run(true, images, Json::array({local(Json::array({det("A", 10, 10), det("B", 11, 11)}))})), {"OK;距离：1.414214"}, true);
+        expect(run(true, images, Json::array({local(Json::array({det("A", 10), det("B", 10)}))})), {"OK;距离：0"}, true);
         expect(run(true, images, Json::array({local(Json::array({det("A", 50, 50, 0.1), det("A", 10, 10, 0.99)})),
-            local(Json::array({det("B", 13, 14, 0.95), det("B", 80, 80, 0.3)}))})), {"OK-5"}, true);
-        expect(run(true, images, Json::array({local(Json::array({det("A", 10, 10), det("A", 90, 90), det("B", 13, 14)}))})), {"OK-5"}, true);
+            local(Json::array({det("B", 13, 14, 0.95), det("B", 80, 80, 0.3)}))})), {"OK;距离：5"}, true);
+        expect(run(true, images, Json::array({local(Json::array({det("A", 10, 10), det("A", 90, 90), det("B", 13, 14)}))})), {"OK;距离：5"}, true);
         for (const Json& detections : std::vector<Json>{Json::array(), Json::array({det("A", 1)}), {det("A", 1), det("A", 3)},
             {det("A", 1), det("B", 2), det("C", 3)}})
-            expect(run(true, images, Json::array({local(detections)})), {"NG-Nan"}, true);
+            expect(run(true, images, Json::array({local(detections)})), {"NG;距离：NaN"}, true);
 
         // 每条 local 的逆仿射独立计算；CropBox 只是 C++ 的元信息，不重复平移。
         auto translated = identity; translated.AffineMatrix2x3 = {1, 0, -100, 0, 1, -80};
@@ -205,28 +295,28 @@ int RunAlgorithmModulesSelfTest() {
         check(crops[0].OriginalIndex == 7 && crops[0].TransformState.ToJson() == translated.ToJson(), "wrapper mutated");
         expect(run(false, {crops[0]}, Json::array({local(Json::array({det("蓝", 10)}), 0, translated.ToJson()), local(Json::array({det("红", 60)}))}), rb), {"OK"}, false);
         auto nonuniform = identity; nonuniform.AffineMatrix2x3 = {2, 0, 6, 0, 3, 9};
-        expect(run(true, images, Json::array({local(Json::array({det("A", 10, 27), det("B", 16, 39)}), 0, nonuniform.ToJson())})), {"OK-5"}, true);
-        expect(run(true, {crops[0]}, Json::array({local(pair)})), {"OK-5"}, true);
+        expect(run(true, images, Json::array({local(Json::array({det("A", 10, 27), det("B", 16, 39)}), 0, nonuniform.ToJson())})), {"OK;距离：5"}, true);
+        expect(run(true, {crops[0]}, Json::array({local(pair)})), {"OK;距离：5"}, true);
         auto cropA = identity; cropA.AffineMatrix2x3 = {2, 0, -20, 0, 2, -40};
         auto cropB = identity; cropB.AffineMatrix2x3 = {0, -1, 70, 1, 0, -30};
         expect(run(true, images, Json::array({local(Json::array({det("A", 4, 6)}), 0, cropA.ToJson()),
-            local(Json::array({det("B", 23, 5)}), 0, cropB.ToJson())})), {"OK-33.24154"}, true);
+            local(Json::array({det("B", 23, 5)}), 0, cropB.ToJson())})), {"OK;距离：33.24154"}, true);
         auto selected = det("A", 10, 10, 0.99);
         selected["bbox"] = {10, 10, 2, 2}; selected["with_angle"] = true; selected["angle"] = 0.7;
         for (const Json& bbox : std::vector<Json>{{10, 10, 2, 2}, {10, 10, 2, 2, 0.7},
             {{"cx", 10}, {"cy", 10}, {"w", 2}, {"h", 2}, {"theta", 0.7}},
             {{"x1", 9}, {"y1", 9}, {"x2", 11}, {"y2", 11}}}) {
             selected["bbox"] = bbox;
-            expect(run(true, images, Json::array({local(Json::array({selected, det("B", 13, 14)}))})), {"OK-5"}, true);
+            expect(run(true, images, Json::array({local(Json::array({selected, det("B", 13, 14)}))})), {"OK;距离：5"}, true);
         }
         // 精确二进制中点：Python 六位格式采用偶数舍入，但规则比较未舍入距离。
         auto midpointA = det("A", 0), midpointB = det("B", 0);
         midpointA["bbox"] = {0.0, 0.0, 2.0, 2.0, 0.0};
         midpointB["bbox"] = {0.0078125, 0.0, 2.0, 2.0, 0.0};
         expect(run(true, images, Json::array({local(Json::array({midpointA, midpointB}))}),
-            {{"rules", {{{"operator", ">"}, {"value", 0.007812}}}}}), {"OK-0.007812"}, true);
+            {{"rules", {{{"operator", ">"}, {"value", 0.007812}}}}}), {"OK;距离：0.007812，大于0.007812"}, true);
         expect(run(true, images, Json::array({local(Json::array({midpointA, midpointB}))}),
-            {{"rules", {{{"operator", "<"}, {"value", 0.0078125}}}}}), {"NG-0.007812"}, true);
+            {{"rules", {{{"operator", "<"}, {"value", 0.0078125}}}}}), {"NG;距离：0.007812，等于0.007812"}, true);
         auto red = det("红", 0), blue = det("蓝", 0);
         red["bbox"] = {100.000001, 50, 10, 10, 0.7}; blue["bbox"] = {100.000002, 50, 10, 10, 0.7};
         expect(run(false, images, Json::array({local(Json::array({blue, red}))}), rb), {"OK"}, false);
@@ -234,18 +324,18 @@ int RunAlgorithmModulesSelfTest() {
         // 同像素、同 OriginalIndex、同 transform 仍为不同原图；同原图不同索引则合并。
         const cv::Mat other = original.clone();
         const std::vector<ModuleImage> separate{images[0], ModuleImage(other, other, identity, 7)};
-        expect(run(true, separate, Json::array({local(Json::array({det("A", 10)}), 0), local(Json::array({det("B", 13, 14)}), 1)})), {"NG-Nan", "NG-Nan"}, true);
+        expect(run(true, separate, Json::array({local(Json::array({det("A", 10)}), 0), local(Json::array({det("B", 13, 14)}), 1)})), {"NG;距离：NaN", "NG;距离：NaN"}, true);
         auto second = local(Json::array({det("蓝", 10), det("红", 20)}), 1); second.erase("index"); second["image_index"] = 1;
         expect(run(false, separate, Json::array({local(Json::array({det("红", 10), det("蓝", 20)})), second}), rb), {"OK", "NG"}, false);
         const std::vector<ModuleImage> aliases{images[0], ModuleImage(original, original, identity, 9)};
         auto a = local(Json::array({det("A", 10, 10)})); a["origin_index"] = 7;
         auto b = local(Json::array({det("B", 13, 14)}), 1); b["origin_index"] = 9;
-        auto merged = run(true, aliases, Json::array({a, b})); expect(merged, {"OK-5"}, true);
+        auto merged = run(true, aliases, Json::array({a, b})); expect(merged, {"OK;距离：5"}, true);
         check(merged.ImageList[0].OriginalIndex == 7 && merged.ImageList[0].ImageObject.data == original.data, "first origin not preserved");
         a["index"] = nullptr; b["index"] = 20;
-        expect(run(true, aliases, Json::array({a, b})), {"OK-5"}, true);
+        expect(run(true, aliases, Json::array({a, b})), {"OK;距离：5"}, true);
         a.erase("origin_index"); b.erase("origin_index"); b["index"] = nullptr;
-        expect(run(true, aliases, Json::array({a, b})), {"OK-5"}, true);
+        expect(run(true, aliases, Json::array({a, b})), {"OK;距离：5"}, true);
 
         // 真正 MergeResults：两路 image 引用同一个上游 wrapper，results 各来自不同支路。
         auto mergeFactory = ModuleRegistry::Get("post_process/merge_results");
@@ -255,9 +345,9 @@ int RunAlgorithmModulesSelfTest() {
         auto combined = merge->Process(images, Json::array({local(Json::array({det("A", 10, 10)}))}));
         check(combined.ImageList.size() == 2 && combined.ImageList[0].OriginalIndex == 0 &&
             combined.ImageList[1].OriginalIndex == 1 && images[0].OriginalIndex == 7, "MergeResults value-wrapper numbering");
-        expect(run(true, combined.ImageList, combined.ResultList), {"OK-5"}, true);
+        expect(run(true, combined.ImageList, combined.ResultList), {"OK;距离：5"}, true);
         for (auto& entry : combined.ResultList) { entry["image_index"] = entry["index"]; entry.erase("index"); }
-        expect(run(true, combined.ImageList, combined.ResultList), {"OK-5"}, true);
+        expect(run(true, combined.ImageList, combined.ResultList), {"OK;距离：5"}, true);
 
         for (bool distance : {false, true}) {
             rejects(distance, {}, Json::array({local(Json::array())}), Json::object());
@@ -297,26 +387,27 @@ int RunAlgorithmModulesSelfTest() {
             rejects(true, images, Json::array(), {{"rules", rules}});
         for (const Json& bbox : std::vector<Json>{Json(), Json::array(), {1,2,3}, {1,1,-2,2}, {1,1,2,2,"nan"}}) {
             auto invalid = det("A", 10, 10, 1); invalid["bbox"] = bbox;
-            expect(run(true, images, Json::array({local(Json::array({invalid, det("A", 10, 10, 0.1), det("B", 13, 14)}))})), {"NG-Nan"}, true);
+            expect(run(true, images, Json::array({local(Json::array({invalid, det("A", 10, 10, 0.1), det("B", 13, 14)}))})), {"NG;距离：NaN"}, true);
             rejects(false, images, Json::array({local(Json::array({invalid}))}), {{"categories", {"A"}}});
         }
         for (const Json& score : std::vector<Json>{Json(), true, "invalid", "inf", "nan"}) {
             auto invalid = det("A", 10, 10); invalid["score"] = score;
-            expect(run(true, images, Json::array({local(Json::array({invalid, det("A", 10, 10, 0.1), det("B", 13, 14)}))})), {"NG-Nan"}, true);
+            expect(run(true, images, Json::array({local(Json::array({invalid, det("A", 10, 10, 0.1), det("B", 13, 14)}))})), {"NG;距离：NaN"}, true);
         }
         for (const Json& category : std::vector<Json>{Json(), "", 42}) {
             auto invalid = det("A", 10, 10); invalid["category_name"] = category;
-            expect(run(true, images, Json::array({local(Json::array({invalid, det("B", 13, 14)}))})), {"NG-Nan"}, true);
+            expect(run(true, images, Json::array({local(Json::array({invalid, det("B", 13, 14)}))})), {"NG;距离：NaN"}, true);
         }
         auto ignoredBbox = det("A", 100, 100, 0.1); ignoredBbox.erase("bbox");
-        expect(run(true, images, Json::array({local(Json::array({ignoredBbox, det("A", 10, 10), det("B", 13, 14)}))})), {"OK-5"}, true);
+        expect(run(true, images, Json::array({local(Json::array({ignoredBbox, det("A", 10, 10), det("B", 13, 14)}))})), {"OK;距离：5"}, true);
         ignoredBbox["score"] = "nan";
-        expect(run(true, images, Json::array({local(Json::array({ignoredBbox, det("A", 10, 10), det("B", 13, 14)}))})), {"NG-Nan"}, true);
-        expect(run(true, separate, Json::array()), {"NG-Nan", "NG-Nan"}, true);
+        expect(run(true, images, Json::array({local(Json::array({ignoredBbox, det("A", 10, 10), det("B", 13, 14)}))})), {"NG;距离：NaN"}, true);
+        expect(run(true, separate, Json::array()), {"NG;距离：NaN", "NG;距离：NaN"}, true);
         expect(run(false, separate, Json::array()), {"OK", "OK"}, false);
 
         // 通过公开 DLL API 执行，避免仅验证 EXE 内独立注册表。
         for (bool distance : {false, true}) for (int alias = 0; alias < (distance ? 1 : 2); ++alias)
+        for (int reference = 0; reference < (distance ? 1 : 2); ++reference)
         for (bool keepDetections : {false, true}) for (int outcome = 0; outcome < (distance ? 3 : 2); ++outcome) {
             const bool expectedOk = outcome == 1;
             const bool invalidDistance = outcome == 2;
@@ -324,7 +415,7 @@ int RunAlgorithmModulesSelfTest() {
                 (std::string("algorithm-shared-input-") + (distance ? "offset" : "sequence") + (alias ? "-legacy" : "") + (keepDetections ? "-keep.json" : ".json"));
             auto archivePath = path;
             archivePath.replace_extension(".dvst");
-            const auto pipeline = BuildAlgorithmSharedInputFlow(distance, keepDetections, expectedOk, invalidDistance, alias != 0).dump(2);
+            const auto pipeline = BuildAlgorithmSharedInputFlow(distance, keepDetections, expectedOk, invalidDistance, alias != 0, reference != 0).dump(2);
             {
                 std::ofstream file(path, std::ios::binary);
                 check(static_cast<bool>(file), "cannot write synthetic flow");
@@ -337,29 +428,33 @@ int RunAlgorithmModulesSelfTest() {
             check(loaded.value("code", 1) == 0, "DLL graph load: " + loaded.dump());
             const auto root = model.InferInternal({original}, Json::object());
             check(root.value("code", 1) == 0, "DLL graph infer: " + root.dump());
-            const std::string label = distance ? (invalidDistance ? "NG-Nan" : (expectedOk ? "OK-5" : "NG-5")) : (expectedOk ? "OK" : "NG");
-            const std::string reason = distance ? (invalidDistance ? "距离：NaN" : "距离：5 px") :
-                (expectedOk ? "期望顺序：A → B\n当前顺序：A → B" : "期望顺序：B → A\n当前顺序：A → B");
-            auto verify = [&](const Json& result, bool normalized = false) {
+            const std::string label = expectedOk ? "OK" : "NG";
+            const std::string reason = distance ? (invalidDistance ? "距离：NaN" :
+                (expectedOk ? "距离：5，小于6" : "距离：5，大于4")) :
+                (reference ? (expectedOk ? "期望顺序：B → A\n当前顺序：B → A" : "期望顺序：A → B\n当前顺序：B → A") :
+                (expectedOk ? "期望顺序：A → B\n当前顺序：A → B" : "期望顺序：B → A\n当前顺序：A → B"));
+            auto verify = [&](const Json& result) {
                 check(result.is_object() && result.contains("ok") && result.at("ok") == expectedOk, "graph inspection status");
                 check(result.at("reason") == reason || result.at("reason") == Json::array({reason}), "graph reason");
+                if (distance) check(invalidDistance ? result.at("extra_info").at("distance").is_null() :
+                    result.at("extra_info").at("distance").is_number_float() && result.at("extra_info").at("distance") == 5.0,
+                    "graph image distance metadata");
                 const auto& detections = result.at("result_list");
-                check(detections.is_array() && detections.size() == (keepDetections ? 3 : 1), "graph detection count");
+                check(detections.is_array() && detections.size() == (keepDetections ? 2 : 0) + (distance ? 0 : 1), "graph detection count");
                 bool classification = false, a = false, b = false;
                 for (const auto& detection : detections) {
+                    check(!distance || !detection.contains("extra_info") || !detection.at("extra_info").contains("distance"),
+                        "distance must not be attached to detection objects");
                     const auto name = detection.at("category_name").get<std::string>();
-                    if (name == label) {
+                    if (!distance && name == label) {
                         classification = true;
                         check(detection.at("score") == 1.0 && detection.at("category_id") == (expectedOk ? 0 : 1), "graph classification");
-                        check(detection.at("bbox") == (distance ? (normalized ? Json::array({150, 100, 300, 200}) :
-                            Json::array({150, 100, 300, 200, 0})) : Json::array({0, 0, 300, 200})), "graph full-image bbox");
-                        if (normalized && distance)
-                            check(detection.at("with_angle") == true && detection.at("angle") == 0, "public rotated bbox");
+                        check(detection.at("bbox") == Json::array({0, 0, 300, 200}), "graph sequence full-image bbox");
                     } else if (name == "A") a = true;
                     else if (name == "B") b = true;
                     else check(false, "unexpected graph detection");
                 }
-                check(classification && (!keepDetections || (a && (b == !invalidDistance))), "graph retained original detections");
+                check(classification == !distance && (!keepDetections || (a && (b == !invalidDistance))), "graph retained original detections");
             };
             verify(root);
             verify(model.InferOneOutJson(original, Json::object()));
@@ -372,8 +467,18 @@ int RunAlgorithmModulesSelfTest() {
                 check(static_cast<bool>(archive), "cannot save synthetic archive");
             }
             dlcv_infer::Model publicModel(archivePath.string(), 0);
+            const auto structured = publicModel.Infer(original, Json::object());
+            const size_t expectedCount = (keepDetections ? 2 : 0) + (distance ? 0 : 1);
+            check(structured.sampleResults.size() == 1 && structured.sampleResults[0].results.size() == expectedCount,
+                "public structured detections");
+            if (distance) check(invalidDistance ? structured.sampleResults[0].extraInfo.at("distance").is_null() :
+                structured.sampleResults[0].extraInfo.at("distance") == 5.0, "public structured image distance");
+            bool structuredOk = !expectedOk;
+            std::vector<std::string> structuredReasons;
+            check(dlcv_infer::Model::GetLastInspectionStatus(structuredOk, structuredReasons) && structuredOk == expectedOk
+                && structuredReasons == std::vector<std::string>{reason}, "public structured inspection survives empty detections");
             const auto publicJson = publicModel.InferOneOutJson(original, Json::object());
-            verify(publicJson, true);
+            verify(publicJson);
             check(publicJson.at("reason") == Json::array({reason}), "public JSON reason normalization");
             bool inspectionOk = !expectedOk;
             std::vector<std::string> inspectionReasons;

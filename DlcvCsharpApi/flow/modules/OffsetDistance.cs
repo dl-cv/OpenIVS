@@ -30,9 +30,22 @@ namespace DlcvModules
                 foreach (var rule in rules) ok &= rule.Key == ">" ? distance > rule.Value : distance < rule.Value;
                 string text = OriginalImageClassification.Finite(distance)
                     ? FormatDistance(distance) : "Nan";
-                string label = (ok ? "OK-" : "NG-") + text;
-                string reason = OriginalImageClassification.Finite(distance) ? "距离：" + text + " px" : "距离：NaN";
-                results.Add(OriginalImageClassification.Result(group, images.Count, "post_process/offset_distance", ok, label, true, reason));
+                string reason = OriginalImageClassification.Finite(distance) ? "距离：" + text : "距离：NaN";
+                if (OriginalImageClassification.Finite(distance))
+                    foreach (var rule in rules)
+                    {
+                        bool passes = rule.Key == ">" ? distance > rule.Value : distance < rule.Value;
+                        if (ok || !passes)
+                            reason += "，" + (distance == rule.Value ? "等于" : distance > rule.Value ? "大于" : "小于") + FormatDistance(rule.Value);
+                    }
+                var extraInfo = (JObject)group.ExtraInfo.DeepClone();
+                extraInfo["distance"] = OriginalImageClassification.Finite(distance) ? new JValue(distance) : JValue.CreateNull();
+                results.Add(new JObject
+                {
+                    ["type"] = "local", ["originating_module"] = "post_process/offset_distance", ["index"] = images.Count,
+                    ["origin_index"] = group.Image.OriginalIndex, ["transform"] = JObject.FromObject(group.Image.TransformState.ToDict()),
+                    ["ok"] = ok, ["reason"] = reason, ["extra_info"] = extraInfo, ["sample_results"] = new JArray()
+                });
                 images.Add(group.Image);
             }
             return new ModuleIO(images, results);
@@ -96,7 +109,7 @@ namespace DlcvModules
                 var first = OriginalImageClassification.Center(selected[0].Value);
                 var second = OriginalImageClassification.Center(selected[1].Value);
                 double dx = Math.Abs(first.X - second.X), dy = Math.Abs(first.Y - second.Y);
-                // 缩放后求欧氏距，避免平方先溢出而误报 NG-Nan。
+                // 缩放后求欧氏距，避免平方先溢出而误判距离无效。
                 double scale = Math.Max(dx, dy);
                 double distance = scale == 0 ? 0 : scale * Math.Sqrt((dx / scale) * (dx / scale) + (dy / scale) * (dy / scale));
                 return OriginalImageClassification.Finite(distance) ? distance : double.NaN;

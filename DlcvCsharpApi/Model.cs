@@ -2266,6 +2266,13 @@ namespace dlcv_infer_csharp
                     }
                 }
 
+                string taskType = _cachedModelInfo?["model_info"]?["task_type"]?.Value<string>();
+                if ((taskType == "分类" || taskType == "cls") &&
+                    (inferRequest["threshold"] == null || inferRequest["threshold"].Type == JTokenType.Null))
+                {
+                    inferRequest["threshold"] = 0.0;
+                }
+
                 // JSON 序列化
                 string jsonStr = inferRequest.ToString();
 
@@ -2716,7 +2723,7 @@ namespace dlcv_infer_csharp
                     }
 
                     if (dvsContainer != null &&
-                        (dvsContainer.ContainsKey("ok") || dvsContainer.ContainsKey("reason")))
+                        (dvsContainer.ContainsKey("ok") || dvsContainer.ContainsKey("reason") || dvsContainer["extra_info"] is JObject))
                     {
                         var payload = new JObject
                         {
@@ -2734,6 +2741,7 @@ namespace dlcv_infer_csharp
                                 ? dvsContainer["reason"].DeepClone()
                                 : JValue.CreateNull();
                         }
+                        if (dvsContainer["extra_info"] is JObject extraInfo) payload["extra_info"] = extraInfo.DeepClone();
                         return payload;
                     }
 

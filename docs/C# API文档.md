@@ -60,6 +60,7 @@ public partial class Utils
 - `Bbox` 长度约定：水平框 ≥4（`x,y,w,h`），旋转框 ≥4（`cx,cy,w,h`，`angle` 单独字段）。
 - `Angle` 有效值范围：`> -99.0f` 视为有效；`-100.0f` 视为无效。
 - `Mask` 为空时（`Mask == null || Mask.Empty()`），`WithMask` 应为 `false`。
+- DVST/DVSO 水平框输出的 `Mask` / `mask_rle` 相对于原图 `Bbox`，方向与原图一致；局部旋转、翻转在输出时还原。mask 栅格尺寸可与框不同，显示时按框缩放；无变换、纯平移及正向轴缩放保留原 RLE。`with_mask=false` 不生成对外 mask 或 poly。
 - 统计与业务扩展均通过 `ExtraInfo` 读取，完整字段语义见 [结果标准](模块、流程与模型推理标准文档.md) 3.3.1。
 - `ExtraInfo` 为 `JObject`，没有扩展时可为 `null`；键缺失、JSON `null`、数值 `0` 保持区别，构造与结构化转 JSON 不增加默认统计键。
 - `ToString()` 按通用扩展对象输出均值、中值与其他扩展，空侧显示 `null`，有效零值仍显示数值，未输出的统计组不显示。
@@ -92,16 +93,19 @@ public partial class Utils
         public List<CSharpObjectResult> Results { get; set; }
         public bool? Ok { get; set; }
         public string Reason { get; set; }
+        public JObject ExtraInfo { get; set; }
 
         public CSharpSampleResult(List<CSharpObjectResult> results);
         public CSharpSampleResult(List<CSharpObjectResult> results, bool? ok, string reason);
+        public CSharpSampleResult(List<CSharpObjectResult> results, bool? ok, string reason, JObject extraInfo);
     }
 }
 ```
 
 - `Ok` 为流程对当前图片的显式判定状态；流程未产生判定状态时为 `null`。
-- `Reason` 为失败原因文本；没有原因时为 `null`。
+- `Reason` 为流程判定原因文本；没有原因时为 `null`。
 - 普通模型和未使用判定模块的旧流程保持 `Ok=null`、`Reason=null`。
+- `ExtraInfo` 保存图片级扩展；距离模块的未舍入距离读取 `sample.ExtraInfo["distance"]`，可计算时为 double，无法计算时为 JSON `null`。JSON 单图包装对象使用同层 `extra_info.distance`；批量时位于各图容器内。距离不放入目标的 `ExtraInfo`，原单参数及三参数构造保持有效，没有扩展时为 `null`。
 
 ### 2.3 CSharpResult
 
@@ -247,6 +251,7 @@ public dynamic InferOneOutJson(Mat image, JObject paramsJson = null);
 - `Infer` 内部调用 `InferBatch(new List<Mat> { image })`。
 - `InferOneOutJson` 内部调用 `InferInternalCore(..., emitPoly: true)` 以保留 `poly` 字段。
 - `output/return_json` 产生按图 `ok/reason` 时，`Infer` / `InferBatch` 将其写入对应 `CSharpSampleResult.Ok/Reason`，`InferOneOutJson` 将其写入单图包装对象。
+- C# 分类节点默认显式传入 `threshold=0`，按 `top_k` 截取 SDK 返回结果；节点显式设置阈值时保留 `score >= threshold`。省略阈值不再使用模型内保存的 0.5。
 - 流程中的 `model/*` 节点始终使用流程文件自身的 `properties.threshold`；入口 `paramsJson.threshold` 不会改写节点属性。
 - 入口 `threshold` 仅在流程执行完成后过滤最终对外结果，保留 `score >= threshold` 的对象；未传入有限数值时不做额外过滤，无有限数值 `score` 的非标准条目保留。
 
@@ -541,7 +546,7 @@ using (var model = ModelFactory.CreateFromIndex(existingIndex))
 
 | 字段名 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `threshold` | float | 普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型的最终对外结果阈值 |
+| `threshold` | float | 分类为 0（不按分数过滤）；其他普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型的最终对外结果阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
 | `batch_size` | int | 1 | 批量大小 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |

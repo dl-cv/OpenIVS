@@ -289,3 +289,7 @@ C# 的 `DlcvCSharpTest.exe` 与 C++ 的 `dlcv_infer_cpp_test.exe` 均支持：
 
 - `curve-text-affine-selftest`：24 组直线和弯曲区域，每组检查三处局部映射方向，覆盖水平、斜向、竖直附近和反向；同时执行原有数量、尺寸等检查。
 - `curve-text-affine-selftest <image> <polygons-json> <output-dir>`：读取同一实际图片与区域数组，经正式曲线节点输出每个区域的 `region-N.png` 和 UTF-8 `result.json`。区域文件为 `[{"polygon": [[x, y], ...]}, ...]`，坐标采用原图像素；输出目录必须尚不存在。参数使用原默认值：高度 80、采样间距 10、平滑参数 10000、向内缩进 1.5、reflect101。退出 0 表示展开成功，镜像与像素变化由前后结果另行比较。
+
+### 流程 mask 坐标回归
+
+`DlcvCSharpTest.exe flow-mask-transform-selftest` 为无模型测试，覆盖输出节点的90/180/270度旋转、水平/竖直翻转、转置组合、平移与缩放、小数bbox、一般仿射ROI、映射分支、with_mask关闭、输入不变及旋转框兼容。使用不对称二值mask逐像素核验RLE和结构化结果，检查无变换路径保留输入RLE引用。退出0表示通过，1表示断言失败。

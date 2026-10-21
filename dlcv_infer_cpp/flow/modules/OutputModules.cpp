@@ -442,6 +442,8 @@ static std::vector<FlowResultItem> BuildOutResultItemsTyped(const ModuleImage& w
 static FlowInspectionStatus ReadInspectionStatus(const Json& entry) {
     FlowInspectionStatus status;
     try {
+        if (entry.is_object() && entry.contains("extra_info") && entry.at("extra_info").is_object())
+            status.ExtraInfo = entry.at("extra_info");
         if (entry.is_object() && entry.contains("ok") && entry.at("ok").is_boolean()) {
             status.HasOk = true;
             status.Ok = entry.at("ok").get<bool>();
@@ -452,9 +454,12 @@ static FlowInspectionStatus ReadInspectionStatus(const Json& entry) {
 }
 
 static void MergeInspectionStatus(FlowInspectionStatus& target, const FlowInspectionStatus& source) {
+    target.ExtraInfo.update(source.ExtraInfo);
     if (!source.HasOk) return;
     if (!target.HasOk) {
-        target = source;
+        target.HasOk = true;
+        target.Ok = source.Ok;
+        target.Reason = source.Reason;
         return;
     }
     target.Ok = target.Ok && source.Ok;
@@ -475,6 +480,7 @@ static void MergeInspectionStatus(FlowInspectionStatus& target, const FlowInspec
 }
 
 static void ApplyInspectionStatus(const FlowInspectionStatus& status, FlowByImageEntry& entry) {
+    entry.ExtraInfo = status.ExtraInfo;
     if (!status.HasOk) return;
     entry.HasOk = true;
     entry.Ok = status.Ok;
@@ -556,8 +562,6 @@ private:
                 for (const auto& d : entry.at("sample_results")) {
                     if (d.is_object()) detList.push_back(&d);
                 }
-                if (detList.empty()) continue;
-
                 const int idx = entry.contains("index") ? entry.at("index").get<int>() : -1;
                 if (idx >= 0) {
                     auto& v = indexToDets[idx];
@@ -568,6 +572,7 @@ private:
                     auto& v = originToDets[oidx];
                     v.insert(v.end(), detList.begin(), detList.end());
                 }
+                if (detList.empty()) continue;
 
                 // transform 兜底兼容
                 try {

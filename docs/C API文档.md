@@ -46,6 +46,8 @@ dlcv_infer_cpp/dlcv_infer_c_api.h
 
 `DlcvCObjectResult` 只提供通用扩展字段 `char* extra_info`，不提供专用均值或中值成员。该指针为以零字节结尾的 UTF-8 JSON 对象字符串，可为 `nullptr`；统计键、折线和业务扩展均在此对象内。完整语义见 [结果标准](模块、流程与模型推理标准文档.md) 3.3.1。
 
+`DlcvCSampleResult` 当前没有图片级扩展字段，结构布局保持不变。距离模块的图片级数据通过 `dlcv_infer_cpp_infer_json_c` 返回的单图包装对象 `extra_info.distance` 读取；可计算时为未舍入数值，无法计算时为 JSON `null`，不写入目标的 `extra_info`。
+
 调用方在结果释放前用现有 JSON 解析库读取 `extra_info`：先判断指针是否为空，再解析为对象；分别检查 `with_mean/with_median` 是否存在，读取对应两侧值并区分 JSON `null` 与有效数值 `0`。结构化结果已携带完整扩展内容，不需要再次调用 JSON 推理接口获取中值。
 
 公开 `DlcvCObjectResult` 的尾部为：

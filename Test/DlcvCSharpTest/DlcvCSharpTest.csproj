@@ -103,6 +103,7 @@
     <Compile Include="FlowStageComparison.cs" />
     <Compile Include="FlowInferParamsSelfTest.cs" />
     <Compile Include="AlgorithmModulesSelfTest.cs" />
+    <Compile Include="FlowMaskTransformSelfTest.cs" />
     <Compile Include="ForegroundBackgroundStatisticsSelfTest.cs" />
     <Compile Include="BarcodeReaderSelfTest.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
