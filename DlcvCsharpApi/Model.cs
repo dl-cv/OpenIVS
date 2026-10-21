@@ -2334,7 +2334,9 @@ namespace dlcv_infer_csharp
                     var categoryId = result["category_id"]?.Value<int>() ?? 0;
                     var categoryName = result["category_name"]?.Value<string>() ?? "";
                     var score = result["score"]?.Value<float>() ?? 0.0f;
-                    var area = result["area"]?.Value<float>() ?? 0.0f;
+                    var areaToken = result["area"];
+                    bool hasArea = areaToken != null && areaToken.Type != JTokenType.Null;
+                    var area = hasArea ? areaToken.Value<float>() : 0.0f;
 
                     var bbox = result["bbox"]?.ToObject<List<double>>() ?? new List<double>();
 
@@ -2461,8 +2463,7 @@ namespace dlcv_infer_csharp
                         }
                     }
 
-                    // area 表示当前 mask 的面积，不能沿用缩放前的 SDK 面积。
-                    if (!mask_img.Empty())
+                    if (!hasArea && !mask_img.Empty())
                     {
                         area = Cv2.CountNonZero(mask_img);
                     }
@@ -2808,9 +2809,11 @@ namespace dlcv_infer_csharp
             result["with_bbox"] = bbox.Count > 0;
 
             // 3. Handle Area
-            if (item.ContainsKey("area"))
+            var areaToken = item["area"];
+            bool hasArea = areaToken != null && areaToken.Type != JTokenType.Null;
+            if (hasArea)
             {
-                result["area"] = item["area"];
+                result["area"] = areaToken;
             }
             else
             {
@@ -2930,8 +2933,10 @@ namespace dlcv_infer_csharp
                                     needDispose = true;
                                 }
 
-                                // 面积按原图坐标中的当前掩码计算，与结构化结果使用相同的栅格。
-                                result["area"] = Cv2.CountNonZero(procImg);
+                                if (!hasArea)
+                                {
+                                    result["area"] = Cv2.CountNonZero(procImg);
+                                }
 
                                 var contours = procImg.FindContoursAsArray(RetrievalModes.External, ContourApproximationModes.ApproxSimple);
                                 if (contours.Length > 0)

@@ -30,7 +30,7 @@ inline cv::Mat ResizeMaskToBboxGrid(const cv::Mat& mask, const std::vector<doubl
     return output;
 }
 
-// 在 SDK 结果释放前，将指针掩码转换为轮廓，并按同一栅格更新面积。
+// 在 SDK 结果释放前，将指针掩码转换为轮廓。
 inline void ConvertPointerMaskToContour(nlohmann::json& result) {
     using json = nlohmann::json;
     if (!result["with_mask"].get<bool>()) return;
@@ -46,10 +46,6 @@ inline void ConvertPointerMaskToContour(nlohmann::json& result) {
     }
 
     const cv::Mat effectiveMask = ResizeMaskToBboxGrid(maskImage, bbox);
-    if (!effectiveMask.empty()) {
-        result["area"] = cv::countNonZero(effectiveMask);
-    }
-
     json pointsJson = json::array();
     if (!effectiveMask.empty() && bbox.size() >= 4) {
         std::vector<std::vector<cv::Point>> contours;
