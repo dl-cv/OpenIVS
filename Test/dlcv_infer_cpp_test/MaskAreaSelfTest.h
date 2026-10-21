@@ -17,47 +17,53 @@ static int RunMaskAreaSelfTest() {
     };
     MaskAreaParseModel model;
     cv::Mat mask(4, 4, CV_8UC1, cv::Scalar(255));
-    for (const std::string scenario : {"resize", "unchanged-size", "empty-mask", "no-mask", "preserve-original"}) {
-        check(scenario, [&] {
-            mask.setTo(cv::Scalar(scenario == "empty-mask" ? 0 : 255));
-            const bool withMask = scenario != "no-mask";
-            const double size = scenario == "unchanged-size" ? 4 : 2.8;
-            Json obj{{"category_id", 0}, {"category_name", "target"}, {"score", 0.9}, {"area", 99},
-                {"bbox", {0, 0, size, size}}, {"with_mask", withMask},
-                {"mask", {{"width", 4}, {"height", 4}, {"mask_ptr", reinterpret_cast<uintptr_t>(mask.data)}}}};
-            Json raw{{"sample_results", Json::array({Json{{"results", Json::array({obj})}}})}};
-            const bool preserve = scenario == "preserve-original";
-            auto result = preserve ? model.ParseToStructResultPreservingOriginalMask(raw) : model.ParseToStructResult(raw);
-            const auto& output = result.sampleResults.at(0).results.at(0);
-            const int expectedSize = preserve ? 4 : static_cast<int>(std::llround(size)); // 保留 C++ 历史取整规则。
-            const int expectedArea = !withMask ? 99 : scenario == "empty-mask" ? 0 : expectedSize * expectedSize;
-            if (output.area != expectedArea) throw std::runtime_error("area=" + std::to_string(output.area) + ", expected=" + std::to_string(expectedArea));
-            if (withMask && (output.mask.cols != expectedSize || output.mask.rows != expectedSize)) throw std::runtime_error("mask geometry changed");
-            if (withMask && output.area != CalculateMaskArea(MatToMaskInfo(output.mask))) throw std::runtime_error("RLE area mismatch");
-        });
+    for (float sdkArea : {123.5f, 0.0f}) {
+        for (const std::string scenario : {"resize", "unchanged-size", "empty-mask", "no-mask", "preserve-original"}) {
+            check(scenario + "-area-" + std::to_string(sdkArea), [&] {
+                mask.setTo(cv::Scalar(scenario == "empty-mask" ? 0 : 255));
+                const bool withMask = scenario != "no-mask";
+                const double size = scenario == "unchanged-size" ? 4 : 2.8;
+                Json obj{{"category_id", 0}, {"category_name", "target"}, {"score", 0.9}, {"area", sdkArea},
+                    {"bbox", {0, 0, size, size}}, {"with_mask", withMask},
+                    {"mask", {{"width", 4}, {"height", 4}, {"mask_ptr", reinterpret_cast<uintptr_t>(mask.data)}}}};
+                Json raw{{"sample_results", Json::array({Json{{"results", Json::array({obj})}}})}};
+                const bool preserve = scenario == "preserve-original";
+                auto result = preserve ? model.ParseToStructResultPreservingOriginalMask(raw) : model.ParseToStructResult(raw);
+                const auto& output = result.sampleResults.at(0).results.at(0);
+                const int expectedSize = preserve ? 4 : static_cast<int>(std::llround(size)); // 保留 C++ 历史取整规则。
+                if (output.area != sdkArea) throw std::runtime_error("area=" + std::to_string(output.area) + ", expected=" + std::to_string(sdkArea));
+                if (withMask && (output.mask.cols != expectedSize || output.mask.rows != expectedSize)) throw std::runtime_error("mask geometry changed");
+                const int expectedMaskArea = scenario == "empty-mask" ? 0 : expectedSize * expectedSize;
+                if (withMask && CalculateMaskArea(MatToMaskInfo(output.mask)) != expectedMaskArea) throw std::runtime_error("RLE geometry changed");
+            });
+        }
     }
     auto checkSharedMaskArea = [&](const std::string& name, const cv::Mat& mask,
-        bool withMask, double bboxWidth, double bboxHeight, double expectedArea) {
-        check(name, [&] {
-            const cv::Mat originalMask = mask.clone();
-            Json object{{"category_id", 0}, {"category_name", "target"}, {"score", 0.9}, {"area", 99},
-                {"bbox", {0, 0, bboxWidth, bboxHeight}}, {"with_mask", withMask},
-                {"mask", {{"width", mask.cols}, {"height", mask.rows},
-                    {"mask_ptr", reinterpret_cast<uintptr_t>(mask.data)}}}};
-            Json raw{{"sample_results", Json::array({Json{{"results", Json::array({object})}}})}};
+        bool withMask, double bboxWidth, double bboxHeight, double expectedMaskArea) {
+        for (float sdkArea : {123.5f, 0.0f}) {
+            check(name + "-area-" + std::to_string(sdkArea), [&] {
+                const cv::Mat originalMask = mask.clone();
+                Json object{{"category_id", 0}, {"category_name", "target"}, {"score", 0.9}, {"area", sdkArea},
+                    {"bbox", {0, 0, bboxWidth, bboxHeight}}, {"with_mask", withMask},
+                    {"mask", {{"width", mask.cols}, {"height", mask.rows},
+                        {"mask_ptr", reinterpret_cast<uintptr_t>(mask.data)}}}};
+                Json raw{{"sample_results", Json::array({Json{{"results", Json::array({object})}}})}};
 
-            const auto structured = model.ParseToStructResult(raw).sampleResults.at(0).results.at(0);
-            Json jsonObject = object;
-            dlcv_infer::mask_utils::ConvertPointerMaskToContour(jsonObject);
-            const double jsonArea = jsonObject.at("area").get<double>();
-            if (structured.area != expectedArea || jsonArea != expectedArea ||
-                jsonArea != static_cast<double>(structured.area)) {
-                throw std::runtime_error("shared area mismatch");
-            }
-            if (cv::norm(mask, originalMask, cv::NORM_INF) != 0.0) {
-                throw std::runtime_error("input mask changed");
-            }
-        });
+                const auto structured = model.ParseToStructResult(raw).sampleResults.at(0).results.at(0);
+                Json jsonObject = object;
+                dlcv_infer::mask_utils::ConvertPointerMaskToContour(jsonObject);
+                const double jsonArea = jsonObject.at("area").get<double>();
+                if (structured.area != sdkArea || jsonArea != sdkArea) {
+                    throw std::runtime_error("SDK area changed");
+                }
+                if (withMask && cv::countNonZero(structured.mask) != expectedMaskArea) {
+                    throw std::runtime_error("mask geometry changed");
+                }
+                if (cv::norm(mask, originalMask, cv::NORM_INF) != 0.0) {
+                    throw std::runtime_error("input mask changed");
+                }
+            });
+        }
     };
 
     checkSharedMaskArea("json-4x4-to-2x2", mask, true, 2, 2, 4);
@@ -101,7 +107,7 @@ static int RunMaskAreaSelfTest() {
 
     cv::Mat emptyMask = cv::Mat::zeros(4, 4, CV_8UC1);
     checkSharedMaskArea("json-empty-mask", emptyMask, true, 2, 2, 0);
-    checkSharedMaskArea("json-no-mask-keeps-area", mask, false, 2, 2, 99);
+    checkSharedMaskArea("json-no-mask-keeps-area", mask, false, 2, 2, 0);
 
     for (bool hasArea : {true, false}) {
         check(hasArea ? "merge-overwrites-area" : "merge-fills-area", [&] {
