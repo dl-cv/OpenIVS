@@ -56,7 +56,7 @@ public partial class Utils
 ```
 
 **字段约束**：
-- `Area` 和 JSON `area` 保留 SDK 已返回的数值，包含 `0`，不因 mask 缩放而重算。仅在 `area` 缺失或为 `null` 且有有效 mask 时，按输出 mask 的非零像素数补充；无 mask 时，结构化结果默认 `0`，普通模型 JSON 默认 bbox 宽乘高。
+- `Area` 和 JSON `area` 保留 SDK 已返回的数值，包含 `0`，不因 mask 缩放而重算。仅在 `area` 缺失或为 `null` 且有有效 mask 时，按输出 mask 的非零像素数补充；无有效 mask 时，结构化结果默认 `0`，普通模型 JSON 在字段缺失时使用 bbox 宽乘高，字段为 `null` 时保留 `null`。
 - `Bbox` 长度约定：水平框 ≥4（`x,y,w,h`），旋转框 ≥4（`cx,cy,w,h`，`angle` 单独字段）。
 - `Angle` 有效值范围：`> -99.0f` 视为有效；`-100.0f` 视为无效。
 - `Mask` 为空时（`Mask == null || Mask.Empty()`），`WithMask` 应为 `false`。
