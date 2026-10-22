@@ -194,20 +194,6 @@ std::array<double, 2> AlgorithmCenter(const AlgorithmDetection& detection) {
     return center;
 }
 
-void AppendAlgorithmClassification(ModuleIO& output, const AlgorithmGroup& group, bool ok, const std::string& label,
-    const std::string& reason, bool distance) {
-    const auto& image = group.Original;
-    const int width = image.OriginalImage.cols, height = image.OriginalImage.rows;
-    const Json bbox = distance ? Json::array({width / 2.0, height / 2.0, double(width), double(height), 0.0}) :
-        Json::array({0, 0, width, height});
-    output.ResultList.push_back({{"type", "local"},
-        {"originating_module", distance ? "post_process/offset_distance" : "post_process/sequence_check"},
-        {"index", output.ImageList.size()}, {"origin_index", image.OriginalIndex},
-        {"transform", image.TransformState.ToJson()}, {"ok", ok}, {"reason", reason},
-        {"sample_results", Json::array({{{"category_name", label}, {"category_id", ok ? 0 : 1}, {"score", 1.0}, {"bbox", bbox}}})}});
-    output.ImageList.push_back(image);
-}
-
 std::string AlgorithmSequenceText(const Json& sequence) {
     if (sequence.empty()) return "（空）";
     std::string text;
@@ -261,7 +247,12 @@ public:
             const bool ok = sequence == categories;
             const std::string reason = "期望顺序：" + AlgorithmSequenceText(categories) +
                 "\n当前顺序：" + AlgorithmSequenceText(sequence);
-            AppendAlgorithmClassification(output, group, ok, ok ? "OK" : "NG", reason, false);
+            const auto& image = group.Original;
+            output.ResultList.push_back({{"type", "local"}, {"originating_module", "post_process/sequence_check"},
+                {"index", output.ImageList.size()}, {"origin_index", image.OriginalIndex},
+                {"transform", image.TransformState.ToJson()}, {"ok", ok}, {"reason", reason},
+                {"sample_results", Json::array()}});
+            output.ImageList.push_back(image);
         }
         return output;
     }
@@ -350,7 +341,7 @@ private:
 } // namespace
 
 DLCV_FLOW_REGISTER_MODULE("post_process/sequence_check", SequenceCheckModule)
-// 仅兼容旧流程类型；分类输出统一使用新主标识。
+// 仅兼容旧流程类型；判定输出统一使用新主标识。
 DLCV_FLOW_REGISTER_MODULE("post_process/wire_sequence_check", SequenceCheckModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/offset_distance", OffsetDistanceModule)
 

@@ -187,21 +187,5 @@ namespace DlcvModules
             if (!properties.TryGetValue(name, out object value)) return fallback;
             return value == null ? JValue.CreateNull() : value as JToken ?? JToken.FromObject(value);
         }
-
-        internal static JObject Result(Group group, int index, string type, bool ok, string label, bool rotated, string reason)
-        {
-            int w = group.Image.OriginalImage.Width, h = group.Image.OriginalImage.Height;
-            return new JObject
-            {
-                ["type"] = "local", ["originating_module"] = type, ["index"] = index,
-                ["origin_index"] = group.Image.OriginalIndex, ["transform"] = JObject.FromObject(group.Image.TransformState.ToDict()),
-                ["ok"] = ok, ["reason"] = reason,
-                ["sample_results"] = new JArray(new JObject
-                {
-                    ["category_name"] = label, ["category_id"] = ok ? 0 : 1, ["score"] = 1.0,
-                    ["bbox"] = rotated ? new JArray(w / 2.0, h / 2.0, (double)w, (double)h, 0.0) : new JArray(0, 0, w, h)
-                })
-            };
-        }
     }
 }
