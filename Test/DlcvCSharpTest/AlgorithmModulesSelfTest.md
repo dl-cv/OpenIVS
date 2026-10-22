@@ -15,11 +15,11 @@ python .cursor/skills/vs-build/scripts/build.py Test/DlcvCSharpTest/DlcvCSharpTe
 
 ## 覆盖范围
 
-注册和默认值、新旧类型在 OK/NG 及空序列下的分类主标识与原因一致、旧类型图流程加载、水平/竖直与重复完整顺序、中心而非左边缘、同坐标稳定排序、各 local 裁剪/缩放/旋转、缺省 transform、延迟图像、不修改输入、原图身份分组与索引歧义、共享 wrapper 旧索引、真实 merge_results 两路共用图像、top1 与同分、零距、AND 与严格阈值、显示精度不影响比较、精确中点 1/128 及相邻浮点值、大数中心与距离、区域设置无关数值、空输入与非 local、非法类别/分数/框/规则/变换拒绝、标准 image_chan/result_chan 流程及 return_json 判定输出。
+注册和默认值、新旧类型在 OK/NG 及空序列下的判定主标识与原因一致、旧类型图流程加载、水平/竖直与重复完整顺序、中心而非左边缘、同坐标稳定排序、各 local 裁剪/缩放/旋转、缺省 transform、延迟图像、不修改输入、原图身份分组与索引歧义、共享 wrapper 旧索引、真实 merge_results 两路共用图像、top1 与同分、零距、AND 与严格阈值、显示精度不影响比较、精确中点 1/128 及相邻浮点值、大数中心与距离、区域设置无关数值、空输入与非 local、非法类别/分数/框/规则/变换拒绝、标准 image_chan/result_chan 流程及 return_json 判定输出。
 
 普通四项输入框使用 OpenIVS XYWH；`with_angle=true` 且独立有限 `angle>-99` 时，四项框使用 `[cx,cy,w,h]`。回归固定使用宽度不同的目标，验证中心距离为 20 px 时 `<18` 判 NG、`>18` 判 OK，以及真实中心的顺序；同时检查缺少或无效独立角度的拒绝处理、`-100/-99` 哨兵值、非布尔 true 标志和五项旋转框不读取独立角度。
 
-距离模块仅输出图片级 `ok/reason`，回归要求 `sample_results` 为空；顺序模块继续检查全幅分类。合并测试检查判定在普通检测之前或之后、通过 index 或 origin_index 关联时均不丢失，多个判定取 AND 且重复原因只保留一次。两张同尺寸、同变换图像使用三个 local 结果进入实际映射路径，验证空结果不复制另一图的两个目标。C# FlowGraphModel 的结构化与 JSON 路径同时覆盖空检测判定、保留原检测支路和正常顺序分类；C++ 专项通过公开 DLL API 检查相同结果及 `GetLastInspectionStatus`。
+顺序与距离模块仅输出图片级 `ok/reason`，回归要求 `sample_results` 为空，不生成 OK/NG 分类目标。合并测试检查判定在普通检测之前或之后、通过 index 或 origin_index 关联时均不丢失，多个判定取 AND 且重复原因只保留一次。两张同尺寸、同变换图像使用三个 local 结果进入实际映射路径，验证空结果不复制另一图的两个目标。C# FlowGraphModel 的结构化与 JSON 路径同时覆盖顺序与距离的空目标判定，以及单独连接真实检测支路时保留原目标；C++ 专项通过公开 DLL API 检查相同结果及 `GetLastInspectionStatus`。
 
 原因文本不附单位，通过时按配置顺序显示全部比较关系，失败时只显示未通过规则。回归包含 `>`、`<`、范围 AND、多规则失败、等号判 NG、空规则和六位舍入前比较；距离与阈值均检查六位偶数舍入及去除末尾零。
 

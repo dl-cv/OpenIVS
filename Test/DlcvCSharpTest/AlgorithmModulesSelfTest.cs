@@ -78,9 +78,11 @@ namespace DlcvCSharpTest
         private static string Outcome(ModuleIO output, int index = 0)
         {
             var entry = output.ResultList[index];
+            Require(entry["ok"]?.Type == JTokenType.Boolean, "判定必须为布尔值");
+            Require(entry["reason"]?.Type == JTokenType.String, "判定原因必须为字符串");
+            Require(entry["sample_results"] is JArray detections && detections.Count == 0, "判定不生成检测目标");
             if (entry.Value<string>("originating_module") != Offset)
-                return entry["sample_results"][0].Value<string>("category_name");
-            Require(entry["sample_results"] is JArray detections && detections.Count == 0, "距离判定不生成检测目标");
+                return entry.Value<bool>("ok") ? "OK" : "NG";
             return (entry.Value<bool>("ok") ? "OK;" : "NG;") + entry.Value<string>("reason");
         }
         private static JObject Rule(string op, double value) { return new JObject { ["operator"] = op, ["value"] = value }; }
@@ -226,11 +228,7 @@ namespace DlcvCSharpTest
                     Require(result.Value<int>("origin_index") == 7 && result.Value<int>("index") == 0 && result.Value<bool>("ok"), "首个原图索引");
                     Require(result.Value<string>("reason") == (type == SequenceType ? "期望顺序：A → B\n当前顺序：A → B" : "距离：5") && result.Value<string>("originating_module") == type, "判定元数据");
                     Require(JToken.DeepEquals(result["transform"], JObject.FromObject(new TransformationState(160, 120).ToDict())), "输出恒等变换");
-                    if (type == SequenceType)
-                    {
-                        Require(JToken.DeepEquals(result["sample_results"][0]["bbox"], new JArray(0, 0, 160, 120)), "线序全幅分类框");
-                        Require(result["sample_results"][0].Value<double>("score") == 1 && result["sample_results"][0].Value<int>("category_id") == 0, "线序分类分数");
-                    }
+                    Require(((JArray)result["sample_results"]).Count == 0, "判定不生成全幅分类框");
                 }
                 Require(JToken.DeepEquals(entries, before) && wrappers[0].ImageObject == null && ReferenceEquals(wrappers[1].TransformState, first) && Cv2.Mean(image).Val0 == 3, "不得修改输入");
                 Require(Outcome(Execute(Offset, wrappers, new JArray(Entry(new JArray(Det("A", 10), Det("B", 13, 14)))))) == "OK;距离：5", "空 transform 按原图坐标");
@@ -389,6 +387,7 @@ namespace DlcvCSharpTest
             var last = JObject.FromObject(payload["last"]);
             Require(last.Value<string>("okng") == (ok ? "OK" : "NG") && last["by_image"][0].Value<bool>("ok") == ok, "图输出判断");
             Require(JToken.DeepEquals(last["by_image"][0]["reason"], entry["reason"]), "图输出 reason 类型与文本一致");
+            Require(((JArray)last["by_image"][0]["results"]).Count == 0, "图输出保留空目标判定");
         }
 
         private static void TestEmpty()
@@ -601,7 +600,7 @@ namespace DlcvCSharpTest
                 foreach (string type in new[] { SequenceType, LegacySequenceType, Offset })
                 foreach (bool reference in type == Offset ? new[] { false } : new[] { false, true })
                 foreach (bool ok in new[] { true, false })
-                foreach (bool keepDetections in type == Offset ? new[] { false, true } : new[] { false })
+                foreach (bool keepDetections in new[] { false, true })
                 {
                     var context = new DlcvModules.ExecutionContext(); context.Set("frontend_image_mat", image);
                     var nodes = JArray.Parse(@"[
@@ -634,12 +633,11 @@ namespace DlcvCSharpTest
                     Require(payload != null, "return_json 输出");
                     var last = JObject.FromObject(payload["last"]);
                     Require(last.Value<string>("okng") == (ok ? "OK" : "NG") && last["by_image"][0].Value<bool>("ok") == ok, "return_json 判定");
-                    var classification = ((JArray)output[5]["result_list"])[0];
-                    Require(classification.Value<string>("originating_module") == (type == Offset ? Offset : SequenceType), "图输出使用新主标识");
-                    Require(classification.Value<bool>("ok") == ok && classification.Value<string>("reason") == reason, "节点 ok/reason");
-                    Require(JToken.DeepEquals(last["by_image"][0]["reason"], classification["reason"]), "return_json reason");
-                    if (type == Offset) Require(((JArray)last["by_image"][0]["results"]).Count == 0, "return_json 无距离分类");
-                    else Require(last["by_image"][0]["results"][0].Value<string>("category_name") == label, "return_json 线序分类");
+                    var inspection = ((JArray)output[5]["result_list"])[0];
+                    Require(inspection.Value<string>("originating_module") == (type == Offset ? Offset : SequenceType), "图输出使用新主标识");
+                    Require(inspection.Value<bool>("ok") == ok && inspection.Value<string>("reason") == reason, "节点 ok/reason");
+                    Require(JToken.DeepEquals(last["by_image"][0]["reason"], inspection["reason"]), "return_json reason");
+                    Require(((JArray)last["by_image"][0]["results"]).Count == 0, "return_json 不生成判定分类");
                     if (keepDetections)
                     {
                         ((JArray)nodes[3]["outputs"][0]["links"]).Add(13);
@@ -654,7 +652,7 @@ namespace DlcvCSharpTest
                         Require(structured.SampleResults.Count == 1 && structured.SampleResults[0].Ok == ok,
                             "结构化结果保留显式判定");
                         Require(structured.SampleResults[0].Reason == reason, "结构化结果保留原因");
-                        int expectedCount = type == Offset ? (keepDetections ? 2 : 0) : 1;
+                        int expectedCount = keepDetections ? 2 : 0;
                         Require(structured.SampleResults[0].Results.Count == expectedCount, "结构化结果目标数量");
                         if (type == Offset)
                         {
@@ -668,7 +666,7 @@ namespace DlcvCSharpTest
                         {
                             var results = (JArray)json["result_list"];
                             Require(results[0].Value<string>("category_name") == "A" && results[1].Value<string>("category_name") == "B",
-                                "真实检测与距离判定分别保留");
+                                "真实检测与图片级判定分别保留");
                             Require(results[0]["extra_info"]?["distance"] == null && results[1]["extra_info"]?["distance"] == null,
                                 "距离不写入真实目标扩展");
                         }

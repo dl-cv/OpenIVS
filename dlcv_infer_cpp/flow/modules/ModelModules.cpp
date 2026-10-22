@@ -598,6 +598,8 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
     // 透传推理参数（与 C# 对齐）
     Json p = Json::object();
     TryAddParam(p, this->Properties, "threshold");
+    // 分类未配置阈值时关闭 SDK 分数过滤，避免最高分类被模型内阈值清空。
+    if (dynamic_cast<ClsModelModule*>(this) != nullptr && !p.contains("threshold")) p["threshold"] = 0.0;
     TryAddParam(p, this->Properties, "iou_threshold");
     TryAddParam(p, this->Properties, "top_k");
     TryAddParam(p, this->Properties, "with_mask");

@@ -10,7 +10,7 @@ namespace DlcvModules
         static SequenceCheck()
         {
             ModuleRegistry.Register("post_process/sequence_check", typeof(SequenceCheck));
-            // 仅兼容旧流程类型；分类输出统一使用新主标识。
+            // 仅兼容旧流程类型；判定输出统一使用新主标识。
             ModuleRegistry.Register("post_process/wire_sequence_check", typeof(SequenceCheck));
         }
 
@@ -66,7 +66,12 @@ namespace DlcvModules
                 bool ok = current.SequenceEqual(categories.Values<string>(), StringComparer.Ordinal);
                 string reason = "期望顺序：" + (categories.Count == 0 ? "（空）" : string.Join(" → ", categories.Values<string>()))
                     + "\n当前顺序：" + (current.Count == 0 ? "（空）" : string.Join(" → ", current));
-                results.Add(OriginalImageClassification.Result(group, images.Count, "post_process/sequence_check", ok, ok ? "OK" : "NG", false, reason));
+                results.Add(new JObject
+                {
+                    ["type"] = "local", ["originating_module"] = "post_process/sequence_check", ["index"] = images.Count,
+                    ["origin_index"] = group.Image.OriginalIndex, ["transform"] = JObject.FromObject(group.Image.TransformState.ToDict()),
+                    ["ok"] = ok, ["reason"] = reason, ["sample_results"] = new JArray()
+                });
                 images.Add(group.Image);
             }
             return new ModuleIO(images, results);

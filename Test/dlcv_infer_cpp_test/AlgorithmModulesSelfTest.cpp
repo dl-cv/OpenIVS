@@ -16,7 +16,7 @@
 #include "flow/FlowPayloadTypes.h"
 
 // DLL 图级测试：MergeResults 的两路 image 都来自节点 3，results 分别来自 3/4。
-static dlcv_infer::flow::Json BuildAlgorithmSharedInputFlow(bool distance, bool keepDetections, bool expectedOk, bool invalidDistance, bool legacy, bool reference = false) {
+static dlcv_infer::flow::Json BuildAlgorithmSharedInputFlow(bool distance, bool keepDetections, bool expectedOk, bool invalidDistance, bool legacy, bool reference = false, bool sparseMerge = false) {
     using dlcv_infer::flow::Json;
     auto input = [](const char* type, int link) { return Json{{"type", type}, {"link", link}}; };
     auto output = [](const char* type, Json links) { return Json{{"type", type}, {"links", std::move(links)}}; };
@@ -46,11 +46,23 @@ static dlcv_infer::flow::Json BuildAlgorithmSharedInputFlow(bool distance, bool 
         nodes.push_back({{"id", 2}, {"order", 2}, {"type", "pre_process/image_flip"},
             {"inputs", {input("image_chan", 12)}}, {"outputs", {output("image_chan", {13})}}});
     }
-    if (keepDetections) nodes.push_back({{"id", 7}, {"order", 7}, {"type", "post_process/merge_results"},
+    if (sparseMerge) {
+        Json inputs = Json::array();
+        for (int pair = 0; pair < 9; ++pair) {
+            inputs.push_back(input("image_chan", pair == 2 ? 71 : -1));
+            inputs.push_back(input("result_chan", pair == 2 ? 72 : -1));
+            if (pair != 2) {
+                inputs[inputs.size() - 2]["link"] = nullptr;
+                inputs[inputs.size() - 1]["link"] = nullptr;
+            }
+        }
+        nodes.push_back({{"id", 7}, {"order", 7}, {"type", "post_process/merge_results"},
+            {"inputs", std::move(inputs)}, {"outputs", {output("image_chan", {91}), output("result_chan", {92})}}});
+    } else if (keepDetections) nodes.push_back({{"id", 7}, {"order", 7}, {"type", "post_process/merge_results"},
         {"inputs", {input("image_chan", 71), input("result_chan", 72), input("image_chan", 81), input("result_chan", 85)}},
         {"outputs", {output("image_chan", {91}), output("result_chan", {92})}}});
     nodes.push_back({{"id", 8}, {"order", 8}, {"type", "output/return_json"},
-        {"inputs", {input("image_chan", keepDetections ? 91 : 71), input("result_chan", keepDetections ? 92 : 72)}},
+        {"inputs", {input("image_chan", keepDetections || sparseMerge ? 91 : 71), input("result_chan", keepDetections || sparseMerge ? 92 : 72)}},
         {"outputs", Json::array()}});
     return Json{{"nodes", std::move(nodes)}};
 }
@@ -113,16 +125,10 @@ int RunAlgorithmModulesSelfTest() {
                     entry.at("origin_index") == image.OriginalIndex, "output identity");
                 check(entry.at("transform") == identity.ToJson(), "result transform");
                 check(entry.at("originating_module") == (distance ? "post_process/offset_distance" : "post_process/sequence_check"), "module type");
-                check(entry.at("ok") == ok, "inspection status");
+                check(entry.at("ok").is_boolean() && entry.at("ok") == ok, "inspection status");
                 check(entry.at("reason").is_string() && !entry.at("reason").get<std::string>().empty(), "reason must remain a nonempty string");
-                if (distance) {
-                    check(entry.at("reason") == labels[i].substr(3), "distance reason precision");
-                    check(result.is_array() && result.empty(), "distance must not generate detections");
-                } else {
-                    check(result.size() == 1 && result[0].at("category_name") == labels[i] &&
-                        result[0].at("category_id") == (ok ? 0 : 1) && result[0].at("score") == 1.0, "sequence classification");
-                    check(result[0].at("bbox") == Json::array({0, 0, 300, 200}), "sequence full-image bbox");
-                }
+                check(result.is_array() && result.empty(), "inspection must not generate detections");
+                if (distance) check(entry.at("reason") == labels[i].substr(3), "distance reason precision");
                 if (!reasons.empty()) check(entry.at("reason") == reasons.at(i), "sequence reason");
             }
         };
@@ -408,14 +414,16 @@ int RunAlgorithmModulesSelfTest() {
         // 通过公开 DLL API 执行，避免仅验证 EXE 内独立注册表。
         for (bool distance : {false, true}) for (int alias = 0; alias < (distance ? 1 : 2); ++alias)
         for (int reference = 0; reference < (distance ? 1 : 2); ++reference)
+        for (int sparseMerge = 0; sparseMerge < (distance ? 1 : 2); ++sparseMerge)
         for (bool keepDetections : {false, true}) for (int outcome = 0; outcome < (distance ? 3 : 2); ++outcome) {
+            if (sparseMerge && keepDetections) continue;
             const bool expectedOk = outcome == 1;
             const bool invalidDistance = outcome == 2;
             const auto path = std::filesystem::temp_directory_path() /
                 (std::string("algorithm-shared-input-") + (distance ? "offset" : "sequence") + (alias ? "-legacy" : "") + (keepDetections ? "-keep.json" : ".json"));
             auto archivePath = path;
             archivePath.replace_extension(".dvst");
-            const auto pipeline = BuildAlgorithmSharedInputFlow(distance, keepDetections, expectedOk, invalidDistance, alias != 0, reference != 0).dump(2);
+            const auto pipeline = BuildAlgorithmSharedInputFlow(distance, keepDetections, expectedOk, invalidDistance, alias != 0, reference != 0, sparseMerge != 0).dump(2);
             {
                 std::ofstream file(path, std::ios::binary);
                 check(static_cast<bool>(file), "cannot write synthetic flow");
@@ -428,7 +436,6 @@ int RunAlgorithmModulesSelfTest() {
             check(loaded.value("code", 1) == 0, "DLL graph load: " + loaded.dump());
             const auto root = model.InferInternal({original}, Json::object());
             check(root.value("code", 1) == 0, "DLL graph infer: " + root.dump());
-            const std::string label = expectedOk ? "OK" : "NG";
             const std::string reason = distance ? (invalidDistance ? "距离：NaN" :
                 (expectedOk ? "距离：5，小于6" : "距离：5，大于4")) :
                 (reference ? (expectedOk ? "期望顺序：B → A\n当前顺序：B → A" : "期望顺序：A → B\n当前顺序：B → A") :
@@ -440,21 +447,17 @@ int RunAlgorithmModulesSelfTest() {
                     result.at("extra_info").at("distance").is_number_float() && result.at("extra_info").at("distance") == 5.0,
                     "graph image distance metadata");
                 const auto& detections = result.at("result_list");
-                check(detections.is_array() && detections.size() == (keepDetections ? 2 : 0) + (distance ? 0 : 1), "graph detection count");
-                bool classification = false, a = false, b = false;
+                check(detections.is_array() && detections.size() == (keepDetections ? 2 : 0), "graph detection count");
+                bool a = false, b = false;
                 for (const auto& detection : detections) {
                     check(!distance || !detection.contains("extra_info") || !detection.at("extra_info").contains("distance"),
                         "distance must not be attached to detection objects");
                     const auto name = detection.at("category_name").get<std::string>();
-                    if (!distance && name == label) {
-                        classification = true;
-                        check(detection.at("score") == 1.0 && detection.at("category_id") == (expectedOk ? 0 : 1), "graph classification");
-                        check(detection.at("bbox") == Json::array({0, 0, 300, 200}), "graph sequence full-image bbox");
-                    } else if (name == "A") a = true;
+                    if (name == "A") a = true;
                     else if (name == "B") b = true;
                     else check(false, "unexpected graph detection");
                 }
-                check(classification == !distance && (!keepDetections || (a && (b == !invalidDistance))), "graph retained original detections");
+                check(!keepDetections || (a && (b == !invalidDistance)), "graph retained original detections");
             };
             verify(root);
             verify(model.InferOneOutJson(original, Json::object()));
@@ -468,7 +471,7 @@ int RunAlgorithmModulesSelfTest() {
             }
             dlcv_infer::Model publicModel(archivePath.string(), 0);
             const auto structured = publicModel.Infer(original, Json::object());
-            const size_t expectedCount = (keepDetections ? 2 : 0) + (distance ? 0 : 1);
+            const size_t expectedCount = keepDetections ? 2 : 0;
             check(structured.sampleResults.size() == 1 && structured.sampleResults[0].results.size() == expectedCount,
                 "public structured detections");
             if (distance) check(invalidDistance ? structured.sampleResults[0].extraInfo.at("distance").is_null() :
