@@ -53,7 +53,11 @@ namespace DlcvCSharpTest
                                 double expectedJsonArea = !hasArea && !withMask ? size * size : expectedArea;
                                 if (result.Area != expectedArea) throw new Exception("area=" + result.Area + ", expected=" + expectedArea);
                                 var json = (JObject)normalizeJson.Invoke(model, new object[] { obj, false });
-                                if (Math.Abs(json.Value<double>("area") - expectedJsonArea) > 0.00001) throw new Exception("JSON area=" + json["area"] + ", expected=" + expectedJsonArea);
+                                if (areaCase == "null" && !withMask)
+                                {
+                                    if (json["area"]?.Type != JTokenType.Null) throw new Exception("JSON 未保留空面积原值");
+                                }
+                                else if (Math.Abs(json.Value<double>("area") - expectedJsonArea) > 0.00001) throw new Exception("JSON area=" + json["area"] + ", expected=" + expectedJsonArea);
                                 if (!JToken.DeepEquals(obj, original)) throw new Exception("输入结果被修改");
                                 var expectedBbox = obj["bbox"].ToObject<List<double>>();
                                 var jsonBbox = json["bbox"].ToObject<List<double>>();

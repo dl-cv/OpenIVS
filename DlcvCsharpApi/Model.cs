@@ -2811,7 +2811,7 @@ namespace dlcv_infer_csharp
             // 3. Handle Area
             var areaToken = item["area"];
             bool hasArea = areaToken != null && areaToken.Type != JTokenType.Null;
-            if (hasArea)
+            if (item.ContainsKey("area"))
             {
                 result["area"] = areaToken;
             }
