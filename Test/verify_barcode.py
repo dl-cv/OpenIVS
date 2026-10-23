@@ -42,11 +42,13 @@ def low_contrast_ean13_image():
 
 
 def read_reference(image):
-    codes = zxingcpp.read_barcodes(image, text_mode=zxingcpp.TextMode.HRI)
-    if codes:
-        return codes
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
-    return zxingcpp.read_barcodes(cv2.equalizeHist(gray), text_mode=zxingcpp.TextMode.HRI)
+    for source in (image, cv2.equalizeHist(gray)):
+        for try_downscale in (False, True):
+            codes = zxingcpp.read_barcodes(source, try_downscale=try_downscale, text_mode=zxingcpp.TextMode.HRI)
+            if codes:
+                return codes
+    return []
 
 
 def normalized(detections, local=False):

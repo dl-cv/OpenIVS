@@ -59,6 +59,7 @@ public:
     ZXING_FN(ReaderOptions_delete, void, void*);
     ZXING_FN(ReaderOptions_setTryRotate, void, void*, bool);
     ZXING_FN(ReaderOptions_setTryInvert, void, void*, bool);
+    ZXING_FN(ReaderOptions_setTryDownscale, void, void*, bool);
     ZXING_FN(ReaderOptions_setTextMode, void, void*, int);
     ZXING_FN(ReaderOptions_setFormats, void, void*, const int*, int);
     ZXING_FN(BarcodeFormatsFromString, int*, const char*, int*);
@@ -122,10 +123,17 @@ public:
             const int format = channels == 1 ? 0x01000000 : channels == 3 ? 0x03000102 : 0x04000102;
             BarcodeApi::Owned view(api.ImageView_new(image.data, image.cols, image.rows, format, static_cast<int>(image.step), 0), api.ImageView_delete);
             api.Check(view.get());
+            // 原分辨率优先；缩小层可能带来几何伪候选，仅在前一轮为空时启用。
+            api.ReaderOptions_setTryDownscale(options.get(), false);
             BarcodeApi::Owned codes(api.ReadBarcodes(view.get(), options.get()), api.Barcodes_delete);
             api.Check(codes.get());
             BarcodeApi::Owned retryView(nullptr, api.ImageView_delete);
             cv::Mat gray, enhanced;
+            if (api.Barcodes_size(codes.get()) == 0) {
+                api.ReaderOptions_setTryDownscale(options.get(), true);
+                codes.reset(api.ReadBarcodes(view.get(), options.get()));
+                api.Check(codes.get());
+            }
             if (api.Barcodes_size(codes.get()) == 0) {
                 if (channels == 1) {
                     cv::equalizeHist(image, enhanced);
@@ -136,8 +144,14 @@ public:
                 retryView.reset(api.ImageView_new(enhanced.data, enhanced.cols, enhanced.rows, 0x01000000,
                     static_cast<int>(enhanced.step), 0));
                 api.Check(retryView.get());
+                api.ReaderOptions_setTryDownscale(options.get(), false);
                 codes.reset(api.ReadBarcodes(retryView.get(), options.get()));
                 api.Check(codes.get());
+                if (api.Barcodes_size(codes.get()) == 0) {
+                    api.ReaderOptions_setTryDownscale(options.get(), true);
+                    codes.reset(api.ReadBarcodes(retryView.get(), options.get()));
+                    api.Check(codes.get());
+                }
             }
             Json detections = Json::array();
             for (int j = 0; j < api.Barcodes_size(codes.get()); ++j) {
