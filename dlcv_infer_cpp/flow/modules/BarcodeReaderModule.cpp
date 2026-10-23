@@ -1,5 +1,6 @@
 #include "flow/BaseModule.h"
 #include "flow/ModuleRegistry.h"
+#include <opencv2/imgproc.hpp>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -123,6 +124,21 @@ public:
             api.Check(view.get());
             BarcodeApi::Owned codes(api.ReadBarcodes(view.get(), options.get()), api.Barcodes_delete);
             api.Check(codes.get());
+            BarcodeApi::Owned retryView(nullptr, api.ImageView_delete);
+            cv::Mat gray, enhanced;
+            if (api.Barcodes_size(codes.get()) == 0) {
+                if (channels == 1) {
+                    cv::equalizeHist(image, enhanced);
+                } else {
+                    cv::cvtColor(image, gray, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
+                    cv::equalizeHist(gray, enhanced);
+                }
+                retryView.reset(api.ImageView_new(enhanced.data, enhanced.cols, enhanced.rows, 0x01000000,
+                    static_cast<int>(enhanced.step), 0));
+                api.Check(retryView.get());
+                codes.reset(api.ReadBarcodes(retryView.get(), options.get()));
+                api.Check(codes.get());
+            }
             Json detections = Json::array();
             for (int j = 0; j < api.Barcodes_size(codes.get()); ++j) {
                 const auto* code = api.Barcodes_at(codes.get(), j);

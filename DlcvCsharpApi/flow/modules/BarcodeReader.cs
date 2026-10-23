@@ -27,6 +27,30 @@ namespace DlcvModules
             throw new ArgumentException(key + " must be a boolean");
         }
 
+        private static JArray ToDetections(Barcode[] codes)
+        {
+            var detections = new JArray();
+            if (codes == null) return detections;
+            foreach (var code in codes)
+            {
+                var pos = code.Position;
+                var points = new[] { pos.TopLeft, pos.TopRight, pos.BottomRight, pos.BottomLeft };
+                int x = points.Min(p => p.X), y = points.Min(p => p.Y);
+                int width = points.Max(p => p.X) - x, height = points.Max(p => p.Y) - y;
+                double area = 0;
+                for (int j = 0; j < 4; j++) area += (double)points[j].X * points[(j + 1) % 4].Y - (double)points[j].Y * points[(j + 1) % 4].X;
+                var line = new JArray(points.Select(p => new JArray(p.X, p.Y)));
+                line.Add(new JArray(points[0].X, points[0].Y));
+                detections.Add(new JObject {
+                    ["category_id"] = 0, ["category_name"] = code.Text, ["score"] = 1.0,
+                    ["bbox"] = new JArray(x, y, width, height), ["area"] = Math.Abs(area) / 2,
+                    ["with_bbox"] = true, ["with_angle"] = false, ["angle"] = -100, ["with_mask"] = false,
+                    ["extra_info"] = new JObject { ["barcode_format"] = code.Format.ToString(), ["polyline"] = line }
+                });
+            }
+            return detections;
+        }
+
         public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
         {
             var images = imageList ?? new List<ModuleImage>();
@@ -61,39 +85,35 @@ namespace DlcvModules
                         throw new ArgumentException("Barcode reader requires uint8 gray, RGB or RGBA images");
                     var format = channels == 1 ? ImageFormat.Lum : channels == 3 ? ImageFormat.RGB : ImageFormat.RGBA;
                     var view = new ImageView(image.Data, image.Width, image.Height, format, checked((int)image.Step()));
-                    Barcode[] codes = reader.From(view);
-                    var detections = new JArray();
+                    Barcode[] codes = reader.From(view) ?? new Barcode[0];
+                    Mat gray = null, enhanced = null;
                     try
                     {
-                        foreach (var code in codes)
+                        if (codes.Length == 0)
                         {
-                            var pos = code.Position;
-                            var points = new[] { pos.TopLeft, pos.TopRight, pos.BottomRight, pos.BottomLeft };
-                            int x = points.Min(p => p.X), y = points.Min(p => p.Y);
-                            int width = points.Max(p => p.X) - x, height = points.Max(p => p.Y) - y;
-                            double area = 0;
-                            for (int j = 0; j < 4; j++) area += (double)points[j].X * points[(j + 1) % 4].Y - (double)points[j].Y * points[(j + 1) % 4].X;
-                            var line = new JArray(points.Select(p => new JArray(p.X, p.Y)));
-                            line.Add(new JArray(points[0].X, points[0].Y));
-                            detections.Add(new JObject {
-                                ["category_id"] = 0, ["category_name"] = code.Text, ["score"] = 1.0,
-                                ["bbox"] = new JArray(x, y, width, height), ["area"] = Math.Abs(area) / 2,
-                                ["with_bbox"] = true, ["with_angle"] = false, ["angle"] = -100, ["with_mask"] = false,
-                                ["extra_info"] = new JObject { ["barcode_format"] = code.Format.ToString(), ["polyline"] = line }
-                            });
+                            gray = new Mat();
+                            enhanced = new Mat();
+                            if (channels == 1) image.CopyTo(gray);
+                            else Cv2.CvtColor(image, gray, channels == 3 ? ColorConversionCodes.RGB2GRAY : ColorConversionCodes.RGBA2GRAY);
+                            Cv2.EqualizeHist(gray, enhanced);
+                            view = new ImageView(enhanced.Data, enhanced.Width, enhanced.Height, ImageFormat.Lum, checked((int)enhanced.Step()));
+                            codes = reader.From(view) ?? new Barcode[0];
                         }
+                        var detections = ToDetections(codes);
+                        var entry = JObject.FromObject(wrap.ToMeta());
+                        entry["type"] = "local";
+                        entry["index"] = i;
+                        entry["sample_results"] = detections;
+                        results.Add(entry);
                     }
                     finally
                     {
                         foreach (var code in codes) code.Dispose();
+                        gray?.Dispose();
+                        enhanced?.Dispose();
                         GC.KeepAlive(view);
                         GC.KeepAlive(image);
                     }
-                    var entry = JObject.FromObject(wrap.ToMeta());
-                    entry["type"] = "local";
-                    entry["index"] = i;
-                    entry["sample_results"] = detections;
-                    results.Add(entry);
                 }
             }
             return new ModuleIO(images, results);

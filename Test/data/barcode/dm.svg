@@ -1,0 +1,9 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="34" height="10" version="1.1" xmlns="http://www.w3.org/2000/svg">
+ <desc>Zint Generated Symbol</desc>
+ <g id="barcode" fill="#000000">
+  <rect x="0" y="0" width="34" height="10" fill="#FFFFFF"/>
+  <path d="M1 1h1v1h-1ZM3 1h1v1h-1ZM5 1h1v1h-1ZM7 1h1v1h-1ZM9 1h1v1h-1ZM11 1h1v2h-1ZM13 1h1v1h-1ZM15 1h1v1h-1ZM17 1h1v1h-1ZM19 1h1v1h-1ZM21 1h1v1h-1ZM23 1h1v1h-1ZM25 1h1v1h-1ZM27 1h1v1h-1ZM29 1h1v2h-1ZM31 1h1v1h-1ZM1 2h3v2h-3ZM7 2h2v1h-2ZM14 2h1v2h-1ZM16 2h2v1h-2ZM21 2h2v1h-2ZM24 2h2v1h-2ZM32 2h1v1h-1ZM5 3h1v3h-1ZM7 3h1v1h-1ZM9 3h3v1h-3ZM17 3h1v1h-1ZM19 3h1v2h-1ZM21 3h1v1h-1ZM24 3h1v1h-1ZM26 3h2v1h-2ZM31 3h1v1h-1ZM1 4h1v2h-1ZM7 4h3v1h-3ZM12 4h1v1h-1ZM16 4h2v1h-2ZM21 4h3v1h-3ZM25 4h1v2h-1ZM27 4h1v1h-1ZM29 4h2v1h-2ZM32 4h1v1h-1ZM7 5h1v1h-1ZM9 5h2v2h-2ZM15 5h1v1h-1ZM17 5h2v1h-2ZM20 5h2v1h-2ZM28 5h2v1h-2ZM31 5h1v1h-1ZM1 6h2v1h-2ZM4 6h1v1h-1ZM13 6h2v1h-2ZM16 6h2v1h-2ZM19 6h1v1h-1ZM21 6h1v2h-1ZM23 6h7v1h-7ZM32 6h1v1h-1ZM1 7h1v1h-1ZM6 7h2v1h-2ZM11 7h3v1h-3ZM15 7h1v1h-1ZM17 7h3v1h-3ZM23 7h2v1h-2ZM27 7h1v1h-1ZM31 7h1v1h-1ZM1 8h32v1h-32Z"/>
+ </g>
+</svg>
