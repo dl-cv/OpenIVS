@@ -44,11 +44,21 @@ def low_contrast_ean13_image():
 def read_reference(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
     for source in (image, cv2.equalizeHist(gray)):
-        for try_downscale in (False, True):
-            codes = zxingcpp.read_barcodes(source, try_downscale=try_downscale, text_mode=zxingcpp.TextMode.HRI)
-            if codes:
-                return codes
+        codes = zxingcpp.read_barcodes(source, try_downscale=True, text_mode=zxingcpp.TextMode.HRI)
+        if codes:
+            return codes
     return []
+
+
+def mixed_scale_qr_image():
+    small = barcode_fixture("qr", scale=5)
+    large = barcode_fixture("qr", scale=20)
+    noise = np.random.default_rng(20261024).random(large.shape) < 0.1
+    large[noise] = 255 - large[noise]
+    image = np.full((large.shape[0] + 80, large.shape[1] + small.shape[1] + 120), 255, np.uint8)
+    image[40:40 + large.shape[0], 40:40 + large.shape[1]] = large
+    image[40:40 + small.shape[0], 80 + large.shape[1]:80 + large.shape[1] + small.shape[1]] = small
+    return image
 
 
 def normalized(detections, local=False):
@@ -99,6 +109,11 @@ def main():
     im[20:20+a.shape[0], 20:20+a.shape[1]] = a
     im[20:20+b.shape[0], 60+a.shape[1]:60+a.shape[1]+b.shape[1]] = b
     add("multi", im, expected["qr"]+expected["dm"])
+    mixed_scale = mixed_scale_qr_image()
+    # 两个真实码只有一个能在原分辨率识别，缩放扫描必须补回另一个。
+    assert len(zxingcpp.read_barcodes(mixed_scale, try_downscale=False)) == 1
+    assert len(zxingcpp.read_barcodes(mixed_scale, try_downscale=True)) == 2
+    add("multi-scale-qr", mixed_scale, ["深度视觉-QR", "深度视觉-QR"])
     manifest = output / "manifest.json"
     manifest.write_text(json.dumps(cases, ensure_ascii=False), encoding="utf-8")
     flow = Path(__file__).resolve().parent / "data" / "barcode_flow.json"
@@ -120,10 +135,12 @@ def main():
             image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
         python = read_reference(image)
         assert sorted(c.text for c in python) == expected[name]
+        python_geometry = []
         for c in python:
-            d = next(d for d in left["local"] if d["category_name"] == c.text)
             points = [[p.x, p.y] for p in (c.position.top_left, c.position.top_right, c.position.bottom_right, c.position.bottom_left)]
-            assert d["extra_info"] == {"barcode_format": str(c.format), "polyline": points + [points[0]]}
+            python_geometry.append({"barcode_format": str(c.format), "polyline": points + [points[0]]})
+        geometry_key = lambda value: json.dumps(value, sort_keys=True)
+        assert sorted((d["extra_info"] for d in left["local"]), key=geometry_key) == sorted(python_geometry, key=geometry_key), (name, "Python geometry")
     print(f"PASS: {len(cases)} fixtures, C#/C++ modules + exported flow API + Python geometry parity")
 
 

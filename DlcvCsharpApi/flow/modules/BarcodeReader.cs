@@ -51,6 +51,44 @@ namespace DlcvModules
             return detections;
         }
 
+        private static bool SameRegion(JToken first, JToken second)
+        {
+            if ((string)first["extra_info"]["barcode_format"] != (string)second["extra_info"]["barcode_format"]) return false;
+            var firstLine = first["extra_info"]["polyline"];
+            var secondLine = second["extra_info"]["polyline"];
+            if (JToken.DeepEquals(firstLine, secondLine)) return true;
+            double area = Math.Min((double)first["area"], (double)second["area"]);
+            if (area <= 0) return false;
+            var firstPoints = firstLine.Take(4).Select(p => new Point2f((float)p[0], (float)p[1]));
+            var secondPoints = secondLine.Take(4).Select(p => new Point2f((float)p[0], (float)p[1]));
+            return Cv2.IntersectConvexConvex(firstPoints, secondPoints, out Point2f[] intersection) >= area * 0.8;
+        }
+
+        private static JArray ReadAtBothScales(ZXingCpp.BarcodeReader reader, ImageView view)
+        {
+            var detections = new JArray();
+            foreach (bool downscale in new[] { false, true })
+            {
+                int originalCount = detections.Count;
+                reader.TryDownscale = downscale;
+                Barcode[] codes = reader.From(view) ?? new Barcode[0];
+                try
+                {
+                    foreach (var candidate in ToDetections(codes))
+                    {
+                        // 同区域的缩放误码优先保留原分辨率结果，其他区域的有效码仍须补齐。
+                        if (!downscale || !detections.Take(originalCount).Any(original => SameRegion(original, candidate)))
+                            detections.Add(candidate);
+                    }
+                }
+                finally
+                {
+                    foreach (var code in codes) code.Dispose();
+                }
+            }
+            return detections;
+        }
+
         public override ModuleIO Process(List<ModuleImage> imageList = null, JArray resultList = null)
         {
             var images = imageList ?? new List<ModuleImage>();
@@ -85,18 +123,11 @@ namespace DlcvModules
                         throw new ArgumentException("Barcode reader requires uint8 gray, RGB or RGBA images");
                     var format = channels == 1 ? ImageFormat.Lum : channels == 3 ? ImageFormat.RGB : ImageFormat.RGBA;
                     var view = new ImageView(image.Data, image.Width, image.Height, format, checked((int)image.Step()));
-                    // 原分辨率优先；缩小层可能带来几何伪候选，仅在前一轮为空时启用。
-                    reader.TryDownscale = false;
-                    Barcode[] codes = reader.From(view) ?? new Barcode[0];
                     Mat gray = null, enhanced = null;
                     try
                     {
-                        if (codes.Length == 0)
-                        {
-                            reader.TryDownscale = true;
-                            codes = reader.From(view) ?? new Barcode[0];
-                        }
-                        if (codes.Length == 0)
+                        var detections = ReadAtBothScales(reader, view);
+                        if (detections.Count == 0)
                         {
                             gray = new Mat();
                             enhanced = new Mat();
@@ -104,15 +135,8 @@ namespace DlcvModules
                             else Cv2.CvtColor(image, gray, channels == 3 ? ColorConversionCodes.RGB2GRAY : ColorConversionCodes.RGBA2GRAY);
                             Cv2.EqualizeHist(gray, enhanced);
                             view = new ImageView(enhanced.Data, enhanced.Width, enhanced.Height, ImageFormat.Lum, checked((int)enhanced.Step()));
-                            reader.TryDownscale = false;
-                            codes = reader.From(view) ?? new Barcode[0];
-                            if (codes.Length == 0)
-                            {
-                                reader.TryDownscale = true;
-                                codes = reader.From(view) ?? new Barcode[0];
-                            }
+                            detections = ReadAtBothScales(reader, view);
                         }
-                        var detections = ToDetections(codes);
                         var entry = JObject.FromObject(wrap.ToMeta());
                         entry["type"] = "local";
                         entry["index"] = i;
@@ -121,7 +145,6 @@ namespace DlcvModules
                     }
                     finally
                     {
-                        foreach (var code in codes) code.Dispose();
                         gray?.Dispose();
                         enhanced?.Dispose();
                         GC.KeepAlive(view);

@@ -89,6 +89,61 @@ bool BarcodeOption(const Json& properties, const char* key) {
     return properties.at(key).get<bool>();
 }
 
+bool SameBarcodeRegion(const Json& first, const Json& second) {
+    if (first["extra_info"]["barcode_format"] != second["extra_info"]["barcode_format"]) return false;
+    const auto& firstLine = first["extra_info"]["polyline"];
+    const auto& secondLine = second["extra_info"]["polyline"];
+    if (firstLine == secondLine) return true;
+    const double area = std::min(first["area"].get<double>(), second["area"].get<double>());
+    if (area <= 0) return false;
+    std::vector<cv::Point2f> firstPoints, secondPoints, intersection;
+    for (size_t k = 0; k < 4; ++k) {
+        firstPoints.emplace_back(firstLine[k][0].get<float>(), firstLine[k][1].get<float>());
+        secondPoints.emplace_back(secondLine[k][0].get<float>(), secondLine[k][1].get<float>());
+    }
+    return cv::intersectConvexConvex(firstPoints, secondPoints, intersection) >= area * 0.8;
+}
+
+Json ReadAtBothScales(BarcodeApi& api, const void* view, void* options) {
+    Json detections = Json::array();
+    for (bool downscale : {false, true}) {
+        const size_t originalCount = detections.size();
+        api.ReaderOptions_setTryDownscale(options, downscale);
+        BarcodeApi::Owned codes(api.ReadBarcodes(view, options), api.Barcodes_delete);
+        api.Check(codes.get());
+        for (int j = 0; j < api.Barcodes_size(codes.get()); ++j) {
+            const auto* code = api.Barcodes_at(codes.get(), j);
+            api.Check(code);
+            const auto pos = api.Barcode_position(code);
+            const std::array<BarcodePoint, 4> points = {pos.topLeft, pos.topRight, pos.bottomRight, pos.bottomLeft};
+            int x = points[0].x, y = points[0].y, xmax = x, ymax = y;
+            double area = 0;
+            Json line = Json::array();
+            for (size_t k = 0; k < 4; ++k) {
+                const auto& p = points[k]; const auto& next = points[(k + 1) % 4];
+                x = std::min(x, p.x); y = std::min(y, p.y);
+                xmax = std::max(xmax, p.x); ymax = std::max(ymax, p.y);
+                area += static_cast<double>(p.x) * next.y - static_cast<double>(p.y) * next.x;
+                line.push_back(Json::array({p.x, p.y}));
+            }
+            line.push_back(line[0]);
+            Json candidate{{"category_id", 0}, {"category_name", api.Text(api.Barcode_text(code))}, {"score", 1.0},
+                {"bbox", Json::array({x, y, xmax - x, ymax - y})}, {"area", std::abs(area) / 2},
+                {"with_bbox", true}, {"with_angle", false}, {"angle", -100}, {"with_mask", false},
+                {"extra_info", {{"barcode_format", api.Text(api.BarcodeFormatToString(api.Barcode_format(code)))}, {"polyline", line}}}};
+            // 同区域的缩放误码优先保留原分辨率结果，其他区域的有效码仍须补齐。
+            bool overlapsOriginal = false;
+            if (downscale) {
+                for (size_t k = 0; k < originalCount; ++k) {
+                    if (SameBarcodeRegion(detections[k], candidate)) { overlapsOriginal = true; break; }
+                }
+            }
+            if (!overlapsOriginal) detections.push_back(std::move(candidate));
+        }
+    }
+    return detections;
+}
+
 class BarcodeReaderModule final : public BaseModule {
 public:
     using BaseModule::BaseModule;
@@ -123,57 +178,19 @@ public:
             const int format = channels == 1 ? 0x01000000 : channels == 3 ? 0x03000102 : 0x04000102;
             BarcodeApi::Owned view(api.ImageView_new(image.data, image.cols, image.rows, format, static_cast<int>(image.step), 0), api.ImageView_delete);
             api.Check(view.get());
-            // 原分辨率优先；缩小层可能带来几何伪候选，仅在前一轮为空时启用。
-            api.ReaderOptions_setTryDownscale(options.get(), false);
-            BarcodeApi::Owned codes(api.ReadBarcodes(view.get(), options.get()), api.Barcodes_delete);
-            api.Check(codes.get());
-            BarcodeApi::Owned retryView(nullptr, api.ImageView_delete);
+            Json detections = ReadAtBothScales(api, view.get(), options.get());
             cv::Mat gray, enhanced;
-            if (api.Barcodes_size(codes.get()) == 0) {
-                api.ReaderOptions_setTryDownscale(options.get(), true);
-                codes.reset(api.ReadBarcodes(view.get(), options.get()));
-                api.Check(codes.get());
-            }
-            if (api.Barcodes_size(codes.get()) == 0) {
+            if (detections.empty()) {
                 if (channels == 1) {
                     cv::equalizeHist(image, enhanced);
                 } else {
                     cv::cvtColor(image, gray, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
                     cv::equalizeHist(gray, enhanced);
                 }
-                retryView.reset(api.ImageView_new(enhanced.data, enhanced.cols, enhanced.rows, 0x01000000,
-                    static_cast<int>(enhanced.step), 0));
+                BarcodeApi::Owned retryView(api.ImageView_new(enhanced.data, enhanced.cols, enhanced.rows, 0x01000000,
+                    static_cast<int>(enhanced.step), 0), api.ImageView_delete);
                 api.Check(retryView.get());
-                api.ReaderOptions_setTryDownscale(options.get(), false);
-                codes.reset(api.ReadBarcodes(retryView.get(), options.get()));
-                api.Check(codes.get());
-                if (api.Barcodes_size(codes.get()) == 0) {
-                    api.ReaderOptions_setTryDownscale(options.get(), true);
-                    codes.reset(api.ReadBarcodes(retryView.get(), options.get()));
-                    api.Check(codes.get());
-                }
-            }
-            Json detections = Json::array();
-            for (int j = 0; j < api.Barcodes_size(codes.get()); ++j) {
-                const auto* code = api.Barcodes_at(codes.get(), j);
-                api.Check(code);
-                const auto pos = api.Barcode_position(code);
-                const std::array<BarcodePoint, 4> points = {pos.topLeft, pos.topRight, pos.bottomRight, pos.bottomLeft};
-                int x = points[0].x, y = points[0].y, xmax = x, ymax = y;
-                double area = 0;
-                Json line = Json::array();
-                for (size_t k = 0; k < 4; ++k) {
-                    const auto& p = points[k]; const auto& next = points[(k + 1) % 4];
-                    x = std::min(x, p.x); y = std::min(y, p.y);
-                    xmax = std::max(xmax, p.x); ymax = std::max(ymax, p.y);
-                    area += static_cast<double>(p.x) * next.y - static_cast<double>(p.y) * next.x;
-                    line.push_back(Json::array({p.x, p.y}));
-                }
-                line.push_back(line[0]);
-                detections.push_back(Json{{"category_id", 0}, {"category_name", api.Text(api.Barcode_text(code))}, {"score", 1.0},
-                    {"bbox", Json::array({x, y, xmax - x, ymax - y})}, {"area", std::abs(area) / 2},
-                    {"with_bbox", true}, {"with_angle", false}, {"angle", -100}, {"with_mask", false},
-                    {"extra_info", {{"barcode_format", api.Text(api.BarcodeFormatToString(api.Barcode_format(code)))}, {"polyline", line}}}});
+                detections = ReadAtBothScales(api, retryView.get(), options.get());
             }
             auto entry = images[i].ToMeta();
             entry["type"] = "local"; entry["index"] = i; entry["sample_results"] = std::move(detections);
