@@ -454,7 +454,6 @@ namespace DlcvDemo
             //
             // button_get_model_info
             //
-            this.button_get_model_info.Anchor = System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
             this.button_get_model_info.BackColor = Color.FromArgb(231, 235, 239);
             this.button_get_model_info.FlatAppearance.BorderSize = 0;
             this.button_get_model_info.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
@@ -618,7 +617,6 @@ namespace DlcvDemo
             this.rightOpsTable.Controls.Add(this.button_check_environment, 0, 2);
             this.rightOpsTable.Controls.Add(this.button_check_dog, 1, 2);
             this.rightOpsTable.Controls.Add(this.button_get_model_info, 2, 2);
-            this.rightOpsTable.SetColumnSpan(this.button_get_model_info, 2);
             //
             // topLayout
             //

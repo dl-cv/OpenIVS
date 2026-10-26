@@ -296,7 +296,7 @@ namespace DlcvDemo
             }
             foreach (Control control in rightOpsTable.Controls)
             {
-                if (control is Button && control != button_open_image && control != button_get_model_info)
+                if (control is Button && control != button_open_image)
                 {
                     control.Width = control == button_free_all_model
                         ? (int)Math.Round(104 * scale)
