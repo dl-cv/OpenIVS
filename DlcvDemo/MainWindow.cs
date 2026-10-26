@@ -298,7 +298,7 @@ namespace DlcvDemo
             {
                 if (control is Button && control != button_open_image)
                 {
-                    control.Width = control == button_language || control == button_free_all_model || control == button_get_model_info
+                    control.Width = control == button_free_all_model || control == button_get_model_info
                         ? (int)Math.Round(104 * scale)
                         : buttonWidth;
                 }

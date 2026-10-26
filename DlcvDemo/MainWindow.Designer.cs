@@ -608,9 +608,9 @@ namespace DlcvDemo
             //
             // 右侧操作区
             //
-            this.rightOpsTable.Controls.Add(this.button_open_image, 0, 0);
+            this.rightOpsTable.Controls.Add(this.button_language, 0, 0);
+            this.rightOpsTable.Controls.Add(this.button_open_image, 1, 0);
             this.rightOpsTable.SetColumnSpan(this.button_open_image, 2);
-            this.rightOpsTable.Controls.Add(this.button_language, 2, 0);
             this.rightOpsTable.Controls.Add(this.button_save_img, 0, 1);
             this.rightOpsTable.Controls.Add(this.button_free_model, 1, 1);
             this.rightOpsTable.Controls.Add(this.button_free_all_model, 2, 1);
