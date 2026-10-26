@@ -667,7 +667,7 @@ namespace DlcvDemo
             this.AutoScaleDimensions = new System.Drawing.SizeF(96F, 96F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi;
             this.BackColor = Color.FromArgb(243, 245, 247);
-            this.Size = new System.Drawing.Size(1280, 820);
+            this.Size = new System.Drawing.Size(1160, 820);
             this.Controls.Add(this.rootLayout);
             this.Font = new System.Drawing.Font("Microsoft YaHei UI", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.MinimumSize = new System.Drawing.Size(1040, 500);

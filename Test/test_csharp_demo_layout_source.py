@@ -9,6 +9,10 @@ WINDOW = (ROOT / "DlcvDemo/MainWindow.cs").read_text(encoding="utf-8-sig")
 
 
 class CsharpDemoLayoutSourceTest(unittest.TestCase):
+    def test_default_window_is_narrower_without_changing_height(self):
+        self.assertIn("this.Size = new System.Drawing.Size(1160, 820);", DESIGNER)
+        self.assertIn("this.MinimumSize = new System.Drawing.Size(1040, 500);", DESIGNER)
+
     def test_parameter_controls_share_vertical_center(self):
         controls = (
             "label_choose_gpu", "label_batch_size", "label_num_thread", "label_threshold",
