@@ -296,9 +296,9 @@ namespace DlcvDemo
             }
             foreach (Control control in rightOpsTable.Controls)
             {
-                if (control is Button && control != button_open_image)
+                if (control is Button && control != button_open_image && control != button_get_model_info)
                 {
-                    control.Width = control == button_free_all_model || control == button_get_model_info
+                    control.Width = control == button_free_all_model
                         ? (int)Math.Round(104 * scale)
                         : buttonWidth;
                 }
@@ -1549,11 +1549,6 @@ namespace DlcvDemo
             DisposeCurrentModel();
             model_path = null;
             richTextBox1.Text = I18n.T("模型已释放");
-        }
-
-        private void button_github_Click(object sender, EventArgs e)
-        {
-            Process.Start("https://docs.dlcv.com.cn/deploy/sdk/csharp_sdk");
         }
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)

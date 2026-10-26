@@ -65,7 +65,6 @@ namespace DlcvDemo
             this.button_free_all_model = new System.Windows.Forms.Button();
             this.button_check_environment = new System.Windows.Forms.Button();
             this.button_check_dog = new System.Windows.Forms.Button();
-            this.button_github = new System.Windows.Forms.Button();
             this.button_get_model_info = new System.Windows.Forms.Button();
             this.splitContainerMain = new System.Windows.Forms.SplitContainer();
             this.resultCard = new System.Windows.Forms.Panel();
@@ -453,23 +452,9 @@ namespace DlcvDemo
             this.button_check_dog.Text = "检查加密狗";
             this.button_check_dog.UseVisualStyleBackColor = false;
             //
-            // button_github
-            //
-            this.button_github.BackColor = Color.FromArgb(231, 235, 239);
-            this.button_github.FlatAppearance.BorderSize = 0;
-            this.button_github.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
-            this.button_github.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);
-            this.button_github.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.button_github.ForeColor = Color.FromArgb(38, 50, 56);
-            this.button_github.Margin = new System.Windows.Forms.Padding(4);
-            this.button_github.Name = "button_github";
-            this.button_github.Size = new System.Drawing.Size(104, 38);
-            this.button_github.TabIndex = 18;
-            this.button_github.Text = "文档";
-            this.button_github.UseVisualStyleBackColor = false;
-            //
             // button_get_model_info
             //
+            this.button_get_model_info.Anchor = System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
             this.button_get_model_info.BackColor = Color.FromArgb(231, 235, 239);
             this.button_get_model_info.FlatAppearance.BorderSize = 0;
             this.button_get_model_info.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
@@ -632,8 +617,8 @@ namespace DlcvDemo
             this.rightOpsTable.Controls.Add(this.button_free_all_model, 3, 1);
             this.rightOpsTable.Controls.Add(this.button_check_environment, 0, 2);
             this.rightOpsTable.Controls.Add(this.button_check_dog, 1, 2);
-            this.rightOpsTable.Controls.Add(this.button_github, 2, 2);
-            this.rightOpsTable.Controls.Add(this.button_get_model_info, 3, 2);
+            this.rightOpsTable.Controls.Add(this.button_get_model_info, 2, 2);
+            this.rightOpsTable.SetColumnSpan(this.button_get_model_info, 2);
             //
             // topLayout
             //
@@ -696,7 +681,6 @@ namespace DlcvDemo
             this.button_free_all_model.Click += new System.EventHandler(this.button_free_all_model_Click);
             this.button_check_environment.Click += new System.EventHandler(this.button_check_environment_Click);
             this.button_check_dog.Click += new System.EventHandler(this.button1_Click);
-            this.button_github.Click += new System.EventHandler(this.button_github_Click);
             this.button_get_model_info.Click += new System.EventHandler(this.button_getmodelinfo_Click);
             this.numericUpDown_threshold.ValueChanged += new System.EventHandler(this.numericUpDown_threshold_ValueChanged);
             this.button_language.Click += new System.EventHandler(this.button_language_Click);
@@ -858,7 +842,6 @@ namespace DlcvDemo
         private System.Windows.Forms.Button button_free_all_model;
         private System.Windows.Forms.Button button_check_environment;
         private System.Windows.Forms.Button button_check_dog;
-        private System.Windows.Forms.Button button_github;
         private System.Windows.Forms.Button button_get_model_info;
         private System.Windows.Forms.SplitContainer splitContainerMain;
         private System.Windows.Forms.Panel resultCard;
