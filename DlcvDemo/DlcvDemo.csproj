@@ -142,6 +142,9 @@
     <Compile Include="..\Test\desktop_projects\DemoJsonResultTests.cs">
       <Link>Tests\DemoJsonResultTests.cs</Link>
     </Compile>
+    <Compile Include="..\Test\desktop_projects\DemoButtonLayoutTests.cs">
+      <Link>Tests\DemoButtonLayoutTests.cs</Link>
+    </Compile>
     <Compile Include="MainWindow.cs">
       <SubType>Form</SubType>
     </Compile>

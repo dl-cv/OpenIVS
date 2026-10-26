@@ -285,6 +285,8 @@ namespace DlcvDemo
             int numericWidth = (int)Math.Round(80 * scale);
             int margin = (int)Math.Round(8 * scale);
             topLayout.SuspendLayout();
+            leftOpsTable.SuspendLayout();
+            rightOpsTable.SuspendLayout();
             foreach (Control control in leftOpsTable.Controls)
             {
                 if (control is Button && control != button_load_model)
@@ -301,6 +303,9 @@ namespace DlcvDemo
                         : buttonWidth;
                 }
             }
+            // 跨列按钮也须更新宽度，否则 AutoSize 列会保留旧宽度并被父容器裁切。
+            button_load_model.Width = 2 * buttonWidth + margin;
+            button_open_image.Width = buttonWidth + (int)Math.Round(104 * scale) + margin;
             leftOpsTable.Width = 2 * (buttonWidth + margin);
             rightOpsTable.Width = 2 * (buttonWidth + margin) + (int)Math.Round(104 * scale) + margin;
             numericUpDown_batch_size.Width = numericWidth;
@@ -308,6 +313,8 @@ namespace DlcvDemo
             numericUpDown_num_thread.Width = numericWidth;
             topLayout.ColumnStyles[1].Width = 16 * scale;
             topLayout.ColumnStyles[3].Width = 16 * scale;
+            leftOpsTable.ResumeLayout(true);
+            rightOpsTable.ResumeLayout(true);
             topLayout.ResumeLayout(true);
         }
 
@@ -786,6 +793,7 @@ namespace DlcvDemo
                 imagePanel1.LabelFontScale = uiTestOptions.LabelFontScale;
                 numericUpDown_batch_size.Value = uiTestOptions.BatchSize;
                 numericUpDown_num_thread.Value = uiTestOptions.ThreadCount;
+                buttonLayoutCheck = RunButtonLayoutUiChecks();
                 WriteUiTestResult("started", null);
 
                 if (uiTestOptions.InteractiveDialogs)
@@ -975,6 +983,7 @@ namespace DlcvDemo
                 ["screenshot"] = uiTestOptions.ScreenshotPath,
                 ["result_view"] = uiTestOptions.ResultView,
                 ["json_export_check"] = jsonExportCheck,
+                ["button_layout_check"] = buttonLayoutCheck,
                 ["test_mode"] = uiTestOptions.TestMode,
                 ["batch_size"] = uiTestOptions.BatchSize,
                 ["thread_count"] = uiTestOptions.ThreadCount,
