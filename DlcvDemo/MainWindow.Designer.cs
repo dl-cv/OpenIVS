@@ -338,13 +338,12 @@ namespace DlcvDemo
             //
             this.rightOpsTable.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
             this.rightOpsTable.BackColor = Color.White;
-            this.rightOpsTable.ColumnCount = 4;
-            this.rightOpsTable.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
+            this.rightOpsTable.ColumnCount = 3;
             this.rightOpsTable.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.rightOpsTable.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.rightOpsTable.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.rightOpsTable.Name = "rightOpsTable";
-            this.rightOpsTable.Size = new System.Drawing.Size(448, 140);
+            this.rightOpsTable.Size = new System.Drawing.Size(336, 140);
             this.rightOpsTable.RowCount = 3;
             this.rightOpsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
             this.rightOpsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
@@ -355,7 +354,7 @@ namespace DlcvDemo
             this.checkBox_rpc_mode.AutoSize = true;
             this.checkBox_rpc_mode.BackColor = Color.White;
             this.checkBox_rpc_mode.ForeColor = Color.FromArgb(55, 71, 79);
-            this.checkBox_rpc_mode.Margin = new System.Windows.Forms.Padding(0, 11, 0, 11);
+            this.checkBox_rpc_mode.Margin = new System.Windows.Forms.Padding(12, 13, 0, 13);
             this.checkBox_rpc_mode.Name = "checkBox_rpc_mode";
             this.checkBox_rpc_mode.TabIndex = 11;
             this.checkBox_rpc_mode.Text = "RPC 模式";
@@ -604,16 +603,17 @@ namespace DlcvDemo
             this.paramsTable.Controls.Add(this.numericUpDown_threshold, 3, 1);
             this.paramsTable.Controls.Add(this.label_num_thread, 0, 2);
             this.paramsTable.Controls.Add(this.numericUpDown_num_thread, 1, 2);
+            this.paramsTable.Controls.Add(this.checkBox_rpc_mode, 2, 2);
+            this.paramsTable.SetColumnSpan(this.checkBox_rpc_mode, 3);
             //
             // 右侧操作区
             //
-            this.rightOpsTable.Controls.Add(this.checkBox_rpc_mode, 0, 0);
-            this.rightOpsTable.Controls.Add(this.button_open_image, 1, 0);
-            this.rightOpsTable.SetColumnSpan(this.button_open_image, 3);
-            this.rightOpsTable.Controls.Add(this.button_language, 0, 1);
-            this.rightOpsTable.Controls.Add(this.button_save_img, 1, 1);
-            this.rightOpsTable.Controls.Add(this.button_free_model, 2, 1);
-            this.rightOpsTable.Controls.Add(this.button_free_all_model, 3, 1);
+            this.rightOpsTable.Controls.Add(this.button_open_image, 0, 0);
+            this.rightOpsTable.SetColumnSpan(this.button_open_image, 2);
+            this.rightOpsTable.Controls.Add(this.button_language, 2, 0);
+            this.rightOpsTable.Controls.Add(this.button_save_img, 0, 1);
+            this.rightOpsTable.Controls.Add(this.button_free_model, 1, 1);
+            this.rightOpsTable.Controls.Add(this.button_free_all_model, 2, 1);
             this.rightOpsTable.Controls.Add(this.button_check_environment, 0, 2);
             this.rightOpsTable.Controls.Add(this.button_check_dog, 1, 2);
             this.rightOpsTable.Controls.Add(this.button_get_model_info, 2, 2);
