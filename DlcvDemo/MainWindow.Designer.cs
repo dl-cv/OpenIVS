@@ -65,7 +65,6 @@ namespace DlcvDemo
             this.button_free_all_model = new System.Windows.Forms.Button();
             this.button_check_environment = new System.Windows.Forms.Button();
             this.button_check_dog = new System.Windows.Forms.Button();
-            this.button_github = new System.Windows.Forms.Button();
             this.button_get_model_info = new System.Windows.Forms.Button();
             this.splitContainerMain = new System.Windows.Forms.SplitContainer();
             this.resultCard = new System.Windows.Forms.Panel();
@@ -232,16 +231,17 @@ namespace DlcvDemo
             this.paramsTable.Name = "paramsTable";
             this.paramsTable.Size = new System.Drawing.Size(400, 140);
             this.paramsTable.RowCount = 3;
-            this.paramsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-            this.paramsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-            this.paramsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
+            this.paramsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
+            this.paramsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
+            this.paramsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
             //
             // label_choose_gpu
             //
+            this.label_choose_gpu.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.label_choose_gpu.AutoSize = true;
             this.label_choose_gpu.BackColor = Color.White;
             this.label_choose_gpu.ForeColor = Color.FromArgb(55, 71, 79);
-            this.label_choose_gpu.Margin = new System.Windows.Forms.Padding(0, 13, 8, 13);
+            this.label_choose_gpu.Margin = new System.Windows.Forms.Padding(0, 0, 8, 0);
             this.label_choose_gpu.Name = "label_choose_gpu";
             this.label_choose_gpu.Text = "选择显卡";
             //
@@ -256,15 +256,17 @@ namespace DlcvDemo
             //
             // label_batch_size
             //
+            this.label_batch_size.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.label_batch_size.AutoSize = true;
             this.label_batch_size.BackColor = Color.White;
             this.label_batch_size.ForeColor = Color.FromArgb(55, 71, 79);
-            this.label_batch_size.Margin = new System.Windows.Forms.Padding(0, 13, 8, 13);
+            this.label_batch_size.Margin = new System.Windows.Forms.Padding(0, 0, 8, 0);
             this.label_batch_size.Name = "label_batch_size";
             this.label_batch_size.Text = "batch_size";
             //
             // numericUpDown_batch_size
             //
+            this.numericUpDown_batch_size.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.numericUpDown_batch_size.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.numericUpDown_batch_size.Margin = new System.Windows.Forms.Padding(0, 6, 0, 6);
             this.numericUpDown_batch_size.Maximum = new decimal(new int[] { 1024, 0, 0, 0 });
@@ -277,15 +279,17 @@ namespace DlcvDemo
             //
             // label_threshold
             //
+            this.label_threshold.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.label_threshold.AutoSize = true;
             this.label_threshold.BackColor = Color.White;
             this.label_threshold.ForeColor = Color.FromArgb(55, 71, 79);
-            this.label_threshold.Margin = new System.Windows.Forms.Padding(12, 13, 8, 13);
+            this.label_threshold.Margin = new System.Windows.Forms.Padding(12, 0, 8, 0);
             this.label_threshold.Name = "label_threshold";
             this.label_threshold.Text = "threshold";
             //
             // numericUpDown_threshold
             //
+            this.numericUpDown_threshold.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.numericUpDown_threshold.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.numericUpDown_threshold.DecimalPlaces = 2;
             this.numericUpDown_threshold.Increment = 0.05m;
@@ -299,15 +303,17 @@ namespace DlcvDemo
             //
             // label_num_thread
             //
+            this.label_num_thread.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.label_num_thread.AutoSize = true;
             this.label_num_thread.BackColor = Color.White;
             this.label_num_thread.ForeColor = Color.FromArgb(55, 71, 79);
-            this.label_num_thread.Margin = new System.Windows.Forms.Padding(0, 13, 8, 13);
+            this.label_num_thread.Margin = new System.Windows.Forms.Padding(0, 0, 8, 0);
             this.label_num_thread.Name = "label_num_thread";
             this.label_num_thread.Text = "线程数";
             //
             // numericUpDown_num_thread
             //
+            this.numericUpDown_num_thread.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.numericUpDown_num_thread.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.numericUpDown_num_thread.Margin = new System.Windows.Forms.Padding(0, 6, 0, 6);
             this.numericUpDown_num_thread.Maximum = new decimal(new int[] { 32, 0, 0, 0 });
@@ -339,13 +345,12 @@ namespace DlcvDemo
             //
             this.rightOpsTable.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
             this.rightOpsTable.BackColor = Color.White;
-            this.rightOpsTable.ColumnCount = 4;
-            this.rightOpsTable.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
+            this.rightOpsTable.ColumnCount = 3;
             this.rightOpsTable.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.rightOpsTable.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.rightOpsTable.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.AutoSize));
             this.rightOpsTable.Name = "rightOpsTable";
-            this.rightOpsTable.Size = new System.Drawing.Size(448, 140);
+            this.rightOpsTable.Size = new System.Drawing.Size(336, 140);
             this.rightOpsTable.RowCount = 3;
             this.rightOpsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
             this.rightOpsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
@@ -353,10 +358,11 @@ namespace DlcvDemo
             //
             // checkBox_rpc_mode
             //
+            this.checkBox_rpc_mode.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.checkBox_rpc_mode.AutoSize = true;
             this.checkBox_rpc_mode.BackColor = Color.White;
             this.checkBox_rpc_mode.ForeColor = Color.FromArgb(55, 71, 79);
-            this.checkBox_rpc_mode.Margin = new System.Windows.Forms.Padding(0, 11, 0, 11);
+            this.checkBox_rpc_mode.Margin = new System.Windows.Forms.Padding(12, 0, 0, 0);
             this.checkBox_rpc_mode.Name = "checkBox_rpc_mode";
             this.checkBox_rpc_mode.TabIndex = 11;
             this.checkBox_rpc_mode.Text = "RPC 模式";
@@ -452,21 +458,6 @@ namespace DlcvDemo
             this.button_check_dog.TabIndex = 17;
             this.button_check_dog.Text = "检查加密狗";
             this.button_check_dog.UseVisualStyleBackColor = false;
-            //
-            // button_github
-            //
-            this.button_github.BackColor = Color.FromArgb(231, 235, 239);
-            this.button_github.FlatAppearance.BorderSize = 0;
-            this.button_github.FlatAppearance.MouseDownBackColor = Color.FromArgb(199, 207, 215);
-            this.button_github.FlatAppearance.MouseOverBackColor = Color.FromArgb(216, 222, 228);
-            this.button_github.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.button_github.ForeColor = Color.FromArgb(38, 50, 56);
-            this.button_github.Margin = new System.Windows.Forms.Padding(4);
-            this.button_github.Name = "button_github";
-            this.button_github.Size = new System.Drawing.Size(104, 38);
-            this.button_github.TabIndex = 18;
-            this.button_github.Text = "文档";
-            this.button_github.UseVisualStyleBackColor = false;
             //
             // button_get_model_info
             //
@@ -620,20 +611,20 @@ namespace DlcvDemo
             this.paramsTable.Controls.Add(this.numericUpDown_threshold, 3, 1);
             this.paramsTable.Controls.Add(this.label_num_thread, 0, 2);
             this.paramsTable.Controls.Add(this.numericUpDown_num_thread, 1, 2);
+            this.paramsTable.Controls.Add(this.checkBox_rpc_mode, 2, 2);
+            this.paramsTable.SetColumnSpan(this.checkBox_rpc_mode, 3);
             //
             // 右侧操作区
             //
-            this.rightOpsTable.Controls.Add(this.checkBox_rpc_mode, 0, 0);
+            this.rightOpsTable.Controls.Add(this.button_language, 0, 0);
             this.rightOpsTable.Controls.Add(this.button_open_image, 1, 0);
-            this.rightOpsTable.SetColumnSpan(this.button_open_image, 3);
-            this.rightOpsTable.Controls.Add(this.button_language, 0, 1);
-            this.rightOpsTable.Controls.Add(this.button_save_img, 1, 1);
-            this.rightOpsTable.Controls.Add(this.button_free_model, 2, 1);
-            this.rightOpsTable.Controls.Add(this.button_free_all_model, 3, 1);
+            this.rightOpsTable.SetColumnSpan(this.button_open_image, 2);
+            this.rightOpsTable.Controls.Add(this.button_save_img, 0, 1);
+            this.rightOpsTable.Controls.Add(this.button_free_model, 1, 1);
+            this.rightOpsTable.Controls.Add(this.button_free_all_model, 2, 1);
             this.rightOpsTable.Controls.Add(this.button_check_environment, 0, 2);
             this.rightOpsTable.Controls.Add(this.button_check_dog, 1, 2);
-            this.rightOpsTable.Controls.Add(this.button_github, 2, 2);
-            this.rightOpsTable.Controls.Add(this.button_get_model_info, 3, 2);
+            this.rightOpsTable.Controls.Add(this.button_get_model_info, 2, 2);
             //
             // topLayout
             //
@@ -676,7 +667,7 @@ namespace DlcvDemo
             this.AutoScaleDimensions = new System.Drawing.SizeF(96F, 96F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi;
             this.BackColor = Color.FromArgb(243, 245, 247);
-            this.Size = new System.Drawing.Size(1280, 820);
+            this.Size = new System.Drawing.Size(1160, 820);
             this.Controls.Add(this.rootLayout);
             this.Font = new System.Drawing.Font("Microsoft YaHei UI", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.MinimumSize = new System.Drawing.Size(1040, 500);
@@ -696,7 +687,6 @@ namespace DlcvDemo
             this.button_free_all_model.Click += new System.EventHandler(this.button_free_all_model_Click);
             this.button_check_environment.Click += new System.EventHandler(this.button_check_environment_Click);
             this.button_check_dog.Click += new System.EventHandler(this.button1_Click);
-            this.button_github.Click += new System.EventHandler(this.button_github_Click);
             this.button_get_model_info.Click += new System.EventHandler(this.button_getmodelinfo_Click);
             this.numericUpDown_threshold.ValueChanged += new System.EventHandler(this.numericUpDown_threshold_ValueChanged);
             this.button_language.Click += new System.EventHandler(this.button_language_Click);
@@ -858,7 +848,6 @@ namespace DlcvDemo
         private System.Windows.Forms.Button button_free_all_model;
         private System.Windows.Forms.Button button_check_environment;
         private System.Windows.Forms.Button button_check_dog;
-        private System.Windows.Forms.Button button_github;
         private System.Windows.Forms.Button button_get_model_info;
         private System.Windows.Forms.SplitContainer splitContainerMain;
         private System.Windows.Forms.Panel resultCard;

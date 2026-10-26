@@ -37,7 +37,6 @@ namespace DlcvDemo
             { "释放所有模型", "Free All" },
             { "检查环境", "Check Env" },
             { "检查加密狗", "Check Dongle" },
-            { "文档", "Docs" },
             { "获取模型信息", "Model Info" },
             { "运行结果", "Result" },
             { "汇总", "Summary" },
