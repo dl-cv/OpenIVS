@@ -62,7 +62,6 @@ namespace DlcvDemo
                 Icon = new System.Drawing.Icon(iconStream);
             }
             Shown += MainWindow_Shown;
-            SizeChanged += (sender, args) => UpdateResponsiveLayout();
             DpiChanged += MainWindow_DpiChanged;
         }
 
@@ -81,7 +80,7 @@ namespace DlcvDemo
             I18n.ApplyTo(this);
             UpdateWindowTitle();
             RefreshDynamicTexts();
-            UpdateResponsiveLayout();
+            UpdateControlSizesForDpi();
         }
 
         private void UpdateWindowTitle()
@@ -97,7 +96,7 @@ namespace DlcvDemo
             I18n.ApplyTo(this);
             UpdateWindowTitle();
             RefreshDynamicTexts();
-            UpdateResponsiveLayout();
+            UpdateControlSizesForDpi();
         }
 
         private void UpdateLanguageButton()
@@ -270,21 +269,20 @@ namespace DlcvDemo
                 if (!IsDisposed && !Disposing)
                 {
                     ConfigureResultPanel(resultWidth);
-                    UpdateResponsiveLayout();
+                    UpdateControlSizesForDpi();
                 }
             }));
         }
 
-        private void UpdateResponsiveLayout()
+        private void UpdateControlSizesForDpi()
         {
             if (topCard == null || IsDisposed || Disposing)
             {
                 return;
             }
             float scale = DeviceDpi / 96F;
-            bool compact = topCard.ClientSize.Width < 1160 * scale;
-            int buttonWidth = (int)Math.Round((compact ? 90 : 104) * scale);
-            int numericWidth = (int)Math.Round((compact ? 80 : 110) * scale);
+            int buttonWidth = (int)Math.Round(90 * scale);
+            int numericWidth = (int)Math.Round(80 * scale);
             int margin = (int)Math.Round(8 * scale);
             topLayout.SuspendLayout();
             foreach (Control control in leftOpsTable.Controls)
@@ -308,8 +306,8 @@ namespace DlcvDemo
             numericUpDown_batch_size.Width = numericWidth;
             numericUpDown_threshold.Width = numericWidth;
             numericUpDown_num_thread.Width = numericWidth;
-            topLayout.ColumnStyles[1].Width = (compact ? 8 : 16) * scale;
-            topLayout.ColumnStyles[3].Width = (compact ? 8 : 16) * scale;
+            topLayout.ColumnStyles[1].Width = 16 * scale;
+            topLayout.ColumnStyles[3].Width = 16 * scale;
             topLayout.ResumeLayout(true);
         }
 

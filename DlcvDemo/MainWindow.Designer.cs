@@ -231,16 +231,17 @@ namespace DlcvDemo
             this.paramsTable.Name = "paramsTable";
             this.paramsTable.Size = new System.Drawing.Size(400, 140);
             this.paramsTable.RowCount = 3;
-            this.paramsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-            this.paramsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
-            this.paramsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.AutoSize));
+            this.paramsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
+            this.paramsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
+            this.paramsTable.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 33.33333F));
             //
             // label_choose_gpu
             //
+            this.label_choose_gpu.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.label_choose_gpu.AutoSize = true;
             this.label_choose_gpu.BackColor = Color.White;
             this.label_choose_gpu.ForeColor = Color.FromArgb(55, 71, 79);
-            this.label_choose_gpu.Margin = new System.Windows.Forms.Padding(0, 13, 8, 13);
+            this.label_choose_gpu.Margin = new System.Windows.Forms.Padding(0, 0, 8, 0);
             this.label_choose_gpu.Name = "label_choose_gpu";
             this.label_choose_gpu.Text = "选择显卡";
             //
@@ -255,15 +256,17 @@ namespace DlcvDemo
             //
             // label_batch_size
             //
+            this.label_batch_size.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.label_batch_size.AutoSize = true;
             this.label_batch_size.BackColor = Color.White;
             this.label_batch_size.ForeColor = Color.FromArgb(55, 71, 79);
-            this.label_batch_size.Margin = new System.Windows.Forms.Padding(0, 13, 8, 13);
+            this.label_batch_size.Margin = new System.Windows.Forms.Padding(0, 0, 8, 0);
             this.label_batch_size.Name = "label_batch_size";
             this.label_batch_size.Text = "batch_size";
             //
             // numericUpDown_batch_size
             //
+            this.numericUpDown_batch_size.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.numericUpDown_batch_size.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.numericUpDown_batch_size.Margin = new System.Windows.Forms.Padding(0, 6, 0, 6);
             this.numericUpDown_batch_size.Maximum = new decimal(new int[] { 1024, 0, 0, 0 });
@@ -276,15 +279,17 @@ namespace DlcvDemo
             //
             // label_threshold
             //
+            this.label_threshold.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.label_threshold.AutoSize = true;
             this.label_threshold.BackColor = Color.White;
             this.label_threshold.ForeColor = Color.FromArgb(55, 71, 79);
-            this.label_threshold.Margin = new System.Windows.Forms.Padding(12, 13, 8, 13);
+            this.label_threshold.Margin = new System.Windows.Forms.Padding(12, 0, 8, 0);
             this.label_threshold.Name = "label_threshold";
             this.label_threshold.Text = "threshold";
             //
             // numericUpDown_threshold
             //
+            this.numericUpDown_threshold.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.numericUpDown_threshold.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.numericUpDown_threshold.DecimalPlaces = 2;
             this.numericUpDown_threshold.Increment = 0.05m;
@@ -298,15 +303,17 @@ namespace DlcvDemo
             //
             // label_num_thread
             //
+            this.label_num_thread.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.label_num_thread.AutoSize = true;
             this.label_num_thread.BackColor = Color.White;
             this.label_num_thread.ForeColor = Color.FromArgb(55, 71, 79);
-            this.label_num_thread.Margin = new System.Windows.Forms.Padding(0, 13, 8, 13);
+            this.label_num_thread.Margin = new System.Windows.Forms.Padding(0, 0, 8, 0);
             this.label_num_thread.Name = "label_num_thread";
             this.label_num_thread.Text = "线程数";
             //
             // numericUpDown_num_thread
             //
+            this.numericUpDown_num_thread.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.numericUpDown_num_thread.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
             this.numericUpDown_num_thread.Margin = new System.Windows.Forms.Padding(0, 6, 0, 6);
             this.numericUpDown_num_thread.Maximum = new decimal(new int[] { 32, 0, 0, 0 });
@@ -351,10 +358,11 @@ namespace DlcvDemo
             //
             // checkBox_rpc_mode
             //
+            this.checkBox_rpc_mode.Anchor = System.Windows.Forms.AnchorStyles.Left;
             this.checkBox_rpc_mode.AutoSize = true;
             this.checkBox_rpc_mode.BackColor = Color.White;
             this.checkBox_rpc_mode.ForeColor = Color.FromArgb(55, 71, 79);
-            this.checkBox_rpc_mode.Margin = new System.Windows.Forms.Padding(12, 13, 0, 13);
+            this.checkBox_rpc_mode.Margin = new System.Windows.Forms.Padding(12, 0, 0, 0);
             this.checkBox_rpc_mode.Name = "checkBox_rpc_mode";
             this.checkBox_rpc_mode.TabIndex = 11;
             this.checkBox_rpc_mode.Text = "RPC 模式";
