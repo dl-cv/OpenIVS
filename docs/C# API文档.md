@@ -144,7 +144,7 @@ public static class ModelFactory
 
 **构造函数行为**：
 1. 若路径以 `.dvst` / `.dvso` 结尾 → 进入 Flow/DVS 模式，实例化 `FlowGraphModel` 或 `DvsModel`。
-2. 若路径以 `.dvp` / `.dvsp` 结尾（忽略大小写）→ 在读取文件、启动后端和查询缓存之前抛出 `NotSupportedException`；请先加速为 `.dvt`、`.dvo`、`.dvst` 或 `.dvso`。
+2. 若路径以 `.dvsp` 结尾 → 抛出 `NotSupportedException`，不加载文件。
 3. `.dvst` 不设 1MB 下限，按 `DV\n` 文件头、JSON 清单及声明长度校验；声明大小须为非负整数，载荷总长度必须与实际剩余长度一致，截断或多余尾部均拒绝。其他受支持格式若文件存在且小于 1MB，仍抛出 `InvalidDataException` 并提示损坏或不完整。内存加载子模型不受此大小下限约束。
 4. 否则 → 普通模型模式，通过 `DllLoader` 调用底层 C API。
 5. 首次普通模型加载根据模型头 `dog_provider` 选择进程默认 DLL，并检查该模型授权；后续普通模型沿用默认 DLL，同时逐个检查授权。实际产品输入由模型加速器一次生成，每次只选择一种加密狗格式，同一产物及流程内子模型只包含该格式。非该生成流程得到的混合格式文件不属于产品输入，不用于扩展接口能力。
@@ -377,8 +377,8 @@ public class DllLoader
 
 **模型级 Provider 解析**：
 - `.dvt`/`.dvo` 文件：读取前两行（`DV` + header_json），解析 `dog_provider` 字段。
-- `.dvst`/`.dvso`：由子模型加载时解析 header。
-- `.dvp`/`.dvsp`：不支持推理，不解析 provider。
+- `.dvp`/`.dvst`/`.dvso`：不支持通过 header 解析（DVP 由底层处理，DVS 由子模型加载时解析）。
+- `.dvsp`：不支持推理，不解析 provider。
 - 滑窗处理使用 `.dvst/.dvso` 中的 Flow 滑窗模块。
 
 **共享 index 接口**：
@@ -625,16 +625,29 @@ using (var model = ModelFactory.CreateFromIndex(existingIndex))
 | `dlcv_infer_v.dll` | Virbox 版本；首次普通模型的模型头指定 Virbox 时选用，默认 DLL 创建后不再切换；系统搜索失败后使用 `C:\dlcv\Lib\site-packages\dlcvpro_infer\dlcv_infer_v.dll` |
 | `sntl_adminapi_windows_x64.dll` | 优先按系统搜索路径加载，失败后回退到 `C:\dlcv\bin\sntl_adminapi_windows_x64.dll` |
 | `nvml.dll` | `Utils.GetGpuInfo()` 通过 `DllImport` 直接调用 |
+| `DLCV Test.exe` | `Model` 的 DVP 模式固定从 `C:\dlcv\Lib\site-packages\dlcv_test\DLCV Test.exe` 启动后端服务 |
 | `AIModelRPC.exe` | `Model` 的 RPC 模式优先从当前 AppDomain 目录查找，其次查找 `C:\dlcv\Lib\site-packages\dlcvpro_infer_csharp\AIModelRPC.exe` |
 
 #### 运行模式
 
 | 模式 | 触发条件 | 当前实现中的通信方式 |
 | --- | --- | --- |
-| DVT | 普通模型文件且 `rpc_mode=false` | `dlcv_infer.dll` / `dlcv_infer_v.dll` 导出的 C 接口 |
+| DVT | 文件后缀既不是 `.dvp`，也不是 `.dvst`/`.dvso`，且 `rpc_mode=false` | `dlcv_infer.dll` / `dlcv_infer_v.dll` 导出的 C 接口 |
+| DVP | 模型路径后缀为 `.dvp` | HTTP，固定服务地址 `http://127.0.0.1:9890` |
 | DVS | 模型路径后缀为 `.dvst` 或 `.dvso` | `DvsModel` + `FlowGraphModel` |
-| 不支持 | 模型路径后缀为 `.dvp` 或 `.dvsp` | 抛出 `NotSupportedException` |
-| RPC | 受支持的普通模型文件且 `rpc_mode=true` | 命名管道 `DlcvModelRpcPipe` + 共享内存 |
+| 不支持 | 模型路径后缀为 `.dvsp` | 抛出 `NotSupportedException` |
+| RPC | `rpc_mode=true` 且不属于 DVP/DVS 后缀 | 命名管道 `DlcvModelRpcPipe` + 共享内存 |
+
+#### DVP 固定接口
+
+`Model` 在 DVP 模式下使用以下固定接口：
+
+- `GET /docs`
+- `GET /version`
+- `POST /load_model`
+- `POST /get_model_info`
+- `POST /api/inference`
+- `POST /free_model`
 
 #### RPC 固定协议
 
@@ -662,20 +675,21 @@ using (var model = ModelFactory.CreateFromIndex(existingIndex))
 
 #### 模型加载规则
 
-- `.dvp`、`.dvsp` 后缀直接返回不支持错误，文件选择窗口仅列出加速后的模型格式。
-- `.dvst`、`.dvso` 后缀进入 DVS 模式。
+- `.dvp` 后缀进入 DVP 模式。
+- `.dvst`、`.dvso` 后缀进入 DVS 模式，`.dvsp` 后缀直接返回不支持错误。
 - 其余后缀在 `rpc_mode=true` 时进入 RPC 模式。
 - 其余情况进入 DVT 模式。
 
 #### 模型缓存
 
-当 `enableCache=true` 且使用普通模型时，缓存键由模型绝对路径的小写规范化值、`device_id` 和运行模式标识 `rpc` / `dvt` 组成；缓存内容保存 `modelIndex`，命中后复用固定的 `DllLoader.Instance`。`ClearModelCache()` 会清空静态模型缓存与加载中集合。DVS 实例还持有执行图和子模型对象，因此忽略 `enableCache`。
+当 `enableCache=true` 且不是 DVS 流程模型时，缓存键由模型绝对路径的小写规范化值、`device_id` 和运行模式标识 `dvp` / `rpc` / `dvt` 组成；缓存内容保存 `modelIndex`，命中后复用固定的 `DllLoader.Instance`。`ClearModelCache()` 会清空静态模型缓存与加载中集合。DVS 实例还持有执行图和子模型对象，因此忽略 `enableCache`，不能只缓存整体 index。
 
 #### 当前实现中的模式差异
 
 | 模式 | 当前行为 |
 | --- | --- |
 | DVT | 通过 `dlcv_load_model`、`dlcv_get_model_info`、`dlcv_infer`、`dlcv_free_model_result`、`dlcv_free_model` 工作 |
+| DVP | 自动检查后端服务；服务不可用时启动 `DLCV Test.exe --keep_alive`；推理请求固定附带 `return_polygon=true` |
 | DVS | 内部创建 `DlcvModules.DvsModel`；直接加载归档时清除遗留 `model_index`，使用包内流程和子模型数据，子模型加载时保存实际 loader。共享恢复才按 `model_bindings` 使用 index，并按实际加载 DLL 查询所属 loader。`GetModelInfo()` 返回普通模型兼容结构，并附加 `loaded_model_meta` 与按模型文件名索引的 `model_info`；`GetDvsModelInfo()` 返回完整流程及全部子模型信息 |
 | RPC | 自动启动 `AIModelRPC.exe`；图像通过共享内存传输；结果中的 mask 可通过共享内存回读 |
 
@@ -684,6 +698,7 @@ using (var model = ModelFactory.CreateFromIndex(existingIndex))
 - 推理前会根据模型信息中解析出的输入通道数完成图像归一化：三通道模型统一转为 `RGB`，单通道模型统一转为灰度；输入若为 16 位、浮点或带符号整型深度，会先转换为 8 位深度。
 - `Infer()` 与 `InferBatch()` 统一返回 `Utils.CSharpResult`。
 - `Model.InferOneOutJson()` 返回单图 JSON 结果数组。
+- DVP 模式下可由 `polygon` 反算 `bbox` 和局部 `Mask`。
 - DVT / RPC 模式下 `mask` 优先从共享内存或 `mask_ptr` 读取。
 - 无 mask 时输出 `{ "height": -1, "mask_ptr": 0, "width": -1 }`。
 - 无监督加速模型当前按实例分割结果契约返回：`task_type=实例分割` 且 `origin_task_type=us`。

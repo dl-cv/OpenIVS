@@ -73,7 +73,7 @@ namespace DlcvDemo
             { "选择模型", "Select Model" },
             { "图片文件 (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif)", "Image Files (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif)" },
             { "选择图片文件", "Select Image" },
-            { "不支持 .dvp 或 .dvsp 模型推理", ".dvp and .dvsp model inference is not supported" },
+            { "不支持 .dvsp 模型推理", ".dvsp model inference is not supported" },
             { "请先加载模型文件！", "Please load a model file first!" },
             { "请先选择图片文件！", "Please select an image file first!" },
             { "图像解码失败！", "Image decoding failed!" },

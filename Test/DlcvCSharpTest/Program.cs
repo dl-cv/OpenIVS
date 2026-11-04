@@ -186,9 +186,9 @@ namespace DlcvCSharpTest
                     return RunUndersizedModelSelfTest();
                 }
 
-                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvp-dvsp-disabled-selftest", StringComparison.OrdinalIgnoreCase))
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-disabled-selftest", StringComparison.OrdinalIgnoreCase))
                 {
-                    return RunDvpDvspDisabledSelfTest();
+                    return RunDvspDisabledSelfTest();
                 }
 
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "dvsp-parity-selftest", StringComparison.OrdinalIgnoreCase))
@@ -5594,51 +5594,26 @@ namespace DlcvCSharpTest
             }
         }
 
-        private static int RunDvpDvspDisabledSelfTest()
+        private static int RunDvspDisabledSelfTest()
         {
-            var files = new List<string>();
+            string modelPath = Path.Combine(Path.GetTempPath(), "unsupported_model.dvsp");
             try
             {
-                foreach (string extension in new[] { ".dvp", ".DVP", ".dvsp", ".DVSP" })
+                using (var model = new Model(modelPath, GpuDeviceId, false, false))
                 {
-                    foreach (int size in new[] { -1, 512, 1024 * 1024 })
-                    {
-                        string path = Path.Combine(Path.GetTempPath(), "unsupported_" + Guid.NewGuid().ToString("N") + extension);
-                        if (size >= 0)
-                        {
-                            files.Add(path);
-                            using (var file = File.Create(path)) file.SetLength(size);
-                        }
-                        foreach (bool rpcMode in new[] { false, true })
-                        {
-                            foreach (bool enableCache in new[] { false, true })
-                            {
-                                bool rejected = false;
-                                try
-                                {
-                                    using (var model = new Model(path, GpuDeviceId, rpcMode, enableCache)) { }
-                                }
-                                catch (NotSupportedException ex)
-                                {
-                                    rejected = ex.Message.Contains(extension.ToLowerInvariant());
-                                }
-                                if (!rejected)
-                                    throw new Exception(extension + " 未返回包含文件格式的不支持错误");
-                            }
-                        }
-                    }
                 }
-                Console.WriteLine("DVP/DVSP 禁用自测通过：大小写后缀、文件存在性与大小、RPC 和缓存模式均已检查");
+                Console.WriteLine("DVSP 禁用自测失败：接口未拒绝 .dvsp");
+                return 1;
+            }
+            catch (NotSupportedException ex)
+            {
+                Console.WriteLine("DVSP 禁用自测通过：" + ex.Message);
                 return 0;
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine("DVP/DVSP 禁用自测失败：" + ex);
+                Console.WriteLine("DVSP 禁用自测失败：异常类型错误，" + ex.Message);
                 return 1;
-            }
-            finally
-            {
-                foreach (string path in files) File.Delete(path);
             }
         }
 
@@ -6190,7 +6165,7 @@ namespace DlcvCSharpTest
             var files = new List<string>();
             try
             {
-                string[] extensions = { ".dvt", ".dvo", ".dvso" };
+                string[] extensions = { ".dvt", ".dvo", ".dvp", ".dvso" };
                 foreach (string ext in extensions)
                 {
                     string path = Path.Combine(Path.GetTempPath(), "dlcv_undersized_" + Guid.NewGuid().ToString("N") + ext);

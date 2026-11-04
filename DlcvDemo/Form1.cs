@@ -332,10 +332,9 @@ namespace DlcvDemo
             {
                 string selectedFilePath = openFileDialog.FileName;
                 string ext = Path.GetExtension(selectedFilePath) ?? "";
-                if (ext.Equals(".dvp", StringComparison.OrdinalIgnoreCase) ||
-                    ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase))
+                if (ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase))
                 {
-                    richTextBox1.Text = "不支持 .dvp 或 .dvsp 模型推理";
+                    richTextBox1.Text = "不支持 .dvsp 模型推理";
                     return;
                 }
                 Properties.Settings.Default.LastModelPath = selectedFilePath;

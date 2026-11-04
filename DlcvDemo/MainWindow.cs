@@ -635,9 +635,8 @@ namespace DlcvDemo
         private void LoadModelFromPath(string selectedFilePath, int? deviceOverride, bool saveLastPath)
         {
             string ext = Path.GetExtension(selectedFilePath) ?? "";
-            if (ext.Equals(".dvp", StringComparison.OrdinalIgnoreCase) ||
-                ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase))
-                throw new NotSupportedException(I18n.T("不支持 .dvp 或 .dvsp 模型推理"));
+            if (ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase))
+                throw new NotSupportedException(I18n.T("不支持 .dvsp 模型推理"));
             ClearResultData();
             if (saveLastPath)
             {

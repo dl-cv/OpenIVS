@@ -87,15 +87,16 @@ namespace dlcv_infer_csharp
         {
             _modelPath = modelPath;
 
+            // 根据模型文件后缀判断是否使用 HTTP 模式
             if (string.IsNullOrEmpty(modelPath))
             {
                 throw new ArgumentException("模型路径不能为空", nameof(modelPath));
             }
 
-            string extension = Path.GetExtension(modelPath).ToLowerInvariant();
-            if (extension == ".dvp" || extension == ".dvsp")
+            string extension = Path.GetExtension(modelPath).ToLower();
+            if (extension == ".dvsp")
             {
-                throw new NotSupportedException($"当前不支持 {extension} 模型，请使用 .dvt、.dvo、.dvst 或 .dvso");
+                throw new NotSupportedException("当前不支持 .dvsp 模型，请使用 .dvst 或 .dvso");
             }
             // DVST 由归档解析器校验文件头及声明长度，不使用普通模型的大小下限。
             if (extension != ".dvst")
