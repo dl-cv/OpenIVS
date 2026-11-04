@@ -133,9 +133,10 @@ namespace DlcvDemo
                     case "--test-mode":
                         if (!string.Equals(value, "infer", StringComparison.OrdinalIgnoreCase)
                             && !string.Equals(value, "infer-json", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(value, "model-dialog", StringComparison.OrdinalIgnoreCase)
                             && !string.Equals(value, "pressure", StringComparison.OrdinalIgnoreCase))
                         {
-                            error = "--test-mode 必须是 infer、infer-json 或 pressure。";
+                            error = "--test-mode 必须是 infer、infer-json、model-dialog 或 pressure。";
                             return false;
                         }
                         options.TestMode = value.ToLowerInvariant();
@@ -264,6 +265,7 @@ namespace DlcvDemo
             Console.Out.WriteLine("--result-view 指定结果区显示汇总或 JSON，默认 summary；切换不重新推理。");
             Console.Out.WriteLine("--save-json 在 infer 或 infer-json 测试中保存完整 JSON，并验证预览、结果切换与保存功能；父目录须已存在。");
             Console.Out.WriteLine("--test-mode=infer-json 复用推理 JSON 按钮生成原始 JSON 结果。");
+            Console.Out.WriteLine("--test-mode=model-dialog 仅打开正式模型选择窗口供隔离采集，30 秒后退出；不加载模型或初始化设备。");
             Console.Out.WriteLine("--capture-delay-ms 在结果生成后保持正式窗口消息循环，供隔离桌面采集完整窗口；默认 0。");
             Console.Out.WriteLine("--test-mode=pressure 时运行压力测试并保存统计界面，时长默认 2000ms。");
         }

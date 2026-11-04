@@ -23,6 +23,11 @@ namespace DlcvTest
 
         internal static async Task<int> RunAsync(string[] args)
         {
+            if (args != null && args.Length == 3 && args[1] == "--model-dialog")
+            {
+                MainWindow.RunModelDialogTest(args[2]);
+                return 0;
+            }
             bool balloonWithThreshold = args != null && args.Length == 9 &&
                 string.Equals(args[5], "--threshold", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(args[7], "--output", StringComparison.OrdinalIgnoreCase);
@@ -119,6 +124,24 @@ namespace DlcvTest
     public partial class MainWindow
     {
         private sealed class SelfTestWindowMarker { }
+
+        internal static void RunModelDialogTest(string modelPath)
+        {
+            string originalPath = Properties.Settings.Default.LastModelPath;
+            var window = new MainWindow(new SelfTestWindowMarker());
+            try
+            {
+                Properties.Settings.Default.LastModelPath = modelPath;
+                window.Show();
+                Task.Delay(30000).ContinueWith(task => Environment.Exit(0));
+                window.btnSelectModel_Click(window, new System.Windows.RoutedEventArgs());
+            }
+            finally
+            {
+                Properties.Settings.Default.LastModelPath = originalPath;
+                window.Close();
+            }
+        }
 
         private MainWindow(SelfTestWindowMarker marker)
         {

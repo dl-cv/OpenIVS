@@ -320,6 +320,11 @@ namespace DlcvDemo
 
         private void MainWindow_Shown(object sender, EventArgs e)
         {
+            if (uiTestOptions?.TestMode == "model-dialog")
+            {
+                BeginInvoke(new Action(RunModelDialogTest));
+                return;
+            }
             Thread thread = new Thread(InitializeDeviceAndUiTest);
             thread.IsBackground = true;
             thread.Start();
