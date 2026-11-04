@@ -16,6 +16,7 @@
 
 #include "MainWindow.h"
 #include "dlcv_infer.h"
+#include "../Test/qt_demo/ModelDialogTest.h"
 
 namespace {
 
@@ -109,7 +110,8 @@ int runCommandLine(int argc, char* argv[]) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    if (argc > 1) {
+    const bool modelDialogTest = argc == 4 && std::string(argv[1]) == "--model-dialog-test";
+    if (argc > 1 && !modelDialogTest) {
         return runCommandLine(argc, argv);
     }
 
@@ -117,11 +119,15 @@ int main(int argc, char* argv[]) {
     app.setApplicationName("C++测试程序2");
     app.setOrganizationName("dlcv");
     app.setFont(QFont("Microsoft YaHei", 9));
+    if (modelDialogTest)
+        model_dialog_test::prepare(QString::fromLocal8Bit(argv[2]));
     QObject::connect(&app, &QCoreApplication::aboutToQuit, []() {
         dlcv_infer::Utils::FreeAllModels();
     });
 
     MainWindow w;
     w.show();
+    if (modelDialogTest)
+        model_dialog_test::open(w, QString::fromLocal8Bit(argv[3]));
     return app.exec();
 }

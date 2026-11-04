@@ -137,7 +137,7 @@ namespace DlcvTest
             OpenFileDialog openFileDialog = new OpenFileDialog()
             {
                 Title = "选择模型",
-                Filter = "深度视觉模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件 (*.*)|*.*",
+                Filter = "深度视觉模型 (*.dvt;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvo;*.dvst;*.dvso|所有文件 (*.*)|*.*",
                 CheckFileExists = true
             };
             try

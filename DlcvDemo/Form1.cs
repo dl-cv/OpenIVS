@@ -316,7 +316,7 @@ namespace DlcvDemo
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.RestoreDirectory = true;
 
-            openFileDialog.Filter = "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso|所有文件 (*.*)|*.*";
+            openFileDialog.Filter = "AI模型 (*.dvt;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvo;*.dvst;*.dvso|所有文件 (*.*)|*.*";
             openFileDialog.Title = "选择模型";
             try
             {

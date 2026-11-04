@@ -531,8 +531,8 @@ namespace DlcvCamDemo
 
             using (OpenFileDialog openFileDialog = new OpenFileDialog())
             {
-                openFileDialog.Filter = "DVP/DVT/DVST 模型文件 (*.dvp, *.dvt, *.dvst)|*.dvp;*.dvt;*.dvst";
-                openFileDialog.Title = "选择推理模型文件（支持 dvp/dvt/dvst）";
+                openFileDialog.Filter = "DVT/DVST 模型文件 (*.dvt, *.dvst)|*.dvt;*.dvst";
+                openFileDialog.Title = "选择推理模型文件（支持 dvt/dvst）";
                 openFileDialog.InitialDirectory = !string.IsNullOrEmpty(Properties.Settings.Default.LastApiFolder)
                     ? Properties.Settings.Default.LastApiFolder
                     : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);

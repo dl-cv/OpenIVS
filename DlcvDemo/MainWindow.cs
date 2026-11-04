@@ -320,6 +320,11 @@ namespace DlcvDemo
 
         private void MainWindow_Shown(object sender, EventArgs e)
         {
+            if (uiTestOptions?.TestMode == "model-dialog")
+            {
+                BeginInvoke(new Action(RunModelDialogTest));
+                return;
+            }
             Thread thread = new Thread(InitializeDeviceAndUiTest);
             thread.IsBackground = true;
             thread.Start();
@@ -607,7 +612,7 @@ namespace DlcvDemo
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.RestoreDirectory = true;
 
-            openFileDialog.Filter = I18n.T("AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso)") + "|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso|" + I18n.T("所有文件 (*.*)") + "|*.*";
+            openFileDialog.Filter = I18n.T("AI模型 (*.dvt;*.dvo;*.dvst;*.dvso)") + "|*.dvt;*.dvo;*.dvst;*.dvso|" + I18n.T("所有文件 (*.*)") + "|*.*";
             openFileDialog.Title = I18n.T("选择模型");
             try
             {

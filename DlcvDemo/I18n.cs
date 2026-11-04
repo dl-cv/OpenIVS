@@ -68,7 +68,7 @@ namespace DlcvDemo
             { "（{0}个）：", "({0}): " },
             { "模型: ", "Model: " },
             { "图片: ", "Image: " },
-            { "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso)", "AI Model (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso)" },
+            { "AI模型 (*.dvt;*.dvo;*.dvst;*.dvso)", "AI Model (*.dvt;*.dvo;*.dvst;*.dvso)" },
             { "所有文件 (*.*)", "All Files (*.*)" },
             { "选择模型", "Select Model" },
             { "图片文件 (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif)", "Image Files (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tiff;*.tif)" },

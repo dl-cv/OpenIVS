@@ -174,6 +174,13 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 
 ## 6. 构建与运行
 
+文件筛选截图使用同一目录中的 `.dvp/.dvsp/.dvt/.dvo/.dvst/.dvso` 样本，样本仅用于文件列表显示：
+- `DlcvDemo.exe ui-test --model <样本.dvt> --image <样本.png> --output <结果.json> --interactive-dialogs false --language zh-CN --test-mode model-dialog` 打开正式模型选择窗口，跳过设备初始化。
+- `DlcvTest.exe selftest --model-dialog <样本.dvt>` 使用隔离自测窗口打开正式模型选择窗口。
+- `dlcv_infer_cpp_qt_demo2.exe --model-dialog-test <样本目录> <结果.json>` 使用隔离 INI 打开元件提取模型选择窗口，输出实际筛选。
+
+这三个入口在 30 秒后退出；通过不可见桌面采集器读取实际窗口，保留完整原生标题栏与文件筛选区。
+
 - 产品打包使用根目录 `1_编译打包.bat`，仅构建 C# 发布所需项目，不构建控制台回归测试。
 - 在 Visual Studio 中构建所需的 C++、C、C# 测试工程，再按需要运行以下测试命令。
 - `DlcvCSharpTest` 以仅构建方式引用 `DlcvDemo`、`DlcvDemo2`。构建控制台测试工程时同步生成反射自测需要的两个程序；Demo 程序集不作为测试工程的编译引用。
