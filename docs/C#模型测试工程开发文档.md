@@ -221,7 +221,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `dvs-rgb-selftest <modelPath> <imagePath> [require-preserved-mask]`
   - `dvs-memory-loading-selftest <modelPath> <imagePath> [device]`
   - `dvsp-reject-selftest <modelPath> [device]`
-  - `undersized-model-selftest`：在临时目录生成小于 1MB 的 `.dvt/.dvo/.dvp/.dvso`，检查返回损坏/不完整错误；另验证小型合法 `.dvst` 可加载，损坏文件头、清单和长度被拒绝；`.dvsp` 仍返回不支持
+  - `undersized-model-selftest`：在临时目录生成小于 1MB 的 `.dvt/.dvo/.dvso`，检查返回损坏/不完整错误；另验证小型合法 `.dvst` 可加载，损坏文件头、清单和长度被拒绝；`.dvsp` 仍返回不支持
   - `create-model-from-index-selftest <modelPath> [device]`
 - `dlcv_infer_cpp_test.exe sliding-merge-selftest` 为无模型回归，覆盖带滑窗元信息的单窗口小数框、正负半整数取整、多窗口合并框和分组首次出现顺序。
 - `create-model-from-index-selftest` 检查 C++ 头文件内联辅助函数创建时增加 index 使用次数、对象释放时减少使用次数；流程模型还会检查 `FreeAllModels()` 清空模型池、旧流程对象在底层释放失败后完成本地清理，以及相同流程能够重新加载。
@@ -244,7 +244,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 - `shared-index-review-selftest` 使用实际普通模型与 DVST 检查两个共享方生命周期、DVS 子模型持有、最终释放、`Utils.GetAllModels()` 模块快照和列表查询不额外加载 DLL。
 - `free-all-modules-selftest` 显式使用两个已加载推理模块，确认相同编号仍分别保留在各自模块快照中，并由 `Utils.FreeAllModels()` 清理全部模块。
 - DVS 使用与普通模型相同的非负 `model_index`。恢复时先调用 `dlcv_bind_index`，再读取 `dlcv_get_dvs_model` 描述并创建 C# 执行对象；失败和正常释放均使用普通 `dlcv_free_model` 配对。`GetModelInfo()` 保持普通模型兼容结构，`GetDvsModelInfo()` 返回完整 DVS 信息。
-- `dvsp-disabled-selftest` 检查 C# API 对 `.dvsp` 直接返回不支持错误。
+- `dvp-dvsp-disabled-selftest` 检查 C# API 拒绝 `.dvp`、`.dvsp`：覆盖大小写后缀、不存在及 512 字节和 1MB 文件、RPC 与缓存开关组合，均须抛出带有对应后缀的 `NotSupportedException`。
 
 说明：
 

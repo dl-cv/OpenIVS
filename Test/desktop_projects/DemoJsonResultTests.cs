@@ -76,21 +76,24 @@ namespace DlcvDemo
                     && ReferenceEquals(lastJsonText, originalJson)
                     && ReferenceEquals(lastSummaryText, originalSummary), "结果切换改变了推理缓存。");
 
-                bool unsupportedModelRejected = false;
                 object originalModel = model;
-                try
+                foreach (string extension in new[] { ".dvp", ".DVP", ".dvsp", ".DVSP" })
                 {
-                    LoadModelFromPath(temporaryPrefix + ".dvsp", uiTestOptions.DeviceId, false);
+                    bool unsupportedModelRejected = false;
+                    try
+                    {
+                        LoadModelFromPath(temporaryPrefix + extension, uiTestOptions.DeviceId, false);
+                    }
+                    catch (NotSupportedException)
+                    {
+                        unsupportedModelRejected = true;
+                    }
+                    RequireJsonCheck(unsupportedModelRejected && ReferenceEquals(lastJsonText, originalJson)
+                        && ReferenceEquals(lastSummaryText, originalSummary) && ReferenceEquals((object)model, originalModel)
+                        && model_path == originalModelPath && image_path == originalImagePath
+                        && showJsonResult && richTextBox1.Text == preview && button_save_json.Enabled,
+                        "不支持的模型格式改变了原结果或已加载模型。");
                 }
-                catch (NotSupportedException)
-                {
-                    unsupportedModelRejected = true;
-                }
-                RequireJsonCheck(unsupportedModelRejected && ReferenceEquals(lastJsonText, originalJson)
-                    && ReferenceEquals(lastSummaryText, originalSummary) && ReferenceEquals((object)model, originalModel)
-                    && model_path == originalModelPath && image_path == originalImagePath
-                    && showJsonResult && richTextBox1.Text == preview && button_save_json.Enabled,
-                    "不支持的模型格式改变了原结果或已加载模型。");
 
                 var samples = new[]
                 {

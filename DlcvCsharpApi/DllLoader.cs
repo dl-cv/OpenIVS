@@ -659,10 +659,8 @@ namespace dlcv_infer_csharp
                 throw new ArgumentException("模型路径不能为空", nameof(modelPath));
 
             string ext = Path.GetExtension(modelPath).ToLower();
-            if (ext == ".dvp")
-                throw new NotSupportedException("DVP 模式不通过 header 解析 provider");
-            if (ext == ".dvsp")
-                throw new NotSupportedException("不支持 .dvsp 模型推理");
+            if (ext == ".dvp" || ext == ".dvsp")
+                throw new NotSupportedException($"不支持 {ext} 模型推理");
             if (ext == ".dvst" || ext == ".dvso")
                 throw new NotSupportedException("DVS 模式在子模型加载时解析 header provider");
 

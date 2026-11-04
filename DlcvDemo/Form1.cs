@@ -316,7 +316,7 @@ namespace DlcvDemo
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.RestoreDirectory = true;
 
-            openFileDialog.Filter = "AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso|所有文件 (*.*)|*.*";
+            openFileDialog.Filter = "AI模型 (*.dvt;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvo;*.dvst;*.dvso|所有文件 (*.*)|*.*";
             openFileDialog.Title = "选择模型";
             try
             {
@@ -332,9 +332,10 @@ namespace DlcvDemo
             {
                 string selectedFilePath = openFileDialog.FileName;
                 string ext = Path.GetExtension(selectedFilePath) ?? "";
-                if (ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase))
+                if (ext.Equals(".dvp", StringComparison.OrdinalIgnoreCase) ||
+                    ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase))
                 {
-                    richTextBox1.Text = "不支持 .dvsp 模型推理";
+                    richTextBox1.Text = "不支持 .dvp 或 .dvsp 模型推理";
                     return;
                 }
                 Properties.Settings.Default.LastModelPath = selectedFilePath;

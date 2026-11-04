@@ -143,7 +143,7 @@ namespace OpenIVS2
             var dialog = new OpenFileDialog
             {
                 Title = "选择 " + camera.Name + " 的模型",
-                Filter = "DLCV 模型|*.dvt;*.dvo;*.dvst;*.dvso;*.dvsp|所有文件|*.*",
+                Filter = "DLCV 模型|*.dvt;*.dvo;*.dvst;*.dvso|所有文件|*.*",
                 FileName = camera.ModelPath
             };
             if (dialog.ShowDialog(this) == true)

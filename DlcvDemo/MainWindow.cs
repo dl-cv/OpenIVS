@@ -607,7 +607,7 @@ namespace DlcvDemo
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.RestoreDirectory = true;
 
-            openFileDialog.Filter = I18n.T("AI模型 (*.dvt;*.dvp;*.dvo;*.dvst;*.dvso)") + "|*.dvt;*.dvp;*.dvo;*.dvst;*.dvso|" + I18n.T("所有文件 (*.*)") + "|*.*";
+            openFileDialog.Filter = I18n.T("AI模型 (*.dvt;*.dvo;*.dvst;*.dvso)") + "|*.dvt;*.dvo;*.dvst;*.dvso|" + I18n.T("所有文件 (*.*)") + "|*.*";
             openFileDialog.Title = I18n.T("选择模型");
             try
             {
@@ -635,8 +635,9 @@ namespace DlcvDemo
         private void LoadModelFromPath(string selectedFilePath, int? deviceOverride, bool saveLastPath)
         {
             string ext = Path.GetExtension(selectedFilePath) ?? "";
-            if (ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase))
-                throw new NotSupportedException(I18n.T("不支持 .dvsp 模型推理"));
+            if (ext.Equals(".dvp", StringComparison.OrdinalIgnoreCase) ||
+                ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase))
+                throw new NotSupportedException(I18n.T("不支持 .dvp 或 .dvsp 模型推理"));
             ClearResultData();
             if (saveLastPath)
             {
