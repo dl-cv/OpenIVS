@@ -12,9 +12,8 @@
 
 C++ 不链接上游 C++ ABI；从本模块目录延迟加载 DLL。返回对象以对应 `ZXing_*_delete` 释放，字符串与格式数组以 `ZXing_free` 释放，`Barcodes_at` 是借用指针。C# 使用官方包装器，reader/barcode 及时 Dispose，ImageView 遵循上游终结器并保持像素所有者存活。
 
-## 许可证随运行时分发
+## 许可证文件
 
-`LICENSE.txt` 为上游 Apache-2.0，输出为 `ZXing-LICENSE.txt`。
-`NOTICE.txt` 保留 C ABI 作者、libzueci、libzint BSD-3-Clause 和随上游写码器包含的字体声明，输出为 `ZXing-NOTICE.txt`。上游发布 workflow 默认编入 writers；本功能不调用写码也不能因此漏掉随二进制分发的声明。libzint 使用的只是 BSD backend，不引入其 GPL 前端或 Qt 应用。
+`LICENSE.txt` 为上游 Apache-2.0；`NOTICE.txt` 保留 C ABI 作者、libzueci、libzint BSD-3-Clause 和随上游写码器包含的字体声明。两个文件保留在本目录，工程构建和 wheel 打包不复制到输出目录。
 
-所有复制与打包入口同步携带这两个文本；不把 NuGet 整包、多平台库或研究时下载的源码归档提交/发布。
+运行库仍按工程依赖复制 `ZXing.dll` 和 C# 包装库 `ZXingCpp.dll`。
