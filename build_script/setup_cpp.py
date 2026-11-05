@@ -3,7 +3,7 @@ import shutil
 
 from setuptools import setup
 
-version = '2026.11.5.0a0'
+version = '2026.11.5.1a0'
 
 package_name = "dlcvpro_infer_cpp"
 

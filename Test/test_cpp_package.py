@@ -131,7 +131,7 @@ class PackageMetadataTest(unittest.TestCase):
                 os.chdir(previous)
             metadata = setup.call_args.kwargs
             self.assertEqual(metadata["name"], "dlcvpro_infer_cpp")
-            self.assertEqual(metadata["version"], "2026.11.5.0a0")
+            self.assertEqual(metadata["version"], "2026.11.5.1a0")
             for name in ("build", "dist", "dlcvpro_infer_csharp"):
                 self.assertTrue((root / name / "keep.txt").is_file())
 
