@@ -15,22 +15,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class CppPackageFilesTest(unittest.TestCase):
-    def test_stages_only_required_demo_files_and_reuses_shared_opencv(self):
+    def test_stages_only_required_demo_files_and_reuses_shared_runtime(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             output = root / "output"
             staging = root / "dlcvpro_infer_cpp"
             output.mkdir()
-            required = {"dlcv_infer_cpp.dll", "ZXing.dll", "Qt6Core.dll", "Qt6Gui.dll",
-                        "Qt6Widgets.dll", "platforms/qwindows.dll", "styles/qmodernwindowsstyle.dll"}
+            required = {"dlcv_infer_cpp.dll", "ZXing.dll"}
             extras = {"old.pdb", "opencv_world4100.dll", "opengl32sw.dll", "dxcompiler.dll",
-                      "D3Dcompiler_47.dll", "Qt6Network.dll", "imageformats/qjpeg.dll", "Qt6Svg.dll"}
+                      "D3Dcompiler_47.dll", "Qt6Network.dll", "imageformats/qjpeg.dll", "Qt6Svg.dll",
+                      "Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "platforms/qwindows.dll",
+                      "styles/qmodernwindowsstyle.dll"}
             for name in required | extras | {"dlcv_infer_cpp_qt_demo.exe"}:
                 target = output / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(name.encode())
-            opencv = root / "opencv_world4100.dll"
-            opencv.write_bytes(b"opencv")
+            runtime = root / "shared"
+            runtime.mkdir()
+            for name in ("opencv_world4100.dll", "Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll",
+                         "qwindows.dll", "styles/qmodernwindowsstyle.dll"):
+                target = runtime / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b"shared runtime")
             (root / "hasp_26146.ini").write_bytes(b"config")
             staging.mkdir()
             (staging / "old.dll").touch()
@@ -39,7 +45,7 @@ class CppPackageFilesTest(unittest.TestCase):
                 patch.object(build_package, "REPO_ROOT", root),
                 patch.object(build_package, "CPP_DEMO_OUTPUT_DIR", output),
                 patch.object(build_package, "CPP_STAGING_DIR", staging),
-                patch.object(build_package, "CPP_SHARED_OPENCV_DLL", opencv),
+                patch.object(build_package, "CPP_SHARED_RUNTIME_DIR", runtime),
                 patch.object(build_package, "run_step") as run_step,
             ):
                 executables = build_package.copy_cpp_package_files()
@@ -50,7 +56,8 @@ class CppPackageFilesTest(unittest.TestCase):
                     required | {"C++ 测试程序.exe", "hasp_26146.ini"},
                 )
                 run_step.assert_not_called()
-                for missing in (opencv, output / "ZXing.dll", output / "platforms/qwindows.dll"):
+                for missing in (runtime / "opencv_world4100.dll", runtime / "Qt6Core.dll",
+                                runtime / "qwindows.dll", runtime / "styles/qmodernwindowsstyle.dll", output / "ZXing.dll"):
                     with self.subTest(missing=missing.name):
                         content = missing.read_bytes()
                         missing.unlink()
@@ -72,6 +79,7 @@ class CppPackageFilesTest(unittest.TestCase):
 
     def test_cpp_build_scope_and_install_use_generated_wheel(self):
         wheel = ROOT / "dist_cpp" / "generated.whl"
+        original_shared_mode = os.environ.get("DlcvUseSharedQt")
         with (
             patch.object(build_package, "parse_args", return_value=argparse.Namespace(install=True, package="cpp")),
             patch.object(build_package.os, "chdir"),
@@ -92,6 +100,8 @@ class CppPackageFilesTest(unittest.TestCase):
         build_call = next(call for call in run_step.call_args_list if call.args[1][1:3] == ["-m", "build"])
         self.assertEqual(build_call.kwargs["env"]["DLCV_PACKAGE_VARIANT"], "cpp")
         self.assertIn("--no-isolation", build_call.args[1])
+        self.assertEqual(run_step.call_args_list[0].kwargs["env"]["DlcvUseSharedQt"], "true")
+        self.assertEqual(os.environ.get("DlcvUseSharedQt"), original_shared_mode)
         self.assertEqual(commands[-1][-1], str(wheel))
 
     def test_cpp_build_failure_returns_status_before_copying(self):
@@ -107,13 +117,12 @@ class CppPackageFilesTest(unittest.TestCase):
 
 
 class PackageMetadataTest(unittest.TestCase):
-    def test_cpp_metadata_includes_nested_plugins_and_preserves_csharp_outputs(self):
+    def test_cpp_metadata_preserves_csharp_outputs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             package = root / "dlcvpro_infer_cpp"
-            (package / "platforms").mkdir(parents=True)
+            package.mkdir()
             (package / "C++ 测试程序.exe").touch()
-            (package / "platforms" / "qwindows.dll").touch()
             for name in ("build", "dist", "dlcvpro_infer_csharp"):
                 (root / name).mkdir()
                 (root / name / "keep.txt").touch()
@@ -127,8 +136,6 @@ class PackageMetadataTest(unittest.TestCase):
             metadata = setup.call_args.kwargs
             self.assertEqual(metadata["name"], "dlcvpro_infer_cpp")
             self.assertEqual(metadata["version"], "2026.11.5.0a0")
-            self.assertEqual(set(metadata["package_data"]["dlcvpro_infer_cpp"]),
-                             {"C++ 测试程序.exe", "platforms/qwindows.dll"})
             for name in ("build", "dist", "dlcvpro_infer_csharp"):
                 self.assertTrue((root / name / "keep.txt").is_file())
 

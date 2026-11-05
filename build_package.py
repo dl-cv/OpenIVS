@@ -38,17 +38,16 @@ PACKAGE_OUTPUT_FILE_NAMES = (
 SIGNED_EXE_NAMES = (DEMO_EXE_NAME, RPC_EXE_NAME)
 CPP_PACKAGE_NAME = "dlcvpro_infer_cpp"
 CPP_STAGING_DIR = REPO_ROOT / CPP_PACKAGE_NAME
-CPP_DEMO_OUTPUT_DIR = REPO_ROOT / "dlcv_infer_cpp_qt_demo" / "Release" / "dlcv_infer_cpp_qt_demo"
+CPP_DEMO_OUTPUT_DIR = REPO_ROOT / "temp" / "cpp-qt-shared"
 CPP_DEMO_EXE_NAME = "C++ 测试程序.exe"
-CPP_SHARED_OPENCV_DLL = Path(r"C:\dlcv\bin\opencv_world4100.dll")
+CPP_SHARED_RUNTIME_DIR = Path(r"C:\dlcv\bin")
+CPP_SHARED_FILE_NAMES = (
+    "opencv_world4100.dll", "Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll",
+    "qwindows.dll", "styles/qmodernwindowsstyle.dll",
+)
 CPP_OUTPUT_FILE_NAMES = (
     "dlcv_infer_cpp.dll",
     "ZXing.dll",
-    "Qt6Core.dll",
-    "Qt6Gui.dll",
-    "Qt6Widgets.dll",
-    "platforms/qwindows.dll",
-    "styles/qmodernwindowsstyle.dll",
 )
 SIGNTOOL_PATH = Path(r"C:\sign-tool\signtool.exe")
 SIGN_CERT_SUBJECT = "深度视觉（广东）人工智能研究有限公司"
@@ -185,7 +184,7 @@ def copy_cpp_package_files() -> list[Path]:
         **{name: CPP_DEMO_OUTPUT_DIR / name for name in CPP_OUTPUT_FILE_NAMES},
         "hasp_26146.ini": REPO_ROOT / "hasp_26146.ini",
     }
-    for source in (*sources.values(), CPP_SHARED_OPENCV_DLL):
+    for source in (*sources.values(), *(CPP_SHARED_RUNTIME_DIR / name for name in CPP_SHARED_FILE_NAMES)):
         require_file(source)
     rebuild_staging_directory(CPP_STAGING_DIR, CPP_PACKAGE_NAME)
     for name, source in sources.items():
@@ -254,6 +253,7 @@ def main() -> int:
                 "--verbosity",
                 "minimal",
             ],
+            env={**os.environ, "DlcvUseSharedQt": "true"} if is_cpp else None,
         )
 
         signed_executables = copy_cpp_package_files() if is_cpp else copy_package_files()

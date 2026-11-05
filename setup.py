@@ -1,7 +1,6 @@
 import os
 import re
 import shutil
-from pathlib import Path
 
 from setuptools import setup
 
@@ -16,11 +15,6 @@ build_dir = "build_cpp" if variant == "cpp" else "build"
 dist_dir = "dist_cpp" if variant == "cpp" else "dist"
 packages: list = [package_name]  # 需要打包的包
 package_data: dict[str:list] = {package_name: ["*"]}  # 哪个包需要打包哪些资源文件
-if variant == "cpp":
-    package_data[package_name] = [
-        path.relative_to(package_name).as_posix()
-        for path in Path(package_name).rglob("*") if path.is_file()
-    ]
 
 
 def main():
