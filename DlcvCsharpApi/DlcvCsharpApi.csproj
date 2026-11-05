@@ -123,14 +123,6 @@
       <Link>ZXing.dll</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Content Include="..\third_party\zxing-cpp\LICENSE.txt">
-      <Link>ZXing-LICENSE.txt</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="..\third_party\zxing-cpp\NOTICE.txt">
-      <Link>ZXing-NOTICE.txt</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
     <None Include="app.config" />
     <None Include="packages.config" />
   </ItemGroup>
