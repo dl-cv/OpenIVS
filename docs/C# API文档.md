@@ -2,6 +2,8 @@
 
 **文档定位**：记录 `DlcvCsharpApi` 的工程结构、依赖、固定加载路径、运行模式与 C# 对外接口。所有内容以当前源码实现为准。
 
+流程新增 `post_process/base_region_extract` 与 `post_process/bbox_edge_distance`。底座检测使用标准 XYWH 框；边距模块输出两个原图检测框及图片级原因、`extra_info.edge_distances`，诊断 `bbox_1/bbox_2` 为 XYXY。属性与坐标约定见 [模块标准 6.4.3](模块、流程与模型推理标准文档.md#643-底座区域与检测框边距)。
+
 ---
 
 ## 1. 项目结构

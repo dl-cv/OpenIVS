@@ -62,6 +62,7 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="AlgorithmModulesSelfTest.cpp" />
+    <ClCompile Include="BaseEdgeSelfTest.cpp" />
     <ClCompile Include="..\common\NativeSharedIndexTestHelper.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\CurveTextAffineModule.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\FeatureModules.cpp" />
@@ -69,6 +70,7 @@
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\PostProcessModules.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\ForegroundBackgroundStatisticsModule.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\AlgorithmModules.cpp" />
+    <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\BaseRegionExtractModule.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\OutputModules.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\BarcodeReaderModule.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\SlidingModules.cpp" />

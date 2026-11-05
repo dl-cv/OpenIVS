@@ -49,6 +49,7 @@
 #include "MaskAreaSelfTest.h"
 #include "SlidingMergeSelfTest.h"
 #include "AlgorithmModulesSelfTest.h"
+#include "BaseEdgeSelfTest.h"
 #include "../common/NativeSharedIndexTestHelper.h"
 
 namespace {
@@ -5525,6 +5526,8 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunCountResultsSelfTest();
     }
 
+
+    if (argc >= 2 && std::wstring(argv[1]) == L"base-edge-selftest") return RunBaseEdgeSelfTest(argc, argv);
 
     if (argc >= 2 && std::wstring(argv[1]) == L"algorithm-modules-selftest") {
         return RunAlgorithmModulesSelfTest();
