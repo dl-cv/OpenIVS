@@ -40,7 +40,16 @@ CPP_PACKAGE_NAME = "dlcvpro_infer_cpp"
 CPP_STAGING_DIR = REPO_ROOT / CPP_PACKAGE_NAME
 CPP_DEMO_OUTPUT_DIR = REPO_ROOT / "dlcv_infer_cpp_qt_demo" / "Release" / "dlcv_infer_cpp_qt_demo"
 CPP_DEMO_EXE_NAME = "C++ 测试程序.exe"
-CPP_OPENCV_DLL = Path(r"C:\OpenCV\build\x64\vc16\bin\opencv_world4100.dll")
+CPP_SHARED_OPENCV_DLL = Path(r"C:\dlcv\bin\opencv_world4100.dll")
+CPP_OUTPUT_FILE_NAMES = (
+    "dlcv_infer_cpp.dll",
+    "ZXing.dll",
+    "Qt6Core.dll",
+    "Qt6Gui.dll",
+    "Qt6Widgets.dll",
+    "platforms/qwindows.dll",
+    "styles/qmodernwindowsstyle.dll",
+)
 SIGNTOOL_PATH = Path(r"C:\sign-tool\signtool.exe")
 SIGN_CERT_SUBJECT = "深度视觉（广东）人工智能研究有限公司"
 TIMESTAMP_URL = "http://time.certum.pl"
@@ -171,36 +180,19 @@ def copy_package_files() -> list[Path]:
 
 
 def copy_cpp_package_files() -> list[Path]:
-    qt_dir = os.environ.get("Qt6_DIR")
-    if not qt_dir:
-        raise RuntimeError("请设置 Qt6_DIR 为 Qt MSVC x64 安装目录中的 lib/cmake")
-    qt_bin = Path(qt_dir).resolve().parents[1] / "bin"
-    deploy_tool = qt_bin / "windeployqt.exe"
-    qtpaths = qt_bin / "qtpaths.exe"
     sources = {
         CPP_DEMO_EXE_NAME: CPP_DEMO_OUTPUT_DIR / "dlcv_infer_cpp_qt_demo.exe",
-        "dlcv_infer_cpp.dll": CPP_DEMO_OUTPUT_DIR / "dlcv_infer_cpp.dll",
-        "ZXing.dll": CPP_DEMO_OUTPUT_DIR / "ZXing.dll",
-        CPP_OPENCV_DLL.name: CPP_OPENCV_DLL,
+        **{name: CPP_DEMO_OUTPUT_DIR / name for name in CPP_OUTPUT_FILE_NAMES},
         "hasp_26146.ini": REPO_ROOT / "hasp_26146.ini",
     }
-    for source in (*sources.values(), deploy_tool, qtpaths):
+    for source in (*sources.values(), CPP_SHARED_OPENCV_DLL):
         require_file(source)
     rebuild_staging_directory(CPP_STAGING_DIR, CPP_PACKAGE_NAME)
     for name, source in sources.items():
-        shutil.copy2(source, CPP_STAGING_DIR / name)
-    executable = CPP_STAGING_DIR / CPP_DEMO_EXE_NAME
-    qt_env = os.environ.copy()
-    qt_env["PATH"] = str(qt_bin) + os.pathsep + qt_env.get("PATH", "")
-    run_step(
-        "部署 Qt 运行库及插件",
-        [str(deploy_tool), "--release", "--no-translations", "--no-compiler-runtime",
-         "--qtpaths", str(qtpaths), str(executable)],
-        env=qt_env,
-    )
-    for name in ("Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "platforms/qwindows.dll"):
-        require_file(CPP_STAGING_DIR / name)
-    return [executable]
+        destination = CPP_STAGING_DIR / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+    return [CPP_STAGING_DIR / CPP_DEMO_EXE_NAME]
 
 
 def snapshot_wheels(dist_dir: Path | None = None) -> dict[Path, tuple[int, int, int]]:

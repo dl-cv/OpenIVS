@@ -15,56 +15,49 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class CppPackageFilesTest(unittest.TestCase):
-    def test_stages_native_program_and_deploys_matching_qt(self):
+    def test_stages_only_required_demo_files_and_reuses_shared_opencv(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             output = root / "output"
             staging = root / "dlcvpro_infer_cpp"
-            qt = root / "Qt" / "lib" / "cmake"
-            qt_bin = root / "Qt" / "bin"
             output.mkdir()
-            qt.mkdir(parents=True)
-            qt_bin.mkdir()
-            for name in ("dlcv_infer_cpp_qt_demo.exe", "dlcv_infer_cpp.dll", "ZXing.dll", "old.pdb"):
-                (output / name).write_bytes(name.encode())
-            for name in ("windeployqt.exe", "qtpaths.exe"):
-                (qt_bin / name).touch()
+            required = {"dlcv_infer_cpp.dll", "ZXing.dll", "Qt6Core.dll", "Qt6Gui.dll",
+                        "Qt6Widgets.dll", "platforms/qwindows.dll", "styles/qmodernwindowsstyle.dll"}
+            extras = {"old.pdb", "opencv_world4100.dll", "opengl32sw.dll", "dxcompiler.dll",
+                      "D3Dcompiler_47.dll", "Qt6Network.dll", "imageformats/qjpeg.dll", "Qt6Svg.dll"}
+            for name in required | extras | {"dlcv_infer_cpp_qt_demo.exe"}:
+                target = output / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(name.encode())
             opencv = root / "opencv_world4100.dll"
             opencv.write_bytes(b"opencv")
             (root / "hasp_26146.ini").write_bytes(b"config")
             staging.mkdir()
             (staging / "old.dll").touch()
 
-            def deploy(name, command, env):
-                self.assertEqual(Path(command[0]), qt_bin / "windeployqt.exe")
-                self.assertEqual(Path(command[-1]), staging / "C++ 测试程序.exe")
-                self.assertIn("--release", command)
-                self.assertEqual(env["PATH"].split(os.pathsep)[0], str(qt_bin))
-                for name in ("Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "platforms/qwindows.dll"):
-                    target = staging / name
-                    target.parent.mkdir(exist_ok=True)
-                    target.write_bytes(b"qt")
-
             with (
                 patch.object(build_package, "REPO_ROOT", root),
                 patch.object(build_package, "CPP_DEMO_OUTPUT_DIR", output),
                 patch.object(build_package, "CPP_STAGING_DIR", staging),
-                patch.object(build_package, "CPP_OPENCV_DLL", opencv),
-                patch.dict(os.environ, {"Qt6_DIR": str(qt)}),
-                patch.object(build_package, "run_step", side_effect=deploy),
+                patch.object(build_package, "CPP_SHARED_OPENCV_DLL", opencv),
+                patch.object(build_package, "run_step") as run_step,
             ):
                 executables = build_package.copy_cpp_package_files()
                 self.assertEqual(executables, [staging / "C++ 测试程序.exe"])
                 self.assertEqual((staging / "C++ 测试程序.exe").read_bytes(), b"dlcv_infer_cpp_qt_demo.exe")
                 self.assertEqual(
                     {p.relative_to(staging).as_posix() for p in staging.rglob("*") if p.is_file()},
-                    {"C++ 测试程序.exe", "dlcv_infer_cpp.dll", "ZXing.dll", "opencv_world4100.dll",
-                     "hasp_26146.ini", "Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "platforms/qwindows.dll"},
+                    required | {"C++ 测试程序.exe", "hasp_26146.ini"},
                 )
-                (output / "ZXing.dll").unlink()
-                with self.assertRaises(FileNotFoundError):
-                    build_package.copy_cpp_package_files()
-                self.assertTrue((staging / "C++ 测试程序.exe").is_file())
+                run_step.assert_not_called()
+                for missing in (opencv, output / "ZXing.dll", output / "platforms/qwindows.dll"):
+                    with self.subTest(missing=missing.name):
+                        content = missing.read_bytes()
+                        missing.unlink()
+                        with self.assertRaises(FileNotFoundError):
+                            build_package.copy_cpp_package_files()
+                        self.assertTrue((staging / "C++ 测试程序.exe").is_file())
+                        missing.write_bytes(content)
 
     def test_staging_cleanup_rejects_outside_directory(self):
         with tempfile.TemporaryDirectory() as directory:
