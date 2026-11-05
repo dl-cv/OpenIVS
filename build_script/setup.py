@@ -1,11 +1,14 @@
 import os
+import re
 import shutil
 
 from setuptools import setup
 
 version = '2026.11.5.0a0'
 
-package_name = "dlcvpro_infer_csharp"
+package_name = "dlcvpro_infer_csharp"  # 包名
+packages: list = [package_name]  # 需要打包的包
+package_data: dict[str:list] = {package_name: ["*"]}  # 哪个包需要打包哪些资源文件
 
 
 def main():
@@ -17,8 +20,8 @@ def main():
         author_email="ypw@dlcv.ai",
         url="",
         keywords="AI, Deep Learning, Computer Vision",
-        packages=[package_name],
-        package_data={package_name: ["*"]},
+        packages=packages,
+        package_data=package_data,
         options={
             "bdist_wheel": {
                 'plat_name': 'win_amd64',
