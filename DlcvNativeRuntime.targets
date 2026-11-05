@@ -14,7 +14,7 @@
     <Error Condition="'%(_DlcvRuntimeOutput.Extension)'!='.dll'" Text="工程引用返回的产物不是 DLL。" />
     <Error Condition="!Exists('%(_DlcvRuntimeOutput.FullPath)')" Text="本次引用工程的 DLL 不存在：%(_DlcvRuntimeOutput.FullPath)" />
     <ItemGroup>
-      <_BarcodeRuntime Include="%(_DlcvRuntimeOutput.RootDir)%(_DlcvRuntimeOutput.Directory)ZXing.dll;%(_DlcvRuntimeOutput.RootDir)%(_DlcvRuntimeOutput.Directory)ZXing-LICENSE.txt;%(_DlcvRuntimeOutput.RootDir)%(_DlcvRuntimeOutput.Directory)ZXing-NOTICE.txt" />
+      <_BarcodeRuntime Include="%(_DlcvRuntimeOutput.RootDir)%(_DlcvRuntimeOutput.Directory)ZXing.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(_BarcodeRuntime)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_DlcvRuntimeOutput)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="false" />
