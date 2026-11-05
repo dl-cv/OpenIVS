@@ -1270,5 +1270,177 @@
         ]
       }
     ]
+  },
+  {
+    "name": "reference-box-only",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {
+      "output_category_1": false
+    },
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "reason": "上边距：30px；下边距：30px；左边距：20px；右边距：20px",
+        "extra_info": {
+          "edge_distances": {
+            "top": 30,
+            "bottom": 30,
+            "left": 20,
+            "right": 20
+          }
+        },
+        "sample_results": [
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "with_angle": false,
+            "is_distance_target": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "reference-box-only-missing",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {
+      "output_category_1": false
+    },
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "score": 0.9
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": false,
+        "sample_results": [],
+        "extra_info": {
+          "edge_distances": {}
+        }
+      }
+    ]
+  },
+  {
+    "name": "reference-box-only-transform",
+    "type": "post_process/bbox_edge_distance",
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "底座",
+            "bbox": [
+              50,
+              60,
+              100,
+              100
+            ],
+            "score": 0.9
+          }
+        ]
+      },
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              40,
+              40,
+              40
+            ],
+            "score": 0.9
+          }
+        ],
+        "transform": {
+          "original_width": 320,
+          "original_height": 420,
+          "affine_2x3": [
+            2,
+            0,
+            -100,
+            0,
+            2,
+            -120
+          ]
+        }
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "extra_info": {
+          "edge_distances": {
+            "top": 20,
+            "bottom": 60,
+            "left": 10,
+            "right": 70
+          }
+        },
+        "sample_results": [
+          {
+            "bbox": [
+              50,
+              60,
+              100,
+              100
+            ]
+          }
+        ]
+      }
+    ],
+    "properties": {
+      "output_category_1": false
+    }
   }
 ]

@@ -375,7 +375,8 @@ public:
                 }
                 extra["category_1"] = first; extra["category_2"] = second;
                 extra["bbox_1"] = box1; extra["bbox_2"] = box2; extra["edge_distances"] = std::move(distances);
-                visible.push_back(Visible(*a.Value, box1)); visible.push_back(Visible(*b.Value, box2));
+                if (Selected("output_category_1")) visible.push_back(Visible(*a.Value, box1));
+                visible.push_back(Visible(*b.Value, box2));
             } catch (const std::invalid_argument& ex) { ok = false; reason = std::string("无法计算边距：") + ex.what(); }
             const auto& image = group.Original;
             output.ResultList.push_back({{"type", "local"}, {"originating_module", "post_process/bbox_edge_distance"},

@@ -50,7 +50,8 @@ namespace DlcvModules
                     extra["category_1"] = first; extra["category_2"] = second;
                     extra["bbox_1"] = new JArray(box1); extra["bbox_2"] = new JArray(box2);
                     extra["edge_distances"] = distances;
-                    visible.Add(Visible(a.Value, box1)); visible.Add(Visible(b.Value, box2));
+                    if (Selected("output_category_1")) visible.Add(Visible(a.Value, box1));
+                    visible.Add(Visible(b.Value, box2));
                 }
                 catch (ArgumentException ex) { ok = false; reason = "无法计算边距：" + ex.Message; }
                 results.Add(new JObject

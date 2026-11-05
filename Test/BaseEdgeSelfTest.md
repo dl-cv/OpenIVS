@@ -18,3 +18,5 @@ python .cursor/skills/vs-build/scripts/build.py Test/dlcv_infer_cpp_test/dlcv_in
 完整流程用例额外指定 `model_path`（`.dvst`）、可选 `device`（默认 0）及 `type="flow"`。通过公开 Model 接口分别执行结构化和 JSON 推理，检查最终框、类别、图片级判定、原因与扩展一致，再检查 `expected`。这条路径独立加载完整归档，不依赖共享索引的模型元信息比较。
 
 真实验证应分开记录两类差异：底座框与 Python 相同参数应完全一致；加速前后的检测框和由其计算的边距可有模型数值差异。`sample_results.bbox` 是 XYWH，诊断 `extra_info.bbox_1/bbox_2` 是 XYXY，比较前须统一格式。真实模型和客户图片不放入仓库。
+
+测量框输出控制：`output_category_1=false` 时只保留类别2参考框，距离、原图变换、扩展和缺失目标原因仍保留；不配置该项仍输出两个框。实际流程检查只有二维码识别、两行 OCR 和底座共四个框，且完整 reason 与关闭前相同。
