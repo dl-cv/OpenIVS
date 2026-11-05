@@ -19,7 +19,7 @@ alwaysApply: true
 
 ## 构建规则
 
-- **唯一入口**：必须使用 `.cursor/skills/vs-build/scripts/build.py` 执行编译/构建/重建
+- **唯一入口**：必须使用 `build_script/build.py` 执行编译/构建/重建
 - **默认配置**：`OpenIVS.sln`、`Debug`、`x64`、`Build`、`minimal`
 - 禁止直接使用 `msbuild`、`dotnet`、`powershell` 等命令编译
 - 构建脚本不可用或报错时，立即停止并报告

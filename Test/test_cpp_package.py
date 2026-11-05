@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import build_cpp_package as build_package
+from build_script import build_cpp_package as build_package
 from Test import test_install_target
 
 
@@ -95,9 +95,8 @@ class CppPackageFilesTest(unittest.TestCase):
         projects = [Path(arg) for command in commands for arg in command if arg.endswith((".csproj", ".vcxproj", ".sln"))]
         self.assertEqual(projects, [ROOT / "dlcv_infer_cpp_qt_demo" / "dlcv_infer_cpp_qt_demo.vcxproj"])
         self.assertFalse(any("sync_assembly_version.py" in arg for command in commands for arg in command))
-        build_call = next(call for call in run_step.call_args_list if call.args[1][1:3] == ["-m", "build"])
-        self.assertEqual(build_call.kwargs["env"]["DLCV_PACKAGE_VARIANT"], "cpp")
-        self.assertIn("--no-isolation", build_call.args[1])
+        build_call = next(call for call in run_step.call_args_list if "bdist_wheel" in call.args[1])
+        self.assertEqual(Path(build_call.args[1][1]), ROOT / "build_script" / "setup_cpp.py")
         self.assertEqual(run_step.call_args_list[0].kwargs["env"]["DlcvUseSharedQt"], "true")
         self.assertEqual(os.environ.get("DlcvUseSharedQt"), original_shared_mode)
         self.assertEqual(commands[-1][-1], str(wheel))
@@ -126,8 +125,8 @@ class PackageMetadataTest(unittest.TestCase):
             previous = Path.cwd()
             try:
                 os.chdir(root)
-                with patch.dict(os.environ, {"DLCV_PACKAGE_VARIANT": "cpp"}), patch("setuptools.setup") as setup:
-                    runpy.run_path(str(ROOT / "setup.py"), run_name="__main__")
+                with patch("setuptools.setup") as setup:
+                    runpy.run_path(str(ROOT / "build_script" / "setup_cpp.py"), run_name="__main__")
             finally:
                 os.chdir(previous)
             metadata = setup.call_args.kwargs

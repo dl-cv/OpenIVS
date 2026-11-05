@@ -90,7 +90,7 @@
 构建命令统一通过项目脚本执行：
 
 ```text
-python ".cursor/skills/vs-build/scripts/build.py" "dlcv_infer_c_qt_demo/dlcv_infer_c_qt_demo.vcxproj" --configuration Debug --platform x64 --target Build --verbosity minimal
+python "build_script/build.py" "dlcv_infer_c_qt_demo/dlcv_infer_c_qt_demo.vcxproj" --configuration Debug --platform x64 --target Build --verbosity minimal
 ```
 
 直接构建项目时，Debug 可执行文件位于：

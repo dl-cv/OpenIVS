@@ -5,7 +5,7 @@
 ## 依赖
 
 - 运行环境：Windows x64、.NET Framework 4.7.2。
-- 编译环境：Python 3.10 或更高版本、Visual Studio MSBuild、.NET Framework 4.7.2 开发工具包。工具链由仓库 `.cursor/skills/vs-build/scripts/build.py` 查找。
+- 编译环境：Python 3.10 或更高版本、Visual Studio MSBuild、.NET Framework 4.7.2 开发工具包。工具链由仓库 `build_script/build.py` 查找。
 - 真实设备操作需要本机 Sentinel LDK Runtime、`hasplms` 服务及 ACC 可访问。隔离测试不连接真实设备或服务。
 
 ## 五项功能与操作确认
@@ -22,7 +22,7 @@
 
 ## 工程运行
 
-使用 Visual Studio 打开 `OpenIVS.sln`，将 `SentinelManager` 设为启动项目后运行；命令行日常编译使用仓库共享 `.cursor/skills/vs-build/scripts/build.py`，不提供独立打包或安装入口。
+使用 Visual Studio 打开 `OpenIVS.sln`，将 `SentinelManager` 设为启动项目后运行；命令行日常编译使用仓库共享 `build_script/build.py`，不提供独立打包或安装入口。
 
 `Properties/AssemblyInfo.cs` 为程序集版本来源。运行配置由 `App.config` 生成，运行时须与程序放在同一目录。
 

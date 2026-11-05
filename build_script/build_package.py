@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_NAME = "dlcvpro_infer_csharp"
 STAGING_DIR = REPO_ROOT / PACKAGE_NAME
 DEMO_OUTPUT_DIR = REPO_ROOT / "DlcvDemo" / "bin"
@@ -191,8 +191,8 @@ def main() -> int:
     args = parse_args()
     os.chdir(REPO_ROOT)
 
-    sync_script = REPO_ROOT / "sync_assembly_version.py"
-    build_script = REPO_ROOT / ".cursor" / "skills" / "vs-build" / "scripts" / "build.py"
+    sync_script = REPO_ROOT / "build_script" / "sync_assembly_version.py"
+    build_script = REPO_ROOT / "build_script" / "build.py"
     demo_project = REPO_ROOT / "DlcvDemo" / "DlcvDemo.csproj"
 
     try:
@@ -242,7 +242,7 @@ def main() -> int:
         wheels_before_build = snapshot_wheels()
         run_step(
             "构建 wheel",
-            [sys.executable, "-m", "build", "--wheel", "--no-isolation", "--outdir", str(REPO_ROOT / "dist")],
+            [sys.executable, str(REPO_ROOT / "build_script" / "setup.py"), "bdist_wheel", "--dist-dir", str(REPO_ROOT / "dist")],
         )
 
         wheel_path = find_generated_wheel(wheels_before_build)

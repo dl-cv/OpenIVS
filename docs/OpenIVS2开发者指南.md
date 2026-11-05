@@ -705,13 +705,13 @@ Fake 客户端应能控制：
 构建 OpenIVS2：
 
 ```powershell
-python ".cursor\skills\vs-build\scripts\build.py" "OpenIVS2\OpenIVS2.csproj" --configuration Debug --platform x64 --target Build --verbosity minimal
+python "build_script\build.py" "OpenIVS2\OpenIVS2.csproj" --configuration Debug --platform x64 --target Build --verbosity minimal
 ```
 
 构建时序测试：
 
 ```powershell
-python ".cursor\skills\vs-build\scripts\build.py" "Test\DlcvSequenceTest\DlcvSequenceTest.csproj" --configuration Debug --platform x64 --target Build --verbosity minimal
+python "build_script\build.py" "Test\DlcvSequenceTest\DlcvSequenceTest.csproj" --configuration Debug --platform x64 --target Build --verbosity minimal
 ```
 
 运行时序测试：

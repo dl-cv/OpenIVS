@@ -202,6 +202,6 @@
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <PropertyGroup><DlcvCopyQtRuntime>true</DlcvCopyQtRuntime></PropertyGroup>
-  <Import Project="$(ProjectDir)..\DlcvNativeRuntime.targets" />
+  <Import Project="$(ProjectDir)..\build_script\DlcvNativeRuntime.targets" />
   <ImportGroup Label="ExtensionTargets" />
 </Project>

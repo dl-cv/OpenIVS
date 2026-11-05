@@ -13,7 +13,7 @@ $env:TMP = $env:TEMP
 $env:TMPDIR = $env:TEMP
 $env:PYTHONUTF8 = '1'
 $env:PYTHONIOENCODING = 'utf-8'
-python .cursor/skills/vs-build/scripts/build.py Test/dlcv_infer_cpp_test/dlcv_infer_cpp_test.vcxproj --configuration Debug --platform x64 *> temp/2209-build/build.log
+python build_script/build.py Test/dlcv_infer_cpp_test/dlcv_infer_cpp_test.vcxproj --configuration Debug --platform x64 *> temp/2209-build/build.log
 ```
 
 确认构建退出码为 0 后运行 `Debug/dlcv_infer_cpp_test.exe algorithm-modules-selftest`。普通运行时将 TEMP/TMP/TMPDIR 设置为本任务独占的验证输出目录，并在该目录保存运行日志。测试将 `algorithm-shared-input-*.json` 合成流程及对应 `.dvst` 写入 TEMP，方便复查。成功打印 `algorithm-modules-selftest passed: ... assertions`，返回 0；断言失败返回 1。

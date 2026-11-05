@@ -158,7 +158,7 @@ class CSharpSharedIndexSourceTest(unittest.TestCase):
             self.assertIn(field, dvs)
 
     def test_csharp_package_no_longer_copies_native_flow_wrapper(self):
-        source = (ROOT / "build_package.py").read_text(encoding="utf-8-sig")
+        source = (ROOT / "build_script" / "build_package.py").read_text(encoding="utf-8-sig")
         names_start = source.index("PACKAGE_OUTPUT_FILE_NAMES")
         names_end = source.index("SIGNED_EXE_NAMES", names_start)
         package_names = source[names_start:names_end]

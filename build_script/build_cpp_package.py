@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from build_package import (
+from .build_package import (
     SIGNTOOL_PATH,
     TIMESTAMP_URL,
     find_signing_certificate_thumbprint,
@@ -15,7 +15,7 @@ from build_package import (
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_NAME = "dlcvpro_infer_cpp"
 STAGING_DIR = REPO_ROOT / PACKAGE_NAME
 DIST_DIR = REPO_ROOT / "dist_cpp"
@@ -78,7 +78,7 @@ def find_generated_wheel(before: dict[Path, tuple[int, int, int]]) -> Path:
 
 def main() -> int:
     args = parse_args()
-    build_script = REPO_ROOT / ".cursor" / "skills" / "vs-build" / "scripts" / "build.py"
+    build_script = REPO_ROOT / "build_script" / "build.py"
     demo_project = REPO_ROOT / "dlcv_infer_cpp_qt_demo" / "dlcv_infer_cpp_qt_demo.vcxproj"
     try:
         for path in (build_script, demo_project, SIGNTOOL_PATH):
@@ -99,8 +99,7 @@ def main() -> int:
         before = snapshot_wheels()
         run_step(
             "构建 C++ wheel",
-            [sys.executable, "-m", "build", "--wheel", "--no-isolation", "--outdir", str(DIST_DIR)],
-            env={**os.environ, "DLCV_PACKAGE_VARIANT": "cpp"},
+            [sys.executable, str(REPO_ROOT / "build_script" / "setup_cpp.py"), "bdist_wheel", "--dist-dir", str(DIST_DIR)],
         )
         wheel = find_generated_wheel(before)
         if args.install:

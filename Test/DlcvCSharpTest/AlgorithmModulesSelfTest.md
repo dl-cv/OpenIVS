@@ -5,7 +5,7 @@
 在仓库根目录使用既有构建入口，默认 Debug x64。
 
 ```powershell
-python .cursor/skills/vs-build/scripts/build.py Test/DlcvCSharpTest/DlcvCSharpTest.csproj --configuration Debug --platform x64
+python build_script/build.py Test/DlcvCSharpTest/DlcvCSharpTest.csproj --configuration Debug --platform x64
 & .\Test\DlcvCSharpTest\bin\x64\Debug\DlcvCSharpTest.exe algorithm-modules-selftest
 ```
 

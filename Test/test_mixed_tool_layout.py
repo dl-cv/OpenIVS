@@ -46,7 +46,7 @@ class MixedToolLayoutTests(unittest.TestCase):
         project = ET.parse(APP / "DlcvCSharpCppTest.csproj")
         imports = [item.attrib["Project"].replace("\\", "/")
                    for item in project.findall("m:Import", NS)]
-        self.assertIn("../DlcvNativeRuntime.targets", imports)
+        self.assertIn("../build_script/DlcvNativeRuntime.targets", imports)
 
     def test_solution_and_generated_profile_start_root_project(self):
         solution = (ROOT / "OpenIVS.sln").read_text(encoding="utf-8-sig")

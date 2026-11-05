@@ -89,6 +89,6 @@
       DestinationFolder="$(IntDir)standalone_c_include" />
   </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <Import Project="$(ProjectDir)..\..\DlcvNativeRuntime.targets" />
+  <Import Project="$(ProjectDir)..\..\build_script\DlcvNativeRuntime.targets" />
   <ImportGroup Label="ExtensionTargets" />
 </Project>
