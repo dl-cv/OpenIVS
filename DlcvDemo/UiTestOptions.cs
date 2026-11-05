@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Globalization;
 using System.IO;
 
@@ -24,6 +25,8 @@ namespace DlcvDemo
         internal int PressureDurationMs { get; private set; } = 2000;
         internal int CaptureDelayMs { get; private set; }
         internal float LabelFontScale { get; private set; } = 1.0f;
+        internal RectangleF? ViewRegion { get; private set; }
+        internal Size? WindowSize { get; private set; }
 
         internal static bool TryParse(string[] args, out UiTestOptions options, out string error)
         {
@@ -66,6 +69,32 @@ namespace DlcvDemo
                         break;
                     case "--save-json":
                         options.SaveJsonPath = value;
+                        break;
+                    case "--view-region":
+                        string[] regionParts = value.Split(',');
+                        var regionValues = new float[4];
+                        bool validRegion = regionParts.Length == 4;
+                        for (int j = 0; validRegion && j < 4; j++)
+                            validRegion = float.TryParse(regionParts[j], NumberStyles.Float, CultureInfo.InvariantCulture, out regionValues[j])
+                                && !float.IsNaN(regionValues[j]) && !float.IsInfinity(regionValues[j])
+                                && (j < 2 ? regionValues[j] >= 0 : regionValues[j] > 0);
+                        if (!validRegion)
+                        {
+                            error = "--view-region 需要非负坐标和正宽高，格式为 x,y,width,height。";
+                            return false;
+                        }
+                        options.ViewRegion = new RectangleF(regionValues[0], regionValues[1], regionValues[2], regionValues[3]);
+                        break;
+                    case "--window-size":
+                        string[] sizeParts = value.Split(',');
+                        if (sizeParts.Length != 2
+                            || !int.TryParse(sizeParts[0], out int width) || width < 640
+                            || !int.TryParse(sizeParts[1], out int height) || height < 480)
+                        {
+                            error = "--window-size 格式为 width,height，最小为 640,480。";
+                            return false;
+                        }
+                        options.WindowSize = new Size(width, height);
                         break;
                     case "--label-font-scale":
                         if (!float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float labelFontScale)
@@ -267,6 +296,8 @@ namespace DlcvDemo
             Console.Out.WriteLine("--test-mode=infer-json 复用推理 JSON 按钮生成原始 JSON 结果。");
             Console.Out.WriteLine("--test-mode=model-dialog 仅打开正式模型选择窗口供隔离采集，30 秒后退出；不加载模型或初始化设备。");
             Console.Out.WriteLine("--capture-delay-ms 在结果生成后保持正式窗口消息循环，供隔离桌面采集完整窗口；默认 0。");
+            Console.Out.WriteLine("--view-region x,y,width,height 放大原图指定区域，仅改变显示，推理仍使用完整图片。");
+            Console.Out.WriteLine("--window-size width,height 指定验证窗口客户区的像素尺寸，须小于当前显示器工作区。");
             Console.Out.WriteLine("--test-mode=pressure 时运行压力测试并保存统计界面，时长默认 2000ms。");
         }
     }

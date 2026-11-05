@@ -2,6 +2,7 @@
 
 #include <QPoint>
 #include <QPointF>
+#include <QRectF>
 #include <QString>
 #include <QtGlobal>
 #include <QWidget>
@@ -32,6 +33,7 @@ public:
     void setImageAndResults(const cv::Mat& bgrImage, const std::vector<dlcv_infer::ObjectResult>& results);
     void setImage(const cv::Mat& bgrImage);
     void setResults(const std::vector<dlcv_infer::ObjectResult>& results);
+    void focusImageRegion(const QRectF& region);
     void clearResults();
 
     void setShowStatusText(bool enabled);

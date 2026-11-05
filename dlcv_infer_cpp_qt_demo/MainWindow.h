@@ -10,6 +10,7 @@
 
 #include <QHash>
 #include <QMainWindow>
+#include <QRectF>
 #include <QSettings>
 
 #include <opencv2/core.hpp>
@@ -32,7 +33,8 @@ public:
     explicit MainWindow(QWidget* parent = nullptr, bool uiTestMode = false);
     bool devicesReadyForUiTest() const { return devicesReady_; }
     dlcv_infer::json runUiTest(const QString& modelPath, const QString& imagePath,
-        int deviceId, double threshold, float labelFontScale, const QString& resultView);
+        int deviceId, double threshold, float labelFontScale, const QString& resultView,
+        const QRectF& viewRegion = QRectF());
     ~MainWindow() override = default;
 
 protected:

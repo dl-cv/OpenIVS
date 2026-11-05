@@ -534,7 +534,8 @@ bool MainWindow::loadModelFromPath(const QString& selectedModelPath) {
 }
 
 dlcv_infer::json MainWindow::runUiTest(const QString& modelPath, const QString& imagePath,
-    int deviceId, double threshold, float labelFontScale, const QString& resultView) {
+    int deviceId, double threshold, float labelFontScale, const QString& resultView,
+    const QRectF& viewRegion) {
     if (!uiTestMode_) throw std::runtime_error("仅在 ui-test 模式下执行界面验证");
     int deviceIndex = -1;
     for (int i = 0; i < comboDevice_->count(); ++i) {
@@ -555,6 +556,9 @@ dlcv_infer::json MainWindow::runUiTest(const QString& modelPath, const QString& 
     if (!lastInferSucceeded_) {
         throw std::runtime_error(outputText_->toPlainText().toUtf8().constData());
     }
+    if (!viewRegion.isEmpty() && !QRectF(0, 0, currentBgrImage_.cols, currentBgrImage_.rows).contains(viewRegion)) {
+        throw std::runtime_error("显示区域超出输入图片范围");
+    }
     if (resultView == "json") onInferJson();
     if (resultView == "model") onGetModelInfo();
     if (resultView == "release") onFreeModel();
@@ -564,9 +568,13 @@ dlcv_infer::json MainWindow::runUiTest(const QString& modelPath, const QString& 
         uiTestResult_["result_json"] = json::parse(uiTestResult_["result_text"].get<std::string>());
     }
     uiTestResult_["label_font_scale"] = imageViewer_->labelFontScale();
+    if (!viewRegion.isEmpty()) {
+        uiTestResult_["view_region"] = {viewRegion.x(), viewRegion.y(), viewRegion.width(), viewRegion.height()};
+    }
     // 完整窗口显示后按最终图像区尺寸适配图片，保留已有结果。
-    QTimer::singleShot(0, imageViewer_, [this]() {
+    QTimer::singleShot(0, imageViewer_, [this, viewRegion]() {
         imageViewer_->setImage(currentBgrImage_);
+        imageViewer_->focusImageRegion(viewRegion);
     });
     return uiTestResult_;
 }

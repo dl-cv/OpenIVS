@@ -79,6 +79,7 @@ void InitializeConsoleForCommandLine() {
 struct InferOptions {
     float labelFontScale = 1.0f;
     QString resultView = "summary";
+    QRectF viewRegion;
     bool hasLabelFontScale = false;
     bool hasResultView = false;
     QString modelPath;
@@ -161,7 +162,8 @@ void PrintHelp(const QString& programPath) {
            " [--device <int>] [--with-mask <true|false>]\n"
         << "  " << program
         << " ui-test --model <path> --image <path> --output <jsonPath>"
-           " [--label-font-scale <0.3..5>] [--result-view <summary|json|model|release>]\n"
+           " [--label-font-scale <0.3..5>] [--result-view <summary|json|model|release>]"
+           " [--view-region <x,y,width,height>]\n"
         << "  " << program << " --help\n\n"
         << "Exit codes: 0=passed, 1=runtime error, 2=invalid arguments, 3=validation failed\n";
 }
@@ -248,6 +250,20 @@ bool ParseInferOptions(const QStringList& args, InferOptions& options, QString& 
             }
             options.labelFontScale = scale;
             options.hasLabelFontScale = true;
+        } else if (args.at(1) == "ui-test" && option == "--view-region") {
+            const QStringList parts = value.split(',');
+            double values[4] = {};
+            bool valid = options.viewRegion.isEmpty() && parts.size() == 4;
+            for (int j = 0; valid && j < 4; ++j) {
+                bool ok = false;
+                values[j] = parts[j].toDouble(&ok);
+                valid = ok && std::isfinite(values[j]) && (j < 2 ? values[j] >= 0 : values[j] > 0);
+            }
+            if (!valid) {
+                error = "--view-region 需要非负坐标和正宽高，格式为 x,y,width,height，且不能重复";
+                return false;
+            }
+            options.viewRegion = QRectF(values[0], values[1], values[2], values[3]);
         } else if (args.at(1) == "ui-test" && option == "--result-view") {
             if (options.hasResultView || (value != "summary" && value != "json" && value != "model" && value != "release")) {
                 error = "--result-view 必须为 summary、json、model 或 release，且不能重复";
@@ -790,7 +806,7 @@ int main(int argc, char* argv[]) {
             timer.stop();
             try {
                 json report = w.runUiTest(uiOptions.modelPath, uiOptions.imagePath, uiOptions.device,
-                    uiOptions.threshold, uiOptions.labelFontScale, uiOptions.resultView);
+                    uiOptions.threshold, uiOptions.labelFontScale, uiOptions.resultView, uiOptions.viewRegion);
                 report["passed"] = true;
                 report["qt_style"] = app.style()->objectName().toStdString();
                 report["qt_style_class"] = app.style()->metaObject()->className();
