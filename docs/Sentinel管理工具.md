@@ -22,7 +22,7 @@
 
 ## 工程运行
 
-使用 Visual Studio 打开 `OpenIVS.sln`，将 `SentinelManager` 设为启动项目后运行；命令行日常编译使用仓库共享 `build_script/build.py`，不提供独立打包或安装入口。
+工程位于 `Test/SentinelManager/SentinelManager.csproj`。使用 Visual Studio 打开 `OpenIVS.sln`，在 `Test` 分组中将 `SentinelManager` 设为启动项目后运行；命令行日常编译使用仓库共享 `build_script/build.py`，不提供独立打包或安装入口。
 
 `Properties/AssemblyInfo.cs` 为程序集版本来源。运行配置由 `App.config` 生成，运行时须与程序放在同一目录。
 

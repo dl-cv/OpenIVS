@@ -15,8 +15,8 @@
     <DebugType>pdbonly</DebugType>
     <WarningLevel>4</WarningLevel>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
-    <AppConfig>..\..\SentinelManager\App.config</AppConfig>
-    <ApplicationManifest>..\..\SentinelManager\app.manifest</ApplicationManifest>
+    <AppConfig>..\SentinelManager\App.config</AppConfig>
+    <ApplicationManifest>..\SentinelManager\app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" /><Reference Include="System.Core" />
@@ -26,7 +26,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Program.cs" /><Compile Include="BackendTests.cs" /><Compile Include="UiTests.cs" />
-    <ProjectReference Include="..\..\SentinelManager\SentinelManager.csproj">
+    <ProjectReference Include="..\SentinelManager\SentinelManager.csproj">
       <Project>{06F95180-9A44-43C9-906F-252A0DA5D559}</Project><Name>SentinelManager</Name>
     </ProjectReference>
   </ItemGroup>

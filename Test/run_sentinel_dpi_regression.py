@@ -18,7 +18,7 @@ import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 TEST_EXE = ROOT / "Test" / "SentinelManagerTest" / "bin" / "Release" / "SentinelManagerTest.exe"
-APP_CONFIG = ROOT / "SentinelManager" / "App.config"
+APP_CONFIG = ROOT / "Test" / "SentinelManager" / "App.config"
 SCREENSHOTS = ("initial.png", "result.png", "raw-result.png", "compact.png")
 TIMEOUT_SECONDS = 60
 REQUIRED_CHECKS = (
