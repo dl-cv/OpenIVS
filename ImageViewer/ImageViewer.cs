@@ -66,6 +66,21 @@ namespace DLCV
         public float MaxScale { get; set; } = 100.0f;
         public float MinScale { get; set; } = 0.5f;
 
+        public void FocusImageRegion(RectangleF region)
+        {
+            lock (_Lock)
+            {
+                if (_image == null || region.Width <= 0 || region.Height <= 0
+                    || !new RectangleF(0, 0, _image.Width, _image.Height).Contains(region))
+                    throw new ArgumentOutOfRangeException(nameof(region), "显示区域超出输入图片范围。");
+                _scale = Math.Max(MinScale, Math.Min(MaxScale,
+                    Math.Min(ClientSize.Width / region.Width, ClientSize.Height / region.Height)));
+                _imagePosition = new PointF(ClientSize.Width / 2f - (region.X + region.Width / 2) * _scale,
+                    ClientSize.Height / 2f - (region.Y + region.Height / 2) * _scale);
+            }
+            Invalidate();
+        }
+
         [DefaultValue(24f)]
         public float VisualizationBaseFontSize { get; set; } = 24f;
 
