@@ -40,6 +40,15 @@ void ImageViewerWidget::setResults(const std::vector<dlcv_infer::ObjectResult>& 
     update();
 }
 
+void ImageViewerWidget::focusImageRegion(const QRectF& region) {
+    if (image_.isNull() || region.isEmpty()) return;
+    scale_ = std::clamp(static_cast<float>(std::min(width() / region.width(), height() / region.height())),
+        minScale_, maxScale_);
+    imagePosition_ = QPointF(width() / 2.0, height() / 2.0) - region.center() * scale_;
+    adjustImagePosition();
+    update();
+}
+
 void ImageViewerWidget::clearResults() {
     results_.clear();
     update();

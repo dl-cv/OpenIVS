@@ -799,6 +799,17 @@ namespace DlcvDemo
                 numericUpDown_batch_size.Value = uiTestOptions.BatchSize;
                 numericUpDown_num_thread.Value = uiTestOptions.ThreadCount;
                 buttonLayoutCheck = RunButtonLayoutUiChecks();
+                if (uiTestOptions.WindowSize.HasValue)
+                {
+                    var workArea = Screen.FromControl(this).WorkingArea;
+                    var requested = uiTestOptions.WindowSize.Value;
+                    if (requested.Width + Width - ClientSize.Width > workArea.Width - 40
+                        || requested.Height + Height - ClientSize.Height > workArea.Height - 40)
+                        throw new ArgumentOutOfRangeException("window-size", "验证窗口超出显示器工作区。");
+                    ClientSize = requested;
+                    Location = new System.Drawing.Point(workArea.Left + 20, workArea.Top + 20);
+                    PerformLayout();
+                }
                 WriteUiTestResult("started", null);
 
                 if (uiTestOptions.InteractiveDialogs)
@@ -909,6 +920,8 @@ namespace DlcvDemo
                 }
 
                 await Task.Yield();
+                if (uiTestOptions.ViewRegion.HasValue)
+                    imagePanel1.FocusImageRegion(uiTestOptions.ViewRegion.Value);
                 Refresh();
                 SaveUiTestScreenshot();
                 UiTestExitCode = 0;
@@ -987,6 +1000,9 @@ namespace DlcvDemo
                 ["ui_framework"] = "WinForms",
                 ["screenshot"] = uiTestOptions.ScreenshotPath,
                 ["result_view"] = uiTestOptions.ResultView,
+                ["view_region"] = uiTestOptions.ViewRegion.HasValue
+                    ? JToken.FromObject(new[] { uiTestOptions.ViewRegion.Value.X, uiTestOptions.ViewRegion.Value.Y,
+                        uiTestOptions.ViewRegion.Value.Width, uiTestOptions.ViewRegion.Value.Height }) : null,
                 ["json_export_check"] = jsonExportCheck,
                 ["button_layout_check"] = buttonLayoutCheck,
                 ["test_mode"] = uiTestOptions.TestMode,

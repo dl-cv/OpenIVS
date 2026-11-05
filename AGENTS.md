@@ -53,6 +53,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 - 两个 Qt Demo 的自动回归使用 `Test/run_qt_demo_regression.py` 运行实际 EXE，读取退出码与严格 UTF-8 JSON；推理测试不打开主窗口。Mask 合成数据和断言只编入 `Test/qt_demo/` 下两个独立测试 EXE，工程直接引用对应 Demo 的 `ImageViewerWidget.cpp`，不复制控件实现；测试采用 Qt offscreen 平台，不模拟鼠标键盘或控制桌面窗口。Demo 不包含 Mask 自测入口。
 - C++ Qt Demo 的真实窗口验证使用 `ui-test --model <模型> --image <图片> --output <临时JSON>`。`--label-font-scale` 接受 0.3 到 5；`--result-view` 接受 summary、json、model、release；release 在完成推理后执行“释放模型”，输出 `model_loaded=false` 与释放提示。默认使用窗口的阈值初始值，也可通过原推理参数指定。程序等待设备初始化，复用实际按钮逻辑和绘制组件，成功后保存 UTF-8 JSON 并自动关闭；失败返回 1，参数错误返回 2。设置只写输出目录内的 INI，不读取或修改正常窗口的注册表配置，不启用显卡锁频。截图时由不可见 Desktop 采集正式完整窗口，不用控件导出替代。
+- C# 与 C++ Qt Demo 的 `ui-test --view-region x,y,width,height` 按原图坐标放大指定区域，仅改变显示范围，推理仍使用完整图片；区域须位于原图范围内。C# 可用 `--window-size width,height` 指定客户区像素尺寸，窗口须完整位于显示器工作区；C++ 使用 Qt 原有 `-qwindowgeometry` 参数设置窗口尺寸和位置。
 - C Qt Demo 只调用正式 C ABI；C ABI 未提供流程判定读取接口，因此 `inspection_supported=false`、`inspection_consistent=null`，不把该能力记为验证通过。C++ Qt Demo 继续检查已有流程判定接口。
 
 - `DlcvDemo`、`DlcvTest`、`OpenIVSWPF` 的实际 EXE 回归使用 `Test/run_desktop_project_regression.py`。两个 WPF selftest 只初始化推理与显示所需对象，不读取生产配置，不连接相机/PLC，不修改模型历史；具体参数和范围见开发文档。
