@@ -26,6 +26,8 @@
 
 `Properties/AssemblyInfo.cs` 为程序集版本来源。运行配置由 `App.config` 生成，运行时须与程序放在同一目录。
 
+工程通过 `Debug|x64`、`Release|x64` 两个条件属性组声明 VS 可枚举的启动配置。仅设置 `Platform` 默认值、但条件组只按 `Configuration` 区分时，VS 无法匹配解决方案的 x64 启动配置。`Test/SentinelManagerTest/check_startup_configuration.ps1` 使用 MSBuild 工程求值检查可枚举平台、Debug/Release 配置、解决方案映射与 EXE 路径；该检查不编译或启动程序。
+
 ## 配置页面兼容
 
 网络状态读取沿用 Python 原版按 HTML 输入控件 ID 查找目标设置的方式。同名控件重复出现时采用页面中最后出现的值，不因页面重复 ID 拒绝操作；目标控件缺失、类型不符或远程客户端选项无效时仍停止操作。
