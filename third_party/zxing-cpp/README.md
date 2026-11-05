@@ -10,10 +10,10 @@
 
 `BarcodeReaderModule.cpp` 的私有声明对应 `core/src/ZXingC.h`，保留其作者归属于 `NOTICE.txt`。Windows x64 下 bool、32 位枚举和 32 字节 Position 按此固定版本声明；不暴露到 OpenIVS 公共 ABI。升级 NuGet 时不可只改版本号，必须核对函数签名、枚举值、结构布局、内存释放约定并运行跨语言测试。
 
-C++ 不链接上游 C++ ABI；从本模块目录延迟加载 DLL。返回对象以对应 `ZXing_*_delete` 释放，字符串与格式数组以 `ZXing_free` 释放，`Barcodes_at` 是借用指针。C# 使用官方包装器，reader/barcode 及时 Dispose，ImageView 遵循上游终结器并保持像素所有者存活。
+C++ 不链接上游 C++ ABI；从 `C:\dlcv\bin\ZXing.dll` 延迟加载共享 DLL。返回对象以对应 `ZXing_*_delete` 释放，字符串与格式数组以 `ZXing_free` 释放，`Barcodes_at` 是借用指针。C# 使用官方包装器，reader/barcode 及时 Dispose，ImageView 遵循上游终结器并保持像素所有者存活。
 
 ## 许可证文件
 
 `LICENSE.txt` 为上游 Apache-2.0；`NOTICE.txt` 保留 C ABI 作者、libzueci、libzint BSD-3-Clause 和随上游写码器包含的字体声明。两个文件保留在本目录，工程构建和 wheel 打包不复制到输出目录。
 
-运行库仍按工程依赖复制 `ZXing.dll` 和 C# 包装库 `ZXingCpp.dll`。
+工程输出仍按依赖复制运行库。C++ 分发包使用共享目录中的 `ZXing.dll`，C# 分发包保留自己的 `ZXing.dll` 和包装库 `ZXingCpp.dll`。

@@ -64,7 +64,7 @@ class BuildScopeTest(unittest.TestCase):
     def test_packaging_builds_only_the_csharp_product(self):
         repo_root = Path(__file__).resolve().parents[1]
         with (
-            patch.object(build_package, "parse_args", return_value=argparse.Namespace(install=False, package="csharp")),
+            patch.object(build_package, "parse_args", return_value=argparse.Namespace(install=False)),
             patch.object(build_package.os, "chdir"),
             patch.object(build_package, "require_file"),
             patch.object(build_package, "run_step") as run_step,

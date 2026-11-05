@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import build_package
+import build_cpp_package as build_package
 from Test import test_install_target
 
 
@@ -21,8 +21,8 @@ class CppPackageFilesTest(unittest.TestCase):
             output = root / "output"
             staging = root / "dlcvpro_infer_cpp"
             output.mkdir()
-            required = {"dlcv_infer_cpp.dll", "ZXing.dll"}
-            extras = {"old.pdb", "opencv_world4100.dll", "opengl32sw.dll", "dxcompiler.dll",
+            required = {"dlcv_infer_cpp.dll"}
+            extras = {"old.pdb", "ZXing.dll", "opencv_world4100.dll", "opengl32sw.dll", "dxcompiler.dll",
                       "D3Dcompiler_47.dll", "Qt6Network.dll", "imageformats/qjpeg.dll", "Qt6Svg.dll",
                       "Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "platforms/qwindows.dll",
                       "styles/qmodernwindowsstyle.dll"}
@@ -32,7 +32,7 @@ class CppPackageFilesTest(unittest.TestCase):
                 target.write_bytes(name.encode())
             runtime = root / "shared"
             runtime.mkdir()
-            for name in ("opencv_world4100.dll", "Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll",
+            for name in ("ZXing.dll", "opencv_world4100.dll", "Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll",
                          "qwindows.dll", "styles/qmodernwindowsstyle.dll"):
                 target = runtime / name
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -43,13 +43,13 @@ class CppPackageFilesTest(unittest.TestCase):
 
             with (
                 patch.object(build_package, "REPO_ROOT", root),
-                patch.object(build_package, "CPP_DEMO_OUTPUT_DIR", output),
-                patch.object(build_package, "CPP_STAGING_DIR", staging),
-                patch.object(build_package, "CPP_SHARED_RUNTIME_DIR", runtime),
+                patch.object(build_package, "DEMO_OUTPUT_DIR", output),
+                patch.object(build_package, "STAGING_DIR", staging),
+                patch.object(build_package, "SHARED_RUNTIME_DIR", runtime),
                 patch.object(build_package, "run_step") as run_step,
             ):
-                executables = build_package.copy_cpp_package_files()
-                self.assertEqual(executables, [staging / "C++ 测试程序.exe"])
+                executable = build_package.copy_package_files()
+                self.assertEqual(executable, staging / "C++ 测试程序.exe")
                 self.assertEqual((staging / "C++ 测试程序.exe").read_bytes(), b"dlcv_infer_cpp_qt_demo.exe")
                 self.assertEqual(
                     {p.relative_to(staging).as_posix() for p in staging.rglob("*") if p.is_file()},
@@ -57,12 +57,12 @@ class CppPackageFilesTest(unittest.TestCase):
                 )
                 run_step.assert_not_called()
                 for missing in (runtime / "opencv_world4100.dll", runtime / "Qt6Core.dll",
-                                runtime / "qwindows.dll", runtime / "styles/qmodernwindowsstyle.dll", output / "ZXing.dll"):
+                                runtime / "qwindows.dll", runtime / "styles/qmodernwindowsstyle.dll", runtime / "ZXing.dll"):
                     with self.subTest(missing=missing.name):
                         content = missing.read_bytes()
                         missing.unlink()
                         with self.assertRaises(FileNotFoundError):
-                            build_package.copy_cpp_package_files()
+                            build_package.copy_package_files()
                         self.assertTrue((staging / "C++ 测试程序.exe").is_file())
                         missing.write_bytes(content)
 
@@ -73,26 +73,24 @@ class CppPackageFilesTest(unittest.TestCase):
             outside.mkdir(parents=True)
             marker = outside / "keep.txt"
             marker.touch()
-            with patch.object(build_package, "REPO_ROOT", root), self.assertRaises(RuntimeError):
-                build_package.rebuild_staging_directory(outside, "dlcvpro_infer_cpp")
+            with (patch.object(build_package, "REPO_ROOT", root),
+                  patch.object(build_package, "STAGING_DIR", outside), self.assertRaises(RuntimeError)):
+                build_package.rebuild_staging_directory()
             self.assertTrue(marker.is_file())
 
     def test_cpp_build_scope_and_install_use_generated_wheel(self):
         wheel = ROOT / "dist_cpp" / "generated.whl"
         original_shared_mode = os.environ.get("DlcvUseSharedQt")
         with (
-            patch.object(build_package, "parse_args", return_value=argparse.Namespace(install=True, package="cpp")),
-            patch.object(build_package.os, "chdir"),
+            patch.object(build_package, "parse_args", return_value=argparse.Namespace(install=True)),
             patch.object(build_package, "require_file"),
             patch.object(build_package, "run_step") as run_step,
-            patch.object(build_package, "copy_cpp_package_files", return_value=[]),
-            patch.object(build_package, "copy_package_files") as csharp,
+            patch.object(build_package, "copy_package_files", return_value=ROOT / "dlcvpro_infer_cpp" / "C++ 测试程序.exe"),
             patch.object(build_package, "find_signing_certificate_thumbprint", return_value="test"),
             patch.object(build_package, "snapshot_wheels", return_value={}),
             patch.object(build_package, "find_generated_wheel", return_value=wheel),
         ):
             self.assertEqual(build_package.main(), 0)
-        csharp.assert_not_called()
         commands = [call.args[1] for call in run_step.call_args_list]
         projects = [Path(arg) for command in commands for arg in command if arg.endswith((".csproj", ".vcxproj", ".sln"))]
         self.assertEqual(projects, [ROOT / "dlcv_infer_cpp_qt_demo" / "dlcv_infer_cpp_qt_demo.vcxproj"])
@@ -106,11 +104,10 @@ class CppPackageFilesTest(unittest.TestCase):
 
     def test_cpp_build_failure_returns_status_before_copying(self):
         with (
-            patch.object(build_package, "parse_args", return_value=argparse.Namespace(install=False, package="cpp")),
-            patch.object(build_package.os, "chdir"),
+            patch.object(build_package, "parse_args", return_value=argparse.Namespace(install=False)),
             patch.object(build_package, "require_file"),
             patch.object(build_package, "run_step", side_effect=subprocess.CalledProcessError(17, "build")),
-            patch.object(build_package, "copy_cpp_package_files") as copy_files,
+            patch.object(build_package, "copy_package_files") as copy_files,
         ):
             self.assertEqual(build_package.main(), 17)
         copy_files.assert_not_called()
