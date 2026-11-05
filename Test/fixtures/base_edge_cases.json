@@ -1,0 +1,1274 @@
+[
+  {
+    "name": "base-35-0",
+    "type": "post_process/base_region_extract",
+    "rectangles": [
+      [
+        95,
+        0,
+        275,
+        350,
+        35
+      ],
+      [
+        150,
+        280,
+        275,
+        340,
+        5
+      ]
+    ],
+    "properties": {},
+    "expected": [
+      {
+        "sample_results": [
+          {
+            "category_name": "底座",
+            "score": 1,
+            "bbox": [
+              94.0,
+              0.0,
+              181.0,
+              280.0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "base-35-1",
+    "type": "post_process/base_region_extract",
+    "rectangles": [
+      [
+        95,
+        0,
+        275,
+        350,
+        35
+      ],
+      [
+        150,
+        280,
+        275,
+        340,
+        5
+      ]
+    ],
+    "properties": {
+      "bright_transition_position_ratio": 1
+    },
+    "expected": [
+      {
+        "sample_results": [
+          {
+            "category_name": "底座",
+            "score": 1,
+            "bbox": [
+              94.0,
+              0.0,
+              181.0,
+              280.0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "base-35-2",
+    "type": "post_process/base_region_extract",
+    "rectangles": [
+      [
+        95,
+        0,
+        275,
+        350,
+        35
+      ],
+      [
+        150,
+        280,
+        275,
+        340,
+        5
+      ]
+    ],
+    "properties": {
+      "blur_kernel": 4,
+      "edge_percentile": 85,
+      "notch_band_ratio": 0.03
+    },
+    "expected": [
+      {
+        "sample_results": [
+          {
+            "category_name": "底座",
+            "score": 1,
+            "bbox": [
+              94.0,
+              0.0,
+              181.0,
+              280.0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "base-225-3",
+    "type": "post_process/base_region_extract",
+    "rectangles": [
+      [
+        95,
+        0,
+        275,
+        350,
+        225
+      ],
+      [
+        150,
+        280,
+        275,
+        340,
+        125
+      ]
+    ],
+    "properties": {},
+    "expected": [
+      {
+        "sample_results": [
+          {
+            "category_name": "底座",
+            "score": 1,
+            "bbox": [
+              94.0,
+              0.0,
+              181.0,
+              276.0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "base-225-4",
+    "type": "post_process/base_region_extract",
+    "rectangles": [
+      [
+        95,
+        0,
+        275,
+        350,
+        225
+      ],
+      [
+        150,
+        280,
+        275,
+        340,
+        125
+      ]
+    ],
+    "properties": {
+      "bright_transition_position_ratio": 1
+    },
+    "expected": [
+      {
+        "sample_results": [
+          {
+            "category_name": "底座",
+            "score": 1,
+            "bbox": [
+              94.0,
+              0.0,
+              181.0,
+              280.0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "base-225-5",
+    "type": "post_process/base_region_extract",
+    "rectangles": [
+      [
+        95,
+        0,
+        275,
+        350,
+        225
+      ],
+      [
+        150,
+        280,
+        275,
+        340,
+        125
+      ]
+    ],
+    "properties": {
+      "blur_kernel": 4,
+      "edge_percentile": 85,
+      "notch_band_ratio": 0.03
+    },
+    "expected": [
+      {
+        "sample_results": [
+          {
+            "category_name": "底座",
+            "score": 1,
+            "bbox": [
+              94.0,
+              0.0,
+              181.0,
+              273.0
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "uniform",
+    "type": "post_process/base_region_extract",
+    "expected": []
+  },
+  {
+    "name": "small",
+    "type": "post_process/base_region_extract",
+    "width": 10,
+    "height": 10,
+    "expected": []
+  },
+  {
+    "name": "defaults",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {},
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "reason": "上边距：30px；下边距：30px；左边距：20px；右边距：20px",
+        "extra_info": {
+          "edge_distances": {
+            "top": 30,
+            "bottom": 30,
+            "left": 20,
+            "right": 20
+          }
+        },
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "with_angle": false,
+            "is_distance_target": true
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "with_angle": false,
+            "is_distance_target": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "top1",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {},
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "score": 0.1
+          },
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              5,
+              5
+            ],
+            "score": 0.1
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "reason": "上边距：30px；下边距：30px；左边距：20px；右边距：20px",
+        "extra_info": {
+          "edge_distances": {
+            "top": 30,
+            "bottom": 30,
+            "left": 20,
+            "right": 20
+          }
+        },
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "with_angle": false,
+            "is_distance_target": true
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "with_angle": false,
+            "is_distance_target": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "equal-scores",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {},
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "文本",
+            "bbox": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "reason": "上边距：30px；下边距：30px；左边距：20px；右边距：20px",
+        "extra_info": {
+          "edge_distances": {
+            "top": 30,
+            "bottom": 30,
+            "left": 20,
+            "right": 20
+          }
+        },
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "with_angle": false,
+            "is_distance_target": true
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "with_angle": false,
+            "is_distance_target": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "negative",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {},
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              -10,
+              -5,
+              120,
+              130
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "reason": "上边距：-5px；下边距：-5px；左边距：-10px；右边距：-10px",
+        "extra_info": {
+          "edge_distances": {
+            "top": -5,
+            "bottom": -5,
+            "left": -10,
+            "right": -10
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "bottom-left-right",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {
+      "top": false
+    },
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "reason": "下边距：30px；左边距：20px；右边距：20px",
+        "extra_info": {
+          "edge_distances": {
+            "bottom": 30,
+            "left": 20,
+            "right": 20
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "missing",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {},
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "score": 0.9
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": false,
+        "sample_results": [],
+        "extra_info": {
+          "edge_distances": {}
+        }
+      }
+    ]
+  },
+  {
+    "name": "invalid-score",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {},
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "score": true
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": false,
+        "sample_results": []
+      }
+    ]
+  },
+  {
+    "name": "invalid-box",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {},
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              0,
+              60
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": false,
+        "sample_results": []
+      }
+    ]
+  },
+  {
+    "name": "zero",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {},
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "reason": "上边距：0px；下边距：0px；左边距：0px；右边距：0px"
+      }
+    ]
+  },
+  {
+    "name": "reject-17",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {
+      "category_1": ""
+    },
+    "reject": true
+  },
+  {
+    "name": "reject-18",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {
+      "top": false,
+      "bottom": false,
+      "left": false,
+      "right": false
+    },
+    "reject": true
+  },
+  {
+    "name": "crop-rescale",
+    "type": "post_process/bbox_edge_distance",
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "底座",
+            "bbox": [
+              50,
+              60,
+              100,
+              100
+            ],
+            "score": 0.9
+          }
+        ]
+      },
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              40,
+              40,
+              40
+            ],
+            "score": 0.9
+          }
+        ],
+        "transform": {
+          "original_width": 320,
+          "original_height": 420,
+          "affine_2x3": [
+            2,
+            0,
+            -100,
+            0,
+            2,
+            -120
+          ]
+        }
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "extra_info": {
+          "edge_distances": {
+            "top": 20,
+            "bottom": 60,
+            "left": 10,
+            "right": 70
+          }
+        },
+        "sample_results": [
+          {
+            "bbox": [
+              60,
+              80,
+              20,
+              20
+            ]
+          },
+          {
+            "bbox": [
+              50,
+              60,
+              100,
+              100
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "empty-input",
+    "type": "post_process/bbox_edge_distance",
+    "images": [],
+    "expected": []
+  },
+  {
+    "name": "rotated-five",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {},
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              50,
+              60,
+              20,
+              40,
+              1.5707963267948966
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "extra_info": {
+          "edge_distances": {
+            "top": 50,
+            "bottom": 50,
+            "left": 30,
+            "right": 30
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "rotated-four",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {},
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              50,
+              60,
+              20,
+              40
+            ],
+            "score": 0.9,
+            "with_angle": true,
+            "angle": 1.5707963267948966
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "extra_info": {
+          "edge_distances": {
+            "top": 50,
+            "bottom": 50,
+            "left": 30,
+            "right": 30
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "negative-zero",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {},
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              -4e-07,
+              30,
+              60,
+              60
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "extra_info": {
+          "edge_distances": {
+            "top": 30,
+            "bottom": 30,
+            "left": -4e-07,
+            "right": 40.0000004
+          }
+        },
+        "reason": "上边距：30px；下边距：30px；左边距：0px；右边距：40px"
+      }
+    ]
+  },
+  {
+    "name": "ignore-other-category-invalid-score",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {},
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "other",
+            "score": false
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "reason": "上边距：30px；下边距：30px；左边距：20px；右边距：20px",
+        "extra_info": {
+          "edge_distances": {
+            "top": 30,
+            "bottom": 30,
+            "left": 20,
+            "right": 20
+          }
+        },
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "with_angle": false,
+            "is_distance_target": true
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "with_angle": false,
+            "is_distance_target": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "retain-extra-info",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {},
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          }
+        ],
+        "extra_info": {
+          "marker": 42
+        }
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "reason": "上边距：30px；下边距：30px；左边距：20px；右边距：20px",
+        "extra_info": {
+          "edge_distances": {
+            "top": 30,
+            "bottom": 30,
+            "left": 20,
+            "right": 20
+          },
+          "marker": 42
+        },
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "with_angle": false,
+            "is_distance_target": true
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "with_angle": false,
+            "is_distance_target": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "checkbox-serialized-values",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {
+      "top": "off",
+      "bottom": "ON",
+      "left": 0,
+      "right": "yes"
+    },
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          }
+        ]
+      }
+    ],
+    "expected": [
+      {
+        "ok": true,
+        "reason": "下边距：30px；右边距：20px",
+        "extra_info": {
+          "edge_distances": {
+            "bottom": 30,
+            "right": 20
+          }
+        }
+      }
+    ]
+  },
+  {
+    "name": "singular-transform",
+    "type": "post_process/bbox_edge_distance",
+    "properties": {},
+    "results": [
+      {
+        "type": "local",
+        "index": 0,
+        "sample_results": [
+          {
+            "category_name": "文本",
+            "bbox": [
+              20,
+              30,
+              60,
+              60
+            ],
+            "score": 0.9
+          },
+          {
+            "category_name": "底座",
+            "bbox": [
+              0,
+              0,
+              100,
+              120
+            ],
+            "score": 0.9
+          }
+        ],
+        "transform": {
+          "original_width": 320,
+          "original_height": 420,
+          "affine_2x3": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    ],
+    "reject": true
+  },
+  {
+    "name": "rgb-gray-conversion",
+    "type": "post_process/base_region_extract",
+    "rectangles": [
+      [
+        95,
+        0,
+        275,
+        350,
+        [
+          240,
+          200,
+          150
+        ]
+      ],
+      [
+        150,
+        280,
+        275,
+        340,
+        [
+          140,
+          100,
+          50
+        ]
+      ]
+    ],
+    "properties": {},
+    "expected": [
+      {
+        "sample_results": [
+          {
+            "category_name": "底座",
+            "score": 1,
+            "bbox": [
+              149.0,
+              279.0,
+              126.0,
+              1.0
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

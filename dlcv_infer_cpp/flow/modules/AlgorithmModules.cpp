@@ -338,12 +338,138 @@ private:
     }
 };
 
+std::string EdgeTrim(const std::string& value) {
+    const auto begin = value.find_first_not_of(" \t\r\n"), end = value.find_last_not_of(" \t\r\n");
+    return begin == std::string::npos ? "" : value.substr(begin, end - begin + 1);
+}
+
+class BBoxEdgeDistanceModule final : public BaseModule {
+public:
+    using BaseModule::BaseModule;
+
+    ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        const std::string first = Category("category_1", "文本"), second = Category("category_2", "底座");
+        const std::array<const char*, 4> sides{"top", "bottom", "left", "right"};
+        const std::array<const char*, 4> labels{"上边距", "下边距", "左边距", "右边距"};
+        std::vector<int> selected;
+        for (int i = 0; i < 4; ++i) if (Selected(sides[i])) selected.push_back(i);
+        if (selected.empty()) throw std::invalid_argument("至少勾选一个边距方向");
+        ModuleIO output;
+        for (const auto& group : AlgorithmGroups(imageList, resultList, false)) {
+            bool ok = true;
+            std::string reason;
+            Json visible = Json::array(), extra = group.ExtraInfo;
+            extra["edge_distances"] = Json::object();
+            try {
+                const auto& a = Top1(group.Detections, first);
+                const auto& b = Top1(group.Detections, second);
+                const auto box1 = OriginalBox(a), box2 = OriginalBox(b);
+                Json distances = Json::object();
+                for (int side : selected) {
+                    const double value = side == 0 ? box1[1] - box2[1] : side == 1 ? box2[3] - box1[3]
+                        : side == 2 ? box1[0] - box2[0] : box2[2] - box1[2];
+                    if (!std::isfinite(value)) throw std::invalid_argument("边距不是有限数值");
+                    distances[sides[side]] = value;
+                    if (!reason.empty()) reason += "；";
+                    reason += std::string(labels[side]) + "：" + AlgorithmDistanceText(std::abs(value) < 0.0000005 ? 0.0 : value) + "px";
+                }
+                extra["category_1"] = first; extra["category_2"] = second;
+                extra["bbox_1"] = box1; extra["bbox_2"] = box2; extra["edge_distances"] = std::move(distances);
+                visible.push_back(Visible(*a.Value, box1)); visible.push_back(Visible(*b.Value, box2));
+            } catch (const std::invalid_argument& ex) { ok = false; reason = std::string("无法计算边距：") + ex.what(); }
+            const auto& image = group.Original;
+            output.ResultList.push_back({{"type", "local"}, {"originating_module", "post_process/bbox_edge_distance"},
+                {"index", output.ImageList.size()}, {"origin_index", image.OriginalIndex}, {"transform", image.TransformState.ToJson()},
+                {"ok", ok}, {"reason", reason}, {"extra_info", std::move(extra)}, {"sample_results", std::move(visible)}});
+            output.ImageList.push_back(image);
+        }
+        return output;
+    }
+
+private:
+    std::string Category(const char* key, const char* fallback) const {
+        const Json value = Properties.value(key, Json(fallback));
+        const std::string text = EdgeTrim(value.is_null() ? "" : value.is_string() ? value.get<std::string>() : value.dump());
+        if (text.empty()) throw std::invalid_argument(std::string(key) + " 不能为空");
+        return text;
+    }
+
+    bool Selected(const char* key) const {
+        const Json value = Properties.value(key, Json(true));
+        if (value.is_boolean()) return value.get<bool>();
+        if (value.is_number()) return value.get<double>() != 0;
+        if (!value.is_string()) return false;
+        std::string text = EdgeTrim(value.get<std::string>());
+        for (auto& c : text) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+        return text == "1" || text == "true" || text == "yes" || text == "on";
+    }
+
+    static const AlgorithmDetection& Top1(const std::vector<AlgorithmDetection>& detections, const std::string& category) {
+        const AlgorithmDetection* best = nullptr;
+        double bestScore = -std::numeric_limits<double>::infinity();
+        for (const auto& detection : detections) {
+            const auto& value = *detection.Value;
+            if (!value.contains("category_name") || !value.at("category_name").is_string() || EdgeTrim(value.at("category_name").get<std::string>()) != category) continue;
+            double score;
+            try { score = AlgorithmNumber(value.value("score", Json())); }
+            catch (const std::invalid_argument&) { throw std::invalid_argument("类别“" + category + "”存在无效 score"); }
+            if (!best || score > bestScore) { best = &detection; bestScore = score; }
+        }
+        if (!best) throw std::invalid_argument("未找到类别“" + category + "”的目标");
+        return *best;
+    }
+
+    static Json Visible(Json result, const std::array<double, 4>& box) {
+        for (const auto* key : {"rbox", "poly", "polygon", "mask_array", "mask_rle"}) result.erase(key);
+        result["bbox"] = {box[0], box[1], box[2] - box[0], box[3] - box[1]};
+        result["with_angle"] = false; result["angle"] = -100; result["with_mask"] = false;
+        result["is_distance_target"] = true;
+        return result;
+    }
+
+    static std::array<double, 4> OriginalBox(const AlgorithmDetection& detection) {
+        const auto& value = *detection.Value;
+        Json bbox = value.value("bbox", Json());
+        bool xyxy = false;
+        if (bbox.is_object()) {
+            xyxy = bbox.contains("x1") && bbox.contains("y1") && bbox.contains("x2") && bbox.contains("y2");
+            bbox = xyxy ? Json::array({bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]})
+                : Json::array({bbox.value("cx", Json()), bbox.value("cy", Json()), bbox.value("w", Json()), bbox.value("h", Json()), bbox.value("angle", bbox.value("theta", Json(0)))});
+        }
+        if (!bbox.is_array() || (bbox.size() != 4 && bbox.size() != 5)) throw std::invalid_argument("bbox 格式无效");
+        std::array<double, 5> v{};
+        for (size_t i = 0; i < bbox.size(); ++i) v[i] = AlgorithmNumber(bbox[i]);
+        bool rotated = bbox.size() == 5;
+        if (!xyxy && !rotated && value.contains("with_angle") && value.at("with_angle") == true) {
+            v[4] = AlgorithmNumber(value.value("angle", Json())); rotated = v[4] > -99;
+        }
+        const double width = xyxy ? v[2] - v[0] : v[2], height = xyxy ? v[3] - v[1] : v[3];
+        if (width <= 0 || height <= 0) throw std::invalid_argument("bbox 宽高必须大于零");
+        const double cx = rotated ? v[0] : v[0] + width / 2, cy = rotated ? v[1] : v[1] + height / 2;
+        const double cosine = rotated ? std::cos(v[4]) : 1, sine = rotated ? std::sin(v[4]) : 0;
+        const double infinity = std::numeric_limits<double>::infinity();
+        std::array<double, 4> box{infinity, infinity, -infinity, -infinity};
+        const auto& t = detection.Inverse;
+        for (int sx : {-1, 1}) for (int sy : {-1, 1}) {
+            const double x = cx + sx * width / 2 * cosine - sy * height / 2 * sine;
+            const double y = cy + sx * width / 2 * sine + sy * height / 2 * cosine;
+            const double ox = t[0] * x + t[1] * y + t[2], oy = t[3] * x + t[4] * y + t[5];
+            if (!std::isfinite(ox) || !std::isfinite(oy)) throw std::invalid_argument("bbox 原图坐标不是有限数值");
+            box[0] = (std::min)(box[0], ox); box[1] = (std::min)(box[1], oy);
+            box[2] = (std::max)(box[2], ox); box[3] = (std::max)(box[3], oy);
+        }
+        if (box[2] <= box[0] || box[3] <= box[1]) throw std::invalid_argument("bbox 宽高必须大于零");
+        return box;
+    }
+};
+
 } // namespace
 
 DLCV_FLOW_REGISTER_MODULE("post_process/sequence_check", SequenceCheckModule)
 // 仅兼容旧流程类型；判定输出统一使用新主标识。
 DLCV_FLOW_REGISTER_MODULE("post_process/wire_sequence_check", SequenceCheckModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/offset_distance", OffsetDistanceModule)
+DLCV_FLOW_REGISTER_MODULE("post_process/bbox_edge_distance", BBoxEdgeDistanceModule)
 
 } // namespace flow
 } // namespace dlcv_infer

@@ -51,7 +51,7 @@ namespace DlcvModules
             return new ModuleIO(images, results);
         }
 
-        private static string FormatDistance(double distance)
+        internal static string FormatDistance(double distance)
         {
             // Framework F6 中点远离零；按 double 的精确二进制值做六位十进制舍入，
             // 与 Python .6f 的 ties-to-even 一致，也避免先乘 1e6 引入二次舍入。
