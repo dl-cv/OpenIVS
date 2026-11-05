@@ -22,7 +22,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 
 ### 日常项目编译
 
-- 单个 `.sln`、`.csproj` 或 `.vcxproj` 的日常编译、构建和重建使用用户级 `vs-build-1.0.0`，由项目保留的 `.cursor/skills/vs-build/scripts/build.py` 调用 Visual Studio 工具链。
+- 单个 `.sln`、`.csproj` 或 `.vcxproj` 的日常编译、构建和重建使用用户级 `vs-build-1.0.0`，由项目保留的 `build_script/build.py` 调用 Visual Studio 工具链。
 - .NET 与 C++ 项目均受支持；C++/C API、Qt Demo 和控制台测试等 `.vcxproj` 的日常编译继续使用此入口。
 - **禁止直接调用** `msbuild`、`dotnet`、`devenv` 或其他本地 shell 编译命令
 - **默认构建参数**：`Debug`、`x64`、`Build`、`minimal`
@@ -37,10 +37,12 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 ### 正式编译、打包与安装
 
 - 仓库级编译验证、正式打包和安装使用用户级 `dlcv-build-install-1.0.0`，按根目录编号脚本执行，不用 `vs-build-1.0.0` 替代正式流程。
-- 发布 C# 测试程序 wheel：`1_编译打包.bat`，需要安装时再执行 `2_安装新版.bat`。
+- Python 编译辅助脚本和 setup 脚本放在 `build_script/`，根目录保留编号 bat。项目专用 `.targets/.props` 放在所属项目目录：`ZXingRuntime.targets` 位于 `dlcv_infer_cpp/`，Qt Mask 配置位于 `Test/qt_demo/`；多个项目共用的 `DlcvNativeRuntime.targets` 位于 `build_script/`。
+- 发布 C# 测试程序 wheel：`1_编译打包.bat` 调用 `build_script/build_package.py`，版本来自 `build_script/setup.py` 的 `version`，由 `build_script/sync_assembly_version.py` 同步程序集版本；需要安装时执行 `2_安装新版.bat`。
+- 发布 C++ Qt 测试程序 wheel：`1_编译打包(C++).bat` 调用 `build_script/build_cpp_package.py`，安装使用 `2_安装新版(C++).bat`；包名为 `dlcvpro_infer_cpp`，版本来自 `build_script/setup_cpp.py` 的 `version`，产物位于 `dist_cpp/`。分发构建通过 `DlcvUseSharedQt=true` 使用独立输出，运行时加载 `C:\dlcv\bin` 的 Qt 6.10.2、插件与 ZXing，包内无 Qt 或 ZXing 文件。
 
-- Sentinel 管理工具仅保留独立 C# 工程与测试，使用 Visual Studio 或仓库共享 `build.py` 进行日常项目编译，不提供独立打包、安装脚本。
-- Sentinel 后端及界面测试使用 `Test/SentinelManagerTest`：无参数执行后端隔离测试，`ui-test --output-dir <系统临时子目录>` 使用固定数据执行界面回归并保存 PNG 与 UTF-8 JSON。验证不得连接真实 ACC、写真实授权配置或控制真实服务。
+- Sentinel 管理工具位于 `Test/SentinelManager/`，在解决方案中归入 `Test` 分组；使用 Visual Studio 或仓库共享 `build.py` 进行日常项目编译，不提供独立打包、安装脚本。
+- Sentinel 测试使用 `Test/SentinelManagerTest`：无参数执行后端隔离测试，`designer-test` 检查窗体入口、资源及 WinForms DesignSurface 加载，`ui-test --output-dir <系统临时子目录>` 使用固定数据执行界面与按钮事件回归并保存 PNG 与 UTF-8 JSON。验证不得连接真实 ACC、写真实授权配置或控制真实服务。
 
 ## 统一运行与验证输入规则
 

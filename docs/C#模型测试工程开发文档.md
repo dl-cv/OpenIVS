@@ -194,7 +194,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
 
 测试程序在单个进程内依次执行无外部参数自测和固定模型回归用例。完整清单执行结束后返回，任一测试失败时返回 `1`，参数或日志路径无效时返回 `2`。
 
-- 单项目日常构建使用 `.cursor/skills/vs-build/scripts/build.py`；产品打包与完整回归构建分别使用上述两个独立入口。
+- 单项目日常构建使用 `build_script/build.py`；产品打包与完整回归构建分别使用上述两个独立入口。
 - 运行文件：
   - `Test\DlcvCSharpTest\bin\x64\Release\DlcvCSharpTest.exe`
   - `Release\dlcv_infer_cpp_test.exe`

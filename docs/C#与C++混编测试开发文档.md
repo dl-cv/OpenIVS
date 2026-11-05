@@ -5,7 +5,7 @@
 - `DlcvCSharpCppTest.csproj`：C# 7.3、.NET Framework 4.7.2、WinForms、x64。
 - `Bridge/DlcvCSharpCppBridge.vcxproj`：VS 2022 v143 C++/CLI 动态库，原生模型实现单独以 C++17 编译。
 - 窗口程序及桥接工程位于根目录 `DlcvCSharpCppTest/`，在现有 `OpenIVS.sln` 中作为普通项目展示；自测文件及自动验证脚本留在 `Test/DlcvCSharpCppTest/`，由窗口工程链接编译。依赖通过工程引用构建，不复制 API 源码，不加入发布打包流程。
-- `DlcvNativeRuntime.targets` 从引用工程取得本次 `dlcv_infer_cpp.dll`；桥接工程提供 OpenCV 运行库路径，由 C# 工程复制到 EXE 目录。
+- `build_script/DlcvNativeRuntime.targets` 从引用工程取得本次 `dlcv_infer_cpp.dll`；桥接工程提供 OpenCV 运行库路径，由 C# 工程复制到 EXE 目录。
 
 ## Visual Studio 界面编辑
 
@@ -72,7 +72,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File Test/DlcvCSharpCppTest/check
 自动化单项目编译使用仓库既有入口：
 
 ```powershell
-python .cursor/skills/vs-build/scripts/build.py DlcvCSharpCppTest/DlcvCSharpCppTest.csproj --configuration Debug --platform x64 --target Build --verbosity minimal
+python build_script/build.py DlcvCSharpCppTest/DlcvCSharpCppTest.csproj --configuration Debug --platform x64 --target Build --verbosity minimal
 ```
 
 输出：`DlcvCSharpCppTest/bin/x64/Debug/DlcvCSharpCppTest.exe`。双击或不带参数运行进入界面。

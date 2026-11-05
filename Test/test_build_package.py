@@ -5,7 +5,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import patch
 
-import build_package
+from build_script import build_package
 
 
 class CopyPackageFilesTest(unittest.TestCase):
@@ -82,8 +82,8 @@ class BuildScopeTest(unittest.TestCase):
                     built_projects.append(Path(argument))
         self.assertEqual([repo_root / "DlcvDemo" / "DlcvDemo.csproj"], built_projects)
         wheel_command = next(call.args[1] for call in run_step.call_args_list
-                             if call.args[1][1:3] == ["-m", "build"])
-        self.assertIn("--no-isolation", wheel_command)
+                             if "bdist_wheel" in call.args[1])
+        self.assertEqual(repo_root / "build_script" / "setup.py", Path(wheel_command[1]))
 
 
 class TestProjectDependenciesTest(unittest.TestCase):

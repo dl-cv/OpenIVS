@@ -46,7 +46,9 @@ class BarcodeApi final {
         path += L"ZXing.dll";
         HMODULE handle = LoadLibraryExW(path.c_str(), nullptr,
             LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-        if (!handle) throw std::runtime_error("Cannot load adjacent ZXing.dll (restore ZXingCpp 0.5.3 and rebuild), Win32=" + std::to_string(GetLastError()));
+        if (!handle) handle = LoadLibraryExW(L"C:\\dlcv\\bin\\ZXing.dll", nullptr,
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        if (!handle) throw std::runtime_error("Cannot load ZXing.dll from module directory or C:\\dlcv\\bin, Win32=" + std::to_string(GetLastError()));
         return handle;
     }
 public:

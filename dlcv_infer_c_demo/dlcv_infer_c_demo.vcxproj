@@ -127,6 +127,6 @@
     <Error Condition="!Exists('$(OpenCvLibDir)\opencv_world4100.lib') and '$(Configuration)'!='Debug'" Text="未找到 OpenCV Release 库 opencv_world4100.lib。" />
   </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <Import Project="$(ProjectDir)..\DlcvNativeRuntime.targets" />
+  <Import Project="$(ProjectDir)..\build_script\DlcvNativeRuntime.targets" />
   <ImportGroup Label="ExtensionTargets" />
 </Project>

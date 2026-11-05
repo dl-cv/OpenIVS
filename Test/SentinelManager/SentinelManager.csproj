@@ -17,12 +17,12 @@
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
     <DefineConstants>DEBUG;TRACE</DefineConstants>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'">
     <Optimize>true</Optimize>
     <DebugType>pdbonly</DebugType>
     <DefineConstants>TRACE</DefineConstants>
@@ -38,7 +38,15 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />
-    <Compile Include="SentinelManagerForm.cs" />
+    <Compile Include="SentinelManagerForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="SentinelManagerForm.Designer.cs">
+      <DependentUpon>SentinelManagerForm.cs</DependentUpon>
+    </Compile>
+    <EmbeddedResource Include="SentinelManagerForm.resx">
+      <DependentUpon>SentinelManagerForm.cs</DependentUpon>
+    </EmbeddedResource>
     <Compile Include="SentinelClient.cs" />
     <Compile Include="SentinelProtocol.cs" />
     <Compile Include="LocalServicePatch.cs" />

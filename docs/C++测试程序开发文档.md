@@ -35,7 +35,7 @@
 
 ### 2.2 Visual Studio 编译
 
-- 构建统一通过 `.cursor/skills/vs-build/scripts/build.py` 执行，目标为 `dlcv_infer_cpp_qt_demo/dlcv_infer_cpp_qt_demo.vcxproj`。
+- 构建统一通过 `build_script/build.py` 执行，目标为 `dlcv_infer_cpp_qt_demo/dlcv_infer_cpp_qt_demo.vcxproj`。
 - 默认配置为 `Debug`、`x64`、`Build`、`minimal`；发布构建使用 `Release`、`x64`、`Build`、`minimal`。
 - 项目通过 `ProjectReference` 构建并链接 `dlcv_infer_cpp`，不从其他输出目录查找同名导入库。
 - Qt、OpenCV 与 DLCV SDK 依赖路径由工程属性解析；缺失时构建失败。
@@ -45,7 +45,7 @@
 - 直接构建项目时，Debug 输出为 `dlcv_infer_cpp_qt_demo/Debug/dlcv_infer_cpp_qt_demo/dlcv_infer_cpp_qt_demo.exe`。
 - 直接构建项目时，Release 输出为 `dlcv_infer_cpp_qt_demo/Release/dlcv_infer_cpp_qt_demo/dlcv_infer_cpp_qt_demo.exe`。
 - 通过 `OpenIVS.sln` 构建时，EXE 输出位于解决方案根目录的 `Debug/dlcv_infer_cpp_qt_demo/` 或 `Release/dlcv_infer_cpp_qt_demo/`。
-- `DlcvNativeRuntime.targets` 从工程引用取得本次 DLL 并复制至 EXE 目录；必需 Qt DLL 和平台插件复制失败会使构建失败，样式插件存在时复制。
+- `build_script/DlcvNativeRuntime.targets` 从工程引用取得本次 DLL 并复制至 EXE 目录；必需 Qt DLL 和平台插件复制失败会使构建失败，样式插件存在时复制。
 - 底层 `dlcv_infer.dll` 或 `dlcv_infer_v.dll` 由首次普通模型的模型头确定为默认 DLL；后续普通模型沿用该 DLL并逐个检查授权。
 
 ---

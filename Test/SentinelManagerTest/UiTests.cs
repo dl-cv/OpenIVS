@@ -207,6 +207,7 @@ namespace SentinelManagerTest
                         layout("initial");
                         var raw = (TextBox)control("rawResult");
                         var grid = (DataGridView)control("detailsGrid");
+                        check("表头保留粗体", grid.ColumnHeadersDefaultCellStyle.Font.Bold);
                         var tabs = (TabControl)control("resultTabs");
                         string[] buttonNames = { "infoButton", "lmidButton", "networkButton", "patchButton", "repairButton" };
                         check("启动不访问服务", client.Calls.Count == 0 && !form.Busy);
@@ -283,6 +284,16 @@ namespace SentinelManagerTest
                         client.Fail = false;
                         await form.RunOperationAsync(SentinelOperation.GetInfo);
                         check("失败后可再次查询", control("statusLabel").Text == "执行完成" && raw.Text.Contains("TEST-0001"));
+                        foreach (var binding in new[] {
+                            new[] { "infoButton", "GetInfo" }, new[] { "lmidButton", "CreateLmid" },
+                            new[] { "networkButton", "DisableNetwork" }, new[] { "patchButton", "ApplyLocalPatch" },
+                            new[] { "repairButton", "Repair" } })
+                        {
+                            int previousCalls = client.Calls.Count;
+                            ((Button)control(binding[0])).PerformClick();
+                            while (form.Busy && !finished) await Task.Delay(10);
+                            check(binding[0] + "绑定对应操作", client.Calls.Count == previousCalls + 1 && client.Calls.Last() == binding[1]);
+                        }
                         if (!finished) exitCode = 0;
                     }
                     catch (Exception ex) { checks.Add(new { name = "异常：" + ex.Message, passed = false }); Console.Error.WriteLine(ex); }

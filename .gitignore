@@ -17,6 +17,9 @@ temp/
 *.exe
 *.dll
 dlcvpro_infer_csharp
+dlcvpro_infer_cpp
+build_cpp/
+dist_cpp/
 dist/
 
 *.whl

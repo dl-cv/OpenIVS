@@ -714,6 +714,12 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
+#ifdef DLCV_SHARED_QT_RUNTIME
+    QCoreApplication::addLibraryPath(QStringLiteral("C:/dlcv/bin"));
+    if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM_PLUGIN_PATH")) {
+        qputenv("QT_QPA_PLATFORM_PLUGIN_PATH", "C:/dlcv/bin");
+    }
+#endif
     QApplication app(argc, argv);
     app.setApplicationName("C++测试程序");
     app.setOrganizationName("dlcv");

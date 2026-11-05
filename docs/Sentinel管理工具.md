@@ -5,7 +5,7 @@
 ## 依赖
 
 - 运行环境：Windows x64、.NET Framework 4.7.2。
-- 编译环境：Python 3.10 或更高版本、Visual Studio MSBuild、.NET Framework 4.7.2 开发工具包。工具链由仓库 `.cursor/skills/vs-build/scripts/build.py` 查找。
+- 编译环境：Python 3.10 或更高版本、Visual Studio MSBuild、.NET Framework 4.7.2 开发工具包。工具链由仓库 `build_script/build.py` 查找。
 - 真实设备操作需要本机 Sentinel LDK Runtime、`hasplms` 服务及 ACC 可访问。隔离测试不连接真实设备或服务。
 
 ## 五项功能与操作确认
@@ -22,9 +22,13 @@
 
 ## 工程运行
 
-使用 Visual Studio 打开 `OpenIVS.sln`，将 `SentinelManager` 设为启动项目后运行；命令行日常编译使用仓库共享 `.cursor/skills/vs-build/scripts/build.py`，不提供独立打包或安装入口。
+工程位于 `Test/SentinelManager/SentinelManager.csproj`。使用 Visual Studio 打开 `OpenIVS.sln`，在 `Test` 分组中将 `SentinelManager` 设为启动项目后运行；命令行日常编译使用仓库共享 `build_script/build.py`，不提供独立打包或安装入口。
 
 `Properties/AssemblyInfo.cs` 为程序集版本来源。运行配置由 `App.config` 生成，运行时须与程序放在同一目录。
+
+窗体布局位于 `SentinelManagerForm.Designer.cs` 的 `InitializeComponent`，资源位于同名 `.resx`，操作逻辑与响应式布局调整位于 `SentinelManagerForm.cs`。VS 通过无参数构造入口加载窗体；测试仍可传入 `ISentinelClient` 和确认回调。打开 `SentinelManagerForm.cs` 的设计视图可编辑按钮、页签与结果表格，设计器初始化不访问设备服务。
+
+工程通过 `Debug|x64`、`Release|x64` 两个条件属性组声明 VS 可枚举的启动配置。仅设置 `Platform` 默认值、但条件组只按 `Configuration` 区分时，VS 无法匹配解决方案的 x64 启动配置。`Test/SentinelManagerTest/check_startup_configuration.ps1` 使用 MSBuild 工程求值检查可枚举平台、Debug/Release 配置、解决方案映射与 EXE 路径；该检查不编译或启动程序。
 
 ## 配置页面兼容
 
@@ -47,6 +51,7 @@
 构建后测试程序位于 `Test/SentinelManagerTest/bin/Release/SentinelManagerTest.exe`：
 
 - 无参数：执行后端隔离测试，退出码为零才继续。
+- `designer-test`：检查无参数构造入口、`InitializeComponent` 和窗体资源，使用 WinForms `DesignSurface` 加载窗体并检查操作按钮、结果页签与表格。
 - `ui-test --output-dir <系统临时目录内的专用子目录>`：执行固定数据界面回归，不模拟鼠标键盘或控制桌面窗口。结果为严格 UTF-8 的 `ui-test-results.json`，截图为 `initial.png`、`result.png`、`raw-result.png`、`compact.png`。
 
 ### DPI 回归

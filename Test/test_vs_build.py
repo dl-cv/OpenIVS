@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / ".cursor/skills/vs-build/scripts/build.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "build_script/build.py"
 spec = importlib.util.spec_from_file_location("vs_build", SCRIPT)
 build = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(build)

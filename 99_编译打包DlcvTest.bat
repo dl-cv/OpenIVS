@@ -5,7 +5,7 @@ cd /d "%~dp0"
 
 set "ROOT=%~dp0"
 set "PROJ=%ROOT%DlcvTest\DlcvTest.csproj"
-set "BUILD_PY=%ROOT%.cursor\skills\vs-build\scripts\build.py"
+set "BUILD_PY=%ROOT%build_script\build.py"
 set "OUT_DIR=%ROOT%DlcvTest\bin\x64\Release"
 set "SEVEN_Z=C:\Program Files\7-Zip\7z.exe"
 
