@@ -23,52 +23,85 @@
     <PlatformTarget>x64</PlatformTarget>
     <OutputPath>bin\x64\Debug\</OutputPath>
     <Optimize>false</Optimize>
-    <DebugSymbols>true</DebugSymbols><DebugType>full</DebugType><DefineConstants>DEBUG;TRACE</DefineConstants>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'">
     <PlatformTarget>x64</PlatformTarget>
     <OutputPath>bin\x64\Release\</OutputPath>
-    <Optimize>true</Optimize><DebugType>pdbonly</DebugType><DefineConstants>TRACE</DefineConstants>
+    <Optimize>true</Optimize>
+    <DebugType>pdbonly</DebugType>
+    <DefineConstants>TRACE</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="System" /><Reference Include="System.Configuration" /><Reference Include="System.Core" />
-    <Reference Include="System.Drawing" /><Reference Include="System.Windows.Forms" />
+    <Reference Include="System" />
+    <Reference Include="System.Configuration" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
     <Reference Include="Newtonsoft.Json">
       <HintPath>..\packages\Newtonsoft.Json.13.0.3\lib\net45\Newtonsoft.Json.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\DlcvCsharpApi\DlcvCsharpApi.csproj">
-      <Project>{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}</Project><Name>DlcvCsharpApi</Name>
+      <Project>{73D82DBE-59D3-46F9-A8B3-87E13EB220EC}</Project>
+      <Name>DlcvCsharpApi</Name>
     </ProjectReference>
     <ProjectReference Include="Bridge\DlcvCSharpCppBridge.vcxproj">
-      <Project>{790E1BA1-248B-49D3-B9D6-34BC0E55FBCD}</Project><Name>DlcvCSharpCppBridge</Name>
+      <Project>{790E1BA1-248B-49D3-B9D6-34BC0E55FBCD}</Project>
+      <Name>DlcvCSharpCppBridge</Name>
     </ProjectReference>
     <ProjectReference Include="..\dlcv_infer_cpp\dlcv_infer_cpp.vcxproj">
-      <Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project><Name>dlcv_infer_cpp</Name>
+      <Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project>
+      <Name>dlcv_infer_cpp</Name>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Program.cs" /><Compile Include="ModelSession.cs" />
-    <Compile Include="MainForm.cs"><SubType>Form</SubType></Compile>
-    <Compile Include="MainForm.Designer.cs"><DependentUpon>MainForm.cs</DependentUpon></Compile>
-    <Compile Include="..\Test\DlcvCSharpCppTest\SelfTest.cs"><Link>Test\SelfTest.cs</Link></Compile>
-    <Compile Include="..\Test\DlcvCSharpCppTest\CommandLineTest.cs"><Link>Test\CommandLineTest.cs</Link></Compile>
-    <Compile Include="..\Test\DlcvCSharpCppTest\AppearanceSelfTest.cs"><Link>Test\AppearanceSelfTest.cs</Link></Compile>
-    <Compile Include="..\Test\DlcvCSharpCppTest\MainForm.Testing.cs"><Link>Test\MainForm.Testing.cs</Link></Compile>
-    <Compile Include="..\Test\DlcvCSharpCppTest\ModelPathSelfTest.cs"><Link>Test\ModelPathSelfTest.cs</Link></Compile>
+    <Compile Include="Program.cs" />
+    <Compile Include="ModelSession.cs" />
+    <Compile Include="MainForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="MainForm.Designer.cs">
+      <DependentUpon>MainForm.cs</DependentUpon>
+    </Compile>
+    <Compile Include="..\Test\DlcvCSharpCppTest\SelfTest.cs">
+      <Link>Test\SelfTest.cs</Link>
+    </Compile>
+    <Compile Include="..\Test\DlcvCSharpCppTest\CommandLineTest.cs">
+      <Link>Test\CommandLineTest.cs</Link>
+    </Compile>
+    <Compile Include="..\Test\DlcvCSharpCppTest\AppearanceSelfTest.cs">
+      <Link>Test\AppearanceSelfTest.cs</Link>
+    </Compile>
+    <Compile Include="..\Test\DlcvCSharpCppTest\MainForm.Testing.cs">
+      <Link>Test\MainForm.Testing.cs</Link>
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="..\Test\DlcvCSharpCppTest\ModelPathSelfTest.cs">
+      <Link>Test\ModelPathSelfTest.cs</Link>
+    </Compile>
     <Compile Include="Properties\Settings.cs" />
-    <EmbeddedResource Include="MainForm.resx"><DependentUpon>MainForm.cs</DependentUpon></EmbeddedResource>
-    <None Include="App.config" /><None Include="app.manifest" />
-    <None Include="..\Test\DlcvCSharpCppTest\check_startup_configuration.ps1"><Link>Test\check_startup_configuration.ps1</Link></None>
-    <None Include="..\Test\DlcvCSharpCppTest\run_tests.py"><Link>Test\run_tests.py</Link></None><None Include="update_launch_profile.py" />
+    <EmbeddedResource Include="MainForm.resx">
+      <DependentUpon>MainForm.cs</DependentUpon>
+    </EmbeddedResource>
+    <None Include="App.config" />
+    <None Include="app.manifest" />
+    <None Include="..\Test\DlcvCSharpCppTest\check_startup_configuration.ps1">
+      <Link>Test\check_startup_configuration.ps1</Link>
+    </None>
+    <None Include="..\Test\DlcvCSharpCppTest\run_tests.py">
+      <Link>Test\run_tests.py</Link>
+    </None>
+    <None Include="update_launch_profile.py" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Import Project="..\DlcvNativeRuntime.targets" />
   <Target Name="CopyBridgeRuntime" AfterTargets="CopyDlcvReferencedRuntime">
-    <MSBuild Projects="Bridge\DlcvCSharpCppBridge.vcxproj" Targets="GetTestRuntimeFiles" BuildInParallel="false"
-             Properties="Configuration=$(Configuration);Platform=$(Platform)">
+    <MSBuild Projects="Bridge\DlcvCSharpCppBridge.vcxproj" Targets="GetTestRuntimeFiles" BuildInParallel="false" Properties="Configuration=$(Configuration);Platform=$(Platform)">
       <Output TaskParameter="TargetOutputs" ItemName="_BridgeRuntime" />
     </MSBuild>
     <Copy SourceFiles="@(_BridgeRuntime)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />

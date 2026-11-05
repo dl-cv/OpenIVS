@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using OpenIVS2.Services;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +19,7 @@ namespace DlcvSequenceTest
 
         private static int Main()
         {
+            Run(() => FlowTimingTests.Run(Assert));
             Run(TestCanvasPositionArrayLoads);
             Run(TestCycleIsRejected);
             Run(TestOneToSixCameraGraphsValidate);
@@ -27,9 +30,114 @@ namespace DlcvSequenceTest
             RunAsync(TestPipelineOverlapsCaptureAndInferenceAsync);
             RunAsync(TestConcurrentTriggerIsRejectedAsync);
             Run(TestHardwareCameraNeedsInjectedFactory);
+            Run(() => CameraStartupTests.Run(Assert));
+            Run(() => CameraFrameTests.Run(Assert));
+            RunAsync(() => TestCameraTimeoutRecoveryAsync(false));
+            RunAsync(() => TestCameraTimeoutRecoveryAsync(true));
+            RunAsync(TestTcpCameraTimeoutRecoveryAsync);
 
             Console.WriteLine("Passed={0} Failed={1}", _passed, _failed);
             return _failed == 0 ? 0 : 1;
+        }
+
+        private static async Task TestCameraTimeoutRecoveryAsync(bool armed)
+        {
+            var cameras = new TrackingCameraFactory { FailNextFrame = true };
+            var display = new LockedDisplaySink();
+            var modbus = new MockModbusClient();
+            var host = new SequenceHost();
+            var completed = 0;
+            var failed = 0;
+            SequenceTriggerFailure failure = null;
+            host.LoadWithoutStart(BuildPipelineGraph(1), new MockAiFlowRunner(), display, modbus, path => path);
+            host.Executor.CameraFactory = cameras;
+            host.Executor.TriggerCompleted = () => { completed++; return Task.CompletedTask; };
+            host.Executor.TriggerFailed = value =>
+            {
+                failed++;
+                failure = value;
+                modbus.WriteSingleRegister(4111, 0);
+                return Task.CompletedTask;
+            };
+            host.Start();
+            try
+            {
+                var info = new Dictionary<string, object> { { "photo_reg", 4111 } };
+                modbus.SetRegister(4111, 1);
+                var caught = false;
+                if (armed)
+                    Assert(await host.Executor.TryTriggerFromArmAsync("trigger", info), "后台触发捕获超时，不向轮询线程抛出");
+                else
+                {
+                    try { await host.TriggerAsync("trigger", info); }
+                    catch (NodeExecutionException ex) { caught = ex.GetBaseException() is TimeoutException; }
+                    Assert(caught, "手动触发可捕获包含超时原因的节点异常");
+                }
+                await host.WaitForIdleAsync();
+                Assert(failed == 1 && completed == 0 && display.UpdateCount == 0 &&
+                    failure.FailureNodeId == "wait_A" && failure.Exception is TimeoutException &&
+                    !failure.Results.ContainsKey("run_A"), "超时只报告一次失败，不推理、不发布成功画面");
+                Assert(modbus.ReadHoldingRegister(4111) == 0, "超时失败回调可清除拍照信号");
+                if (armed)
+                    await host.Executor.TryTriggerFromArmAsync("trigger", info);
+                else
+                    await host.TriggerAsync("trigger", info);
+                Assert(completed == 1 && failed == 1 && display.UpdateCount == 1,
+                    "超时后释放触发锁，下一周期可以正常完成");
+            }
+            finally
+            {
+                await host.WaitForIdleAsync();
+                host.Stop();
+            }
+        }
+
+        private static async Task TestTcpCameraTimeoutRecoveryAsync()
+        {
+            var graph = BuildPipelineGraph(1);
+            var trigger = graph.Nodes.First(x => x.Id == "trigger");
+            trigger.Type = "modbus_tcp_input";
+            trigger.Props = new JObject
+            {
+                { "photo_reg", 4111 }, { "photo_value", 1 },
+                { "barcode_count", 0 }, { "poll_interval_ms", 20 }
+            };
+            var cameras = new TrackingCameraFactory { FailNextFrame = true };
+            var modbus = new RecoveringModbusClient(0);
+            var display = new LockedDisplaySink();
+            var failed = new TaskCompletionSource<SequenceTriggerFailure>();
+            var completed = new TaskCompletionSource<bool>();
+            var host = new SequenceHost();
+            host.LoadWithoutStart(graph, new MockAiFlowRunner(), display, modbus, path => path);
+            host.Executor.CameraFactory = cameras;
+            host.Executor.TriggerFailed = failure =>
+            {
+                modbus.WriteSingleRegister(4111, 0);
+                failed.TrySetResult(failure);
+                return Task.CompletedTask;
+            };
+            host.Executor.TriggerCompleted = () => { completed.TrySetResult(true); return Task.CompletedTask; };
+            host.Start();
+            try
+            {
+                if (!modbus.ZeroObserved.Wait(3000)) throw new Exception("模拟 TCP 未进入轮询");
+                modbus.SetRegister(4111, 1);
+                var result = await Task.WhenAny(failed.Task, Task.Delay(3000));
+                Assert(result == failed.Task && failed.Task.Result.Exception is TimeoutException &&
+                    display.UpdateCount == 0 && !completed.Task.IsCompleted, "TCP 轮询取图超时进入失败回调，不发布成功结果");
+                await host.WaitForIdleAsync();
+                modbus.ZeroObserved.Reset();
+                if (!modbus.ZeroObserved.Wait(3000)) throw new Exception("模拟 TCP 超时后未继续读取清零信号");
+                modbus.SetRegister(4111, 1);
+                result = await Task.WhenAny(completed.Task, Task.Delay(3000));
+                Assert(result == completed.Task && display.UpdateCount == 1 &&
+                    modbus.CloseCount == 0, "TCP 超时不误判 PLC 断线，下一上升沿仍正常检测");
+            }
+            finally
+            {
+                await host.WaitForIdleAsync();
+                host.Stop();
+            }
         }
 
         private static void TestCanvasPositionArrayLoads()
@@ -86,6 +194,14 @@ namespace DlcvSequenceTest
             var modbus = new MockModbusClient();
             var host = new SequenceHost();
             host.LoadWithoutStart(BuildPipelineGraph(3), flowRunner, display, modbus, path => path);
+            var timings = new System.Collections.Concurrent.ConcurrentDictionary<string, double>();
+            var tracker = new FlowTimingTracker();
+            flowRunner.ModelCallCompleted = tracker.RecordModelCall;
+            host.Executor.ProgressSink = (type, evt, id, nodeType) =>
+            {
+                var elapsed = tracker.OnProgress(evt, id, nodeType);
+                if (elapsed.HasValue) timings[id] = elapsed.Value;
+            };
             host.Executor.CameraFactory = cameraFactory;
             host.Start();
             try
@@ -100,6 +216,8 @@ namespace DlcvSequenceTest
                 Assert(flowRunner.AObservedBWait, "A推理期间B已经开始等待图像");
                 Assert(flowRunner.BObservedCWait, "B推理期间C已经开始等待图像");
                 Assert(display.UpdateCount == 3, "三个相机画面均已更新");
+                Assert(timings.Count == 3 && new[] { "run_A", "run_B", "run_C" }.All(id => timings.ContainsKey(id) && timings[id] >= 0),
+                    "真实 Sequence 进度事件消费三个独立模型调用耗时");
                 Assert(modbus.WriteHistory.Count == 1 &&
                     modbus.WriteHistory[0].Address == 500 &&
                     modbus.WriteHistory[0].Value == 0,
@@ -445,6 +563,7 @@ namespace DlcvSequenceTest
 
         private sealed class TrackingCameraFactory : ICameraResourceFactory
         {
+            public bool FailNextFrame { get; set; }
             public ManualResetEventSlim BWaitStarted { get; } = new ManualResetEventSlim(false);
             public ManualResetEventSlim CWaitStarted { get; } = new ManualResetEventSlim(false);
 
@@ -474,6 +593,11 @@ namespace DlcvSequenceTest
 
             public object GetFrame(int timeoutMs)
             {
+                if (_owner.FailNextFrame)
+                {
+                    _owner.FailNextFrame = false;
+                    throw new TimeoutException("等待相机画面超时");
+                }
                 if (_face == "B") _owner.BWaitStarted.Set();
                 if (_face == "C") _owner.CWaitStarted.Set();
                 return "Frame-" + _face;
@@ -486,6 +610,7 @@ namespace DlcvSequenceTest
         private sealed class PipelineFlowRunner : IAiFlowRunner
         {
             private readonly TrackingCameraFactory _cameras;
+            public Action<string, long, long> ModelCallCompleted { get; set; }
             public bool AObservedBWait { get; private set; }
             public bool BObservedCWait { get; private set; }
 
@@ -508,7 +633,11 @@ namespace DlcvSequenceTest
             {
                 if (face == "A") AObservedBWait = _cameras.BWaitStarted.Wait(2000);
                 if (face == "B") BObservedCWait = _cameras.CWaitStarted.Wait(2000);
-                return new Dictionary<string, object> { { "ok", true }, { "face", face } };
+                var started = Stopwatch.GetTimestamp();
+                var result = new Dictionary<string, object> { { "ok", true }, { "face", face } };
+                var completed = Stopwatch.GetTimestamp();
+                ModelCallCompleted?.Invoke(face, started, completed);
+                return result;
             }
 
             public IFlowHandle AcquireFlow(string path) { return AcquireFlow(path, null); }
@@ -564,6 +693,8 @@ namespace DlcvSequenceTest
             }
 
             public int SuccessfulConnectCount { get { return Volatile.Read(ref _successfulConnectCount); } }
+            public ManualResetEventSlim ZeroObserved { get; } = new ManualResetEventSlim(false);
+            public int CloseCount { get; private set; }
 
             public bool Connect(string host, int port, byte deviceId)
             {
@@ -573,8 +704,13 @@ namespace DlcvSequenceTest
                 return _inner.Connect(host, port, deviceId);
             }
 
-            public void Close() { _inner.Close(); }
-            public ushort ReadHoldingRegister(ushort address) { return _inner.ReadHoldingRegister(address); }
+            public void Close() { CloseCount++; _inner.Close(); }
+            public ushort ReadHoldingRegister(ushort address)
+            {
+                var value = _inner.ReadHoldingRegister(address);
+                if (address == 4111 && value == 0) ZeroObserved.Set();
+                return value;
+            }
             public ushort[] ReadHoldingRegisters(ushort address, ushort count) { return _inner.ReadHoldingRegisters(address, count); }
             public void WriteSingleRegister(ushort address, ushort value) { _inner.WriteSingleRegister(address, value); }
             public void SetRegister(ushort address, ushort value) { _inner.SetRegister(address, value); }

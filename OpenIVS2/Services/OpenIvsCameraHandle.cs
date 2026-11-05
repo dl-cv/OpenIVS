@@ -21,7 +21,7 @@ namespace OpenIVS2.Services
             if (device == null) throw new ArgumentNullException("device");
             _softwareTrigger = softwareTrigger;
             _camera = new CameraManager();
-            _camera.ImageCaptured += Camera_ImageCaptured;
+            _camera.ImageUpdated += Camera_ImageUpdated;
             if (!_camera.ConnectDevice(device))
                 throw new InvalidOperationException("相机连接失败: " + device);
             if (_softwareTrigger) _camera.SetSoftTrigger();
@@ -59,29 +59,37 @@ namespace OpenIVS2.Services
 
         public void Release()
         {
-            if (_released) return;
-            _released = true;
-            _camera.ImageCaptured -= Camera_ImageCaptured;
+            lock (_sync)
+            {
+                if (_released) return;
+                _released = true;
+            }
+            _camera.ImageUpdated -= Camera_ImageUpdated;
             try { _camera.StopGrabbing(); } catch { }
             try { _camera.Dispose(); } catch { }
             lock (_sync)
             {
                 while (_frames.Count > 0) _frames.Dequeue().Dispose();
+                _frameReady.Set();
+                _frameReady.Dispose();
             }
-            _frameReady.Set();
-            _frameReady.Dispose();
         }
 
-        private void Camera_ImageCaptured(object sender, ImageEventArgs e)
+        private void Camera_ImageUpdated(object sender, ImageEventArgs e)
         {
-            if (_released || e == null || e.Image == null) return;
-            var copy = new Bitmap(e.Image);
+            if (e == null || e.Image == null) return;
             lock (_sync)
             {
+                // CameraDevice 已克隆 SDK 图像；此私有管理器的唯一订阅者负责释放。
+                if (_released)
+                {
+                    e.Image.Dispose();
+                    return;
+                }
                 while (_frames.Count >= 2) _frames.Dequeue().Dispose();
-                _frames.Enqueue(copy);
+                _frames.Enqueue(e.Image);
+                _frameReady.Set();
             }
-            _frameReady.Set();
         }
 
         private void ThrowIfReleased()
