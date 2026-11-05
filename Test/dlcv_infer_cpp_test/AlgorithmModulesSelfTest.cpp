@@ -1,6 +1,7 @@
 #include "AlgorithmModulesSelfTest.h"
 
 #include <cmath>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -487,6 +488,67 @@ int RunAlgorithmModulesSelfTest() {
             std::vector<std::string> inspectionReasons;
             check(dlcv_infer::Model::GetLastInspectionStatus(inspectionOk, inspectionReasons), "public DLL inspection available");
             check(inspectionOk == expectedOk && inspectionReasons == std::vector<std::string>{reason}, "public DLL inspection matches output");
+        }
+        // Each output pair of a node shares one Main channel. Consuming port 0 must not
+        // move that channel away from a later consumer of port 1.
+        {
+            auto input = [](const char* type, int link) {
+                return Json{{"name", type}, {"type", type}, {"link", link}};
+            };
+            auto output = [](const char* type, Json links) {
+                return Json{{"type", type}, {"links", std::move(links)}};
+            };
+            const auto saveDir = std::filesystem::temp_directory_path() /
+                ("openivs-shared-main-port-" +
+                 std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+            std::filesystem::create_directories(saveDir);
+            const std::string suffix = "_shared_main_" + std::to_string(checks);
+            const Json nodes = Json::array({
+                {{"id", 1}, {"order", 1}, {"type", "input/image"}, {"properties", Json::object()},
+                    {"inputs", Json::array()},
+                    {"outputs", {output("image_chan", {11}), output("string", {12})}}},
+                {{"id", 6}, {"order", 2}, {"type", "input/build_results"},
+                    {"properties", {{"category_name", "shared_main"}, {"score", 0.9},
+                        {"bbox_x", 1}, {"bbox_y", 1}, {"bbox_w", 2}, {"bbox_h", 2}}},
+                    {"inputs", {input("image_chan", 11)}},
+                    {"outputs", {output("image_chan", {62}), output("result_chan", {61})}}},
+                {{"id", 2}, {"order", 3}, {"type", "pre_process/coordinate_crop"},
+                    {"properties", {{"x", 0}, {"y", 0}, {"w", 10}, {"h", 10}}},
+                    {"inputs", {input("image_chan", 11)}},
+                    {"outputs", {output("image_chan", {21})}}},
+                {{"id", 3}, {"order", 4}, {"type", "pre_process/coordinate_crop"},
+                    {"properties", {{"x", 20}, {"y", 30}, {"w", 40}, {"h", 50}}},
+                    {"inputs", {input("image_chan", 12), input("result_chan", 61)}},
+                    {"outputs", {output("image_chan", {31, 33}), output("result_chan", {32, 34})}}},
+                {{"id", 4}, {"order", 5}, {"type", "output/save_image"},
+                    {"properties", {{"save_path", saveDir.string()}, {"suffix", suffix}, {"format", "png"}}},
+                    {"inputs", {input("image_chan", 31), input("result_chan", 32)}},
+                    {"outputs", Json::array()}},
+                {{"id", 5}, {"order", 6}, {"type", "output/return_json"},
+                    {"inputs", {input("image_chan", 33), input("result_chan", 34)}},
+                    {"outputs", Json::array()}}
+            });
+            const auto flowPath = saveDir / "shared-main-port.json";
+            {
+                std::ofstream file(flowPath, std::ios::binary);
+                check(static_cast<bool>(file), "cannot write shared-main-port flow");
+                file << Json{{"nodes", nodes}}.dump(2);
+            }
+            FlowGraphModel model;
+            const auto loaded = model.Load(flowPath.string(), 0);
+            check(loaded.value("code", 1) == 0, "shared-main-port flow load: " + loaded.dump());
+            const auto root = model.InferInternal({original}, Json::object());
+            check(root.value("code", 1) == 0, "shared-main-port flow infer: " + root.dump());
+            cv::Mat saved;
+            for (const auto& entry : std::filesystem::directory_iterator(saveDir)) {
+                if (entry.path().extension() == ".png" &&
+                    entry.path().filename().string().find(suffix) != std::string::npos) {
+                    saved = cv::imread(entry.path().string(), cv::IMREAD_UNCHANGED);
+                    if (!saved.empty()) break;
+                }
+            }
+            check(!saved.empty() && saved.cols == 40 && saved.rows == 50,
+                "second consumer of shared main channel received the expected crop");
         }
         std::cout << "algorithm-modules-selftest passed: " << checks << " assertions" << std::endl;
         return 0;

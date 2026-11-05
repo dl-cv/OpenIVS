@@ -260,7 +260,7 @@ static std::unordered_map<long long, int> BuildOutputConsumerCount(
             if (itSrc == linkToSource.end()) continue;
             const int srcNodeId = itSrc->second.first;
             const int srcOutIdx = itSrc->second.second;
-            counts[BuildOutputPortKey(srcNodeId, srcOutIdx)] += 1;
+            counts[BuildOutputPortKey(srcNodeId, srcOutIdx / 2)] += 1;
         }
     }
     return counts;
@@ -319,7 +319,7 @@ std::map<int, ModuleChannel> GraphExecutor::CollectInputPairs(
 
         bool moveNow = false;
         if (remainingConsumers != nullptr) {
-            const long long key = BuildOutputPortKey(srcNodeId, srcOutIdx);
+            const long long key = BuildOutputPortKey(srcNodeId, srcOutIdx / 2);
             auto itRemain = remainingConsumers->find(key);
             if (itRemain != remainingConsumers->end()) {
                 if (itRemain->second <= 1) {
