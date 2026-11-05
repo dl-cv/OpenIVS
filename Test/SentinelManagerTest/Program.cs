@@ -13,6 +13,7 @@ namespace SentinelManagerTest
             try
             {
                 if (args.Length == 0) return BackendTests.Run();
+                if (args.Length == 1 && args[0] == "designer-test") return DesignerTests.Run();
                 if (args.Length == 3 && args[0] == "ui-test" && args[1] == "--output-dir")
                 {
                     string output = Path.GetFullPath(args[2]);
@@ -25,7 +26,7 @@ namespace SentinelManagerTest
                     Directory.CreateDirectory(output);
                     return UiTests.Run(output);
                 }
-                Console.Error.WriteLine("参数：无参数执行后端测试；ui-test --output-dir <系统临时子目录> 执行界面测试。");
+                Console.Error.WriteLine("参数：无参数执行后端测试；designer-test 检查设计器加载；ui-test --output-dir <系统临时子目录> 执行界面测试。");
                 return 2;
             }
             catch (Exception ex) { Console.Error.WriteLine("测试失败：" + ex); return 1; }

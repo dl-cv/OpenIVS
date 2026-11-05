@@ -1,195 +1,62 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace SentinelManager
 {
-    public enum SentinelOperation { GetInfo, CreateLmid, DisableNetwork, ApplyLocalPatch, Repair }
-
-    public sealed class SentinelManagerForm : Form
+    public sealed partial class SentinelManagerForm : Form
     {
-        private static readonly Color Ink = Color.FromArgb(28, 46, 70);
-        private static readonly Color Blue = Color.FromArgb(37, 99, 235);
         private readonly ISentinelClient client;
         private readonly Func<string, string, bool> confirm;
-        private readonly TableLayoutPanel body = new TableLayoutPanel();
-        private readonly TableLayoutPanel actions = new TableLayoutPanel();
-        private readonly Panel sidebar = new Panel();
-        private readonly Label sideTitle = new Label();
-        private readonly Label sideNote = new Label();
-        private readonly Button[] buttons = new Button[5];
-        private readonly Label[] notes = new Label[4];
-        private readonly Panel[] cards = new Panel[4];
-        private readonly Label status = new Label();
-        private readonly Label executed = new Label();
-        private readonly ProgressBar progress = new ProgressBar();
-        private readonly Button copy;
-        private readonly DataGridView details = new DataGridView();
-        private readonly TextBox raw = new TextBox();
-        private readonly TabControl tabs = new TabControl();
+        private readonly Button[] buttons;
+        private readonly Label[] notes;
+        private readonly Panel[] cards;
         private bool? compact;
         private int layoutDpi;
         private bool layoutReady;
         public bool Busy { get; private set; }
 
-        public SentinelManagerForm(ISentinelClient client, Func<string, string, bool> confirm = null)
+        public SentinelManagerForm()
         {
-            SuspendLayout();
-            this.client = client ?? throw new ArgumentNullException(nameof(client));
-            this.confirm = confirm ?? ((dialogTitle, text) => MessageBox.Show(this, text, dialogTitle,
-                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes);
-            Text = "Sentinel 加密狗管理";
-            Name = "SentinelManagerForm";
-            Font = new Font("Microsoft YaHei UI", 12F, FontStyle.Regular, GraphicsUnit.Point);
-            ForeColor = Ink;
-            BackColor = Color.FromArgb(243, 246, 251);
-            AutoScaleDimensions = new SizeF(96F, 96F);
-            AutoScaleMode = AutoScaleMode.Dpi;
-            MinimumSize = new Size(720, 480);
-            ClientSize = new Size(1120, 860);
-            StartPosition = FormStartPosition.CenterScreen;
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(20, 16, 20, 16), RowCount = 2, ColumnCount = 1 };
-            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 76));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            Controls.Add(root);
-            var heading = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
-            heading.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160));
-            heading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            buttons[4] = MakeButton("一键修复", "repairButton", true);
-            buttons[4].Size = new Size(140, 48);
-            heading.Controls.Add(buttons[4], 0, 0);
-            var title = new Panel { Dock = DockStyle.Fill };
-            title.Controls.Add(new Label { Text = "本机设备与服务管理", AutoSize = true, Location = new Point(0, 39), ForeColor = Color.SlateGray });
-            title.Controls.Add(new Label { Text = "Sentinel 加密狗管理", AutoSize = true, Font = new Font(Font.FontFamily, 19.5F, FontStyle.Bold, GraphicsUnit.Point), Location = new Point(0, 0) });
-            heading.Controls.Add(title, 1, 0);
-            root.Controls.Add(heading, 0, 0);
-            body.Dock = DockStyle.Fill;
-            body.Margin = Padding.Empty;
-            root.Controls.Add(body, 0, 1);
-            sidebar.BackColor = Color.White;
-            sidebar.Padding = new Padding(14);
-            sidebar.Dock = DockStyle.Fill;
-            sidebar.Margin = new Padding(0, 0, 16, 0);
-            sideTitle.Text = "管理操作";
-            sideTitle.Font = new Font(Font, FontStyle.Bold);
-            sideTitle.Dock = DockStyle.Top;
-            sideTitle.Height = 34;
-            sideNote.Text = "仅显示本机 Sentinel HL 设备";
-            sideNote.ForeColor = Color.SlateGray;
-            sideNote.Dock = DockStyle.Bottom;
-            sideNote.Height = 40;
-            actions.Dock = DockStyle.Fill;
-            actions.Margin = Padding.Empty;
-            string[] labels = { "获取加密狗信息", "创建新的LMID", "关闭网络访问", "应用本地服务补丁" };
-            string[] names = { "infoButton", "lmidButton", "networkButton", "patchButton" };
-            string[] descriptions = { "查看设备信息。服务未运行时自动启动。", "重新生成 LMID。", "关闭远程授权、广播搜索和远程访问。", "写入本地配置并重启服务，需管理员权限。" };
-            for (int i = 0; i < 4; i++)
-            {
-                buttons[i] = MakeButton(labels[i], names[i], i == 0);
-                if (i == 2) { buttons[i].BackColor = Color.FromArgb(255, 248, 237); buttons[i].ForeColor = Color.FromArgb(165, 77, 20); }
-                cards[i] = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(246, 248, 252), Padding = new Padding(10), Margin = new Padding(0, 0, 0, 12) };
-                buttons[i].Dock = DockStyle.Top;
-                buttons[i].Height = 42;
-                notes[i] = new Label { Text = descriptions[i], Dock = DockStyle.Fill, Padding = new Padding(0, 8, 0, 0), ForeColor = Color.SlateGray };
-                cards[i].Controls.Add(notes[i]);
-                cards[i].Controls.Add(buttons[i]);
-            }
-            sidebar.Controls.Add(actions);
-            sidebar.Controls.Add(sideTitle);
-            sidebar.Controls.Add(sideNote);
-            var result = new TableLayoutPanel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(16), ColumnCount = 1, RowCount = 4, Margin = Padding.Empty };
-            result.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            result.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-            result.RowStyles.Add(new RowStyle(SizeType.Absolute, 8));
-            result.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            result.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-            var resultHeader = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Margin = Padding.Empty };
-            resultHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            resultHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 106));
-            status.Name = "statusLabel";
-            status.Dock = DockStyle.Fill;
-            status.TextAlign = ContentAlignment.MiddleLeft;
-            status.Padding = new Padding(10, 0, 0, 0);
-            SetStatus("就绪", false);
-            copy = MakeButton("复制结果", "copyButton", false);
-            copy.Dock = DockStyle.Fill;
-            copy.Enabled = false;
-            copy.Click += (s, e) => { try { Clipboard.SetText(raw.Text); } catch (System.Runtime.InteropServices.ExternalException) { SetStatus("剪贴板暂不可用，请稍后重试", true); } };
-            resultHeader.Controls.Add(status, 0, 0);
-            resultHeader.Controls.Add(copy, 1, 0);
-            result.Controls.Add(resultHeader, 0, 0);
-            progress.Dock = DockStyle.Fill;
-            progress.Style = ProgressBarStyle.Marquee;
-            progress.Visible = false;
-            result.Controls.Add(progress, 0, 1);
-            tabs.Name = "resultTabs";
-            tabs.Dock = DockStyle.Fill;
-            var overview = new TabPage("信息概览") { BackColor = Color.White };
-            var original = new TabPage("原始结果") { BackColor = Color.White };
-            tabs.TabPages.Add(overview);
-            tabs.TabPages.Add(original);
-            details.Name = "detailsGrid";
-            details.Dock = DockStyle.Fill;
-            details.ReadOnly = true;
-            details.AllowUserToAddRows = false;
-            details.AllowUserToDeleteRows = false;
-            details.AllowUserToResizeRows = false;
-            details.RowHeadersVisible = false;
-            details.BackgroundColor = Color.White;
-            details.BorderStyle = BorderStyle.None;
-            details.CellBorderStyle = DataGridViewCellBorderStyle.None;
-            details.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            details.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells;
-            details.DefaultCellStyle.WrapMode = DataGridViewTriState.True;
-            details.DefaultCellStyle.Font = Font;
-            details.DefaultCellStyle.Padding = new Padding(9, 2, 9, 2);
-            details.DefaultCellStyle.SelectionBackColor = Color.FromArgb(223, 235, 255);
-            details.DefaultCellStyle.SelectionForeColor = Ink;
-            details.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(247, 249, 253);
-            details.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(241, 245, 251);
-            details.ColumnHeadersDefaultCellStyle.ForeColor = Color.FromArgb(82, 101, 128);
-            details.ColumnHeadersDefaultCellStyle.Font = new Font(Font, FontStyle.Bold);
-            details.ColumnHeadersHeight = 40;
-            details.EnableHeadersVisualStyles = false;
-            details.Columns.Add("name", "信息项");
-            details.Columns.Add("value", "内容");
-            details.Columns[0].FillWeight = 36;
-            details.Columns[1].FillWeight = 64;
-            foreach (DataGridViewColumn column in details.Columns) column.SortMode = DataGridViewColumnSortMode.NotSortable;
-            overview.Controls.Add(details);
-            raw.Name = "rawResult";
-            raw.Dock = DockStyle.Fill;
-            raw.Multiline = true;
-            raw.ReadOnly = true;
-            raw.ScrollBars = ScrollBars.Both;
-            raw.WordWrap = true;
-            raw.BorderStyle = BorderStyle.None;
-            raw.BackColor = Color.White;
-            raw.Text = "未执行：点击按钮获取加密狗信息。";
-            original.Controls.Add(raw);
-            result.Controls.Add(tabs, 0, 2);
-            executed.Name = "executedLabel";
-            executed.Text = "尚未执行 · 点击“获取加密狗信息”开始";
-            executed.ForeColor = Color.SlateGray;
-            executed.Dock = DockStyle.Fill;
-            executed.TextAlign = ContentAlignment.BottomLeft;
-            result.Controls.Add(executed, 0, 3);
-            body.Controls.Add(sidebar);
-            body.Controls.Add(result);
-            for (int i = 0; i < buttons.Length; i++)
-            {
-                var operation = (SentinelOperation)i;
-                buttons[i].Click += async (s, e) => await RunOperationAsync(operation);
-            }
-            Resize += (s, e) => ApplyResponsiveLayout();
-            FormClosing += (s, e) => { if (Busy) { e.Cancel = true; SetStatus("正在处理，请等待完成后关闭", false); } };
+            InitializeComponent();
+            client = new SentinelClient();
+            confirm = (dialogTitle, text) => MessageBox.Show(this, text, dialogTitle,
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+            buttons = new[] { infoButton, lmidButton, networkButton, patchButton, repairButton };
+            notes = new[] { infoNote, lmidNote, networkNote, patchNote };
+            cards = new[] { infoCard, lmidCard, networkCard, patchCard };
             ShowDetails(raw.Text);
-            ResumeLayout(true);
             PerformAutoScale();
             layoutReady = true;
             ApplyResponsiveLayout();
+        }
+
+        public SentinelManagerForm(ISentinelClient client, Func<string, string, bool> confirm = null) : this()
+        {
+            this.client = client ?? throw new ArgumentNullException(nameof(client));
+            if (confirm != null) this.confirm = confirm;
+        }
+
+        private async void HandleOperationClick(object sender, EventArgs e)
+        {
+            await RunOperationAsync((SentinelOperation)Array.IndexOf(buttons, (Button)sender));
+        }
+
+        private void HandleCopyClick(object sender, EventArgs e)
+        {
+            try { Clipboard.SetText(raw.Text); }
+            catch (System.Runtime.InteropServices.ExternalException) { SetStatus("剪贴板暂不可用，请稍后重试", true); }
+        }
+
+        private void HandleResize(object sender, EventArgs e)
+        {
+            ApplyResponsiveLayout();
+        }
+
+        private void HandleFormClosing(object sender, FormClosingEventArgs e)
+        {
+            if (Busy) { e.Cancel = true; SetStatus("正在处理，请等待完成后关闭", false); }
         }
 
         protected override void OnLoad(EventArgs e)
@@ -227,15 +94,6 @@ namespace SentinelManager
             Size = new Size(Math.Min(Width, availableWidth), Math.Min(Height, availableHeight));
             Location = new Point(Math.Max(area.Left + margin, Math.Min(Left, area.Right - margin - Width)),
                 Math.Max(area.Top + margin, Math.Min(Top, area.Bottom - margin - Height)));
-        }
-
-        private static Button MakeButton(string text, string name, bool primary)
-        {
-            var button = new Button { Name = name, Text = text, FlatStyle = FlatStyle.Flat,
-                BackColor = primary ? Blue : Color.White, ForeColor = primary ? Color.White : Ink,
-                Font = new Font("Microsoft YaHei UI", 11.25F, FontStyle.Bold, GraphicsUnit.Point), Cursor = Cursors.Hand, Margin = new Padding(0, 0, 0, 4) };
-            button.FlatAppearance.BorderColor = primary ? Blue : Color.FromArgb(203, 215, 231);
-            return button;
         }
 
         private void ApplyResponsiveLayout()
@@ -374,4 +232,6 @@ namespace SentinelManager
             }
         }
     }
+
+    public enum SentinelOperation { GetInfo, CreateLmid, DisableNetwork, ApplyLocalPatch, Repair }
 }

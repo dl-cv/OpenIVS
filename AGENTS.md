@@ -42,7 +42,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
 - 发布 C++ Qt 测试程序 wheel：`1_编译打包(C++).bat` 调用 `build_script/build_cpp_package.py`，安装使用 `2_安装新版(C++).bat`；包名为 `dlcvpro_infer_cpp`，版本来自 `build_script/setup_cpp.py` 的 `version`，产物位于 `dist_cpp/`。分发构建通过 `DlcvUseSharedQt=true` 使用独立输出，运行时加载 `C:\dlcv\bin` 的 Qt 6.10.2、插件与 ZXing，包内无 Qt 或 ZXing 文件。
 
 - Sentinel 管理工具位于 `Test/SentinelManager/`，在解决方案中归入 `Test` 分组；使用 Visual Studio 或仓库共享 `build.py` 进行日常项目编译，不提供独立打包、安装脚本。
-- Sentinel 后端及界面测试使用 `Test/SentinelManagerTest`：无参数执行后端隔离测试，`ui-test --output-dir <系统临时子目录>` 使用固定数据执行界面回归并保存 PNG 与 UTF-8 JSON。验证不得连接真实 ACC、写真实授权配置或控制真实服务。
+- Sentinel 测试使用 `Test/SentinelManagerTest`：无参数执行后端隔离测试，`designer-test` 检查窗体入口、资源及 WinForms DesignSurface 加载，`ui-test --output-dir <系统临时子目录>` 使用固定数据执行界面与按钮事件回归并保存 PNG 与 UTF-8 JSON。验证不得连接真实 ACC、写真实授权配置或控制真实服务。
 
 ## 统一运行与验证输入规则
 
