@@ -41,7 +41,7 @@ class MaskTestProjectTests(unittest.TestCase):
                 self.assertEqual(definition, f"DLCV_QT_{kind.upper()}_MASK_TEST")
 
     def test_runtime_uses_offscreen_without_inference_dll(self):
-        tree = ET.parse(ROOT / "build_script" / "MaskVisualizationTest.targets")
+        tree = ET.parse(TEST_ROOT / "MaskVisualizationTest.targets")
         sources = ";".join(x.attrib["SourceFiles"] for x in tree.findall(".//m:Copy", NS))
         self.assertIn("qoffscreen", sources)
         self.assertNotIn("dlcv_infer", sources)

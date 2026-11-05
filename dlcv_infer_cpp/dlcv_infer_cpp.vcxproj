@@ -225,7 +225,7 @@
   </Target>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <Import Project="$(MSBuildThisFileDirectory)..\build_script\ZXingRuntime.targets" />
+  <Import Project="$(MSBuildThisFileDirectory)ZXingRuntime.targets" />
   <Target Name="GetFlowRuntimeFiles" Returns="@(_FlowRuntimeFiles)">
     <PropertyGroup><_FlowOpenCvSuffix Condition="'$(Configuration)'=='Debug'">d</_FlowOpenCvSuffix></PropertyGroup>
     <ItemGroup>

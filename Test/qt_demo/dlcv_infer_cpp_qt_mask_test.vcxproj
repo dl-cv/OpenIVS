@@ -28,7 +28,7 @@
     <DemoSourceDir>$(ProjectDir)..\..\dlcv_infer_cpp_qt_demo</DemoSourceDir>
     <MaskTestDefinition>DLCV_QT_CPP_MASK_TEST</MaskTestDefinition>
   </PropertyGroup>
-  <Import Project="$(ProjectDir)..\..\build_script\MaskVisualizationTest.props" />
+  <Import Project="$(ProjectDir)MaskVisualizationTest.props" />
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="$(DemoSourceDir)\ImageViewerWidget.cpp" />
@@ -36,5 +36,5 @@
     <ClInclude Include="$(DemoSourceDir)\ImageViewerWidget.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <Import Project="$(ProjectDir)..\..\build_script\MaskVisualizationTest.targets" />
+  <Import Project="$(ProjectDir)MaskVisualizationTest.targets" />
 </Project>
