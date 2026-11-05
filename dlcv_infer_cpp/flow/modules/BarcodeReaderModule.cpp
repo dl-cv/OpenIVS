@@ -34,9 +34,21 @@ class BarcodeApi final {
         return reinterpret_cast<T>(symbol);
     }
     static HMODULE Load() {
-        HMODULE handle = LoadLibraryExW(L"C:\\dlcv\\bin\\ZXing.dll", nullptr,
+        HMODULE owner = nullptr;
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&Load), &owner))
+            throw std::runtime_error("Cannot locate barcode module");
+        std::wstring path(32768, L'\0');
+        const auto length = GetModuleFileNameW(owner, &path[0], static_cast<DWORD>(path.size()));
+        if (!length || length >= path.size()) throw std::runtime_error("Cannot locate barcode module path");
+        path.resize(length);
+        path.resize(path.find_last_of(L"\\/") + 1);
+        path += L"ZXing.dll";
+        HMODULE handle = LoadLibraryExW(path.c_str(), nullptr,
             LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-        if (!handle) throw std::runtime_error("Cannot load C:\\dlcv\\bin\\ZXing.dll, Win32=" + std::to_string(GetLastError()));
+        if (!handle) handle = LoadLibraryExW(L"C:\\dlcv\\bin\\ZXing.dll", nullptr,
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        if (!handle) throw std::runtime_error("Cannot load ZXing.dll from module directory or C:\\dlcv\\bin, Win32=" + std::to_string(GetLastError()));
         return handle;
     }
 public:

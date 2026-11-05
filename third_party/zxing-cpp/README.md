@@ -10,7 +10,7 @@
 
 `BarcodeReaderModule.cpp` 的私有声明对应 `core/src/ZXingC.h`，保留其作者归属于 `NOTICE.txt`。Windows x64 下 bool、32 位枚举和 32 字节 Position 按此固定版本声明；不暴露到 OpenIVS 公共 ABI。升级 NuGet 时不可只改版本号，必须核对函数签名、枚举值、结构布局、内存释放约定并运行跨语言测试。
 
-C++ 不链接上游 C++ ABI；从 `C:\dlcv\bin\ZXing.dll` 延迟加载共享 DLL。返回对象以对应 `ZXing_*_delete` 释放，字符串与格式数组以 `ZXing_free` 释放，`Barcodes_at` 是借用指针。C# 使用官方包装器，reader/barcode 及时 Dispose，ImageView 遵循上游终结器并保持像素所有者存活。
+C++ 不链接上游 C++ ABI；优先从 `dlcv_infer_cpp.dll` 所在目录延迟加载 `ZXing.dll`，加载失败后尝试 `C:\dlcv\bin\ZXing.dll`。返回对象以对应 `ZXing_*_delete` 释放，字符串与格式数组以 `ZXing_free` 释放，`Barcodes_at` 是借用指针。C# 使用官方包装器，reader/barcode 及时 Dispose，ImageView 遵循上游终结器并保持像素所有者存活。
 
 ## 许可证文件
 
