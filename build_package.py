@@ -22,8 +22,6 @@ PACKAGE_OUTPUT_FILE_NAMES = (
     "DlcvCsharpApi.dll",
     "ZXingCpp.dll",
     "ZXing.dll",
-    "ZXing-LICENSE.txt",
-    "ZXing-NOTICE.txt",
     "DlcvCsharpApi.dll.config",
     "ImageViewer.dll",
     "ImageViewer.dll.config",

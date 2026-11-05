@@ -5,7 +5,7 @@ from pathlib import Path
 
 from setuptools import setup
 
-version = '2026.11.4.0a0'
+version = '2026.11.5.0a0'
 cpp_version = '2026.11.5.0a0'
 
 variant = os.environ.get("DLCV_PACKAGE_VARIANT", "csharp")

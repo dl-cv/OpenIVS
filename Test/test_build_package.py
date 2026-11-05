@@ -26,6 +26,8 @@ class CopyPackageFilesTest(unittest.TestCase):
             (output_dir / "DlcvDemo.exe").write_bytes(b"unexpected executable")
             (output_dir / "DlcvDemo.exe.config").write_bytes(b"unexpected config")
             (output_dir / "old-runtime.dll").write_bytes(b"unexpected library")
+            (output_dir / "ZXing-LICENSE.txt").write_bytes(b"license")
+            (output_dir / "ZXing-NOTICE.txt").write_bytes(b"notice")
             (repo_root / "hasp_26146.ini").write_text("test", encoding="utf-8")
 
             with (
@@ -54,6 +56,8 @@ class CopyPackageFilesTest(unittest.TestCase):
             self.assertNotIn("old-runtime.dll", actual_names)
             self.assertNotIn("dlcv_infer_cpp.dll", actual_names)
             self.assertNotIn("opencv_world4100.dll", actual_names)
+            self.assertNotIn("ZXing-LICENSE.txt", actual_names)
+            self.assertNotIn("ZXing-NOTICE.txt", actual_names)
 
 
 class BuildScopeTest(unittest.TestCase):
