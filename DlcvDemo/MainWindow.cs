@@ -1279,7 +1279,8 @@ namespace DlcvDemo
                 // 调用InferInternal进行推理
 
                 JObject infer_config = new JObject();
-                infer_config["with_mask"] = false;
+                // 原始 JSON 含掩码内存地址，现有一致性比较继续使用无掩码结果。
+                infer_config["with_mask"] = !isConsistencyTestMode;
 
                 var inferSw = Stopwatch.StartNew();
                 var resultTuple = model.InferInternal(image_list, infer_config);

@@ -367,6 +367,7 @@ GUI 自动验证使用同一个 WinForms 主窗口的 `ui-test` 入口，模型�
   - 读取图片（`Unchanged`），构造 image_list（重复同一张 Mat，与 2.4 一致）
   - 创建 `PressureTestRunner(threadCount, targetRate=1000000, batchSize=batch_size)`
   - 设置 action 为 `ModelInferAction(image_list)`
+  - 性能测试传入 `with_mask=true`，包含完整掩码返回开销；每次调用仍在 `finally` 中释放底层结果
   - 启动 500ms 定时器刷新统计：
     - 调用 `pressureTestRunner.GetStatistics(false, false)`
     - 在统计内容前增加模型、图片、线程数与批量大小，写入 `richTextBox1`

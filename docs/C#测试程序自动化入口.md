@@ -25,7 +25,7 @@
 ```
 
 - 自动验证使用 `--interactive-dialogs false`：不弹文件选择框、不激活窗口，按参数加载模型和图片，成功或失败后关闭窗口；`true` 为人工交互模式。
-- `--test-mode` 默认 `infer`；`infer-json` 在单次推理后执行正式“推理 JSON”按钮；`pressure` 使用界面的多线程测试流程，时长默认 2000ms，结束时保存统计结果。批量大小和线程数默认均为 1。
+- `--test-mode` 默认 `infer`；`infer-json` 在单次推理后执行正式“推理 JSON”按钮；`pressure` 使用界面的多线程测试流程并返回完整掩码，时长默认 2000ms，结束时保存统计结果。批量大小和线程数默认均为 1。
 - `--save-json` 用于 `infer` 和 `infer-json`，使用正式保存方法导出完整缓存，父目录须存在，路径不得与模型、图片、状态 JSON、状态临时文件或截图相同。结果中的 `json_export_check` 记录 UTF-8 与 JSON 内容核验、预览和全选耗时、缓存切换、2 MB 文本、空结果、错误路径、输入文件保护及保存快照检查。测试实现位于 `Test/desktop_projects/DemoJsonResultTests.cs`，通过项目引用编入现有 UI 测试入口。
 - 启动测试时检查顶部实际控件几何：在中英文模式下检查默认、最小、中间宽度及原尺寸切换点相邻像素，分别缩小和放大；按钮尺寸保持不变，跨列按钮与下方两列具有相同左右端点，控件不得超出父容器，参数标签与输入框垂直居中。结果写入 `button_layout_check`，测试实现位于 `Test/desktop_projects/DemoButtonLayoutTests.cs`；结束后恢复原窗口尺寸及语言，不模拟鼠标键盘。
 - `--language` 只影响本次运行，不持久化；`--result-view` 默认 `summary`，切换至 `json` 不重新推理。
