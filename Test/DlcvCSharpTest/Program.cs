@@ -744,6 +744,17 @@ namespace DlcvCSharpTest
                     "--screenshot", screenshotPng
                 });
                 RequireWinFormsSelfTest(pngResult.Ok, "合法 --screenshot 参数被拒绝: " + pngResult.Error);
+                UiTestOptionsParseResult dogInfoResult = InvokeUiTestOptionsParse(tryParseMethod, new[]
+                {
+                    "ui-test", "--test-mode", "dog-info", "--output", outputPath,
+                    "--interactive-dialogs", "false"
+                });
+                RequireWinFormsSelfTest(dogInfoResult.Ok, "加密狗界面测试应允许省略模型和图片: " + dogInfoResult.Error);
+                UiTestOptionsParseResult missingDogOutput = InvokeUiTestOptionsParse(tryParseMethod, new[]
+                {
+                    "ui-test", "--test-mode", "dog-info"
+                });
+                RequireWinFormsSelfTest(!missingDogOutput.Ok, "加密狗界面测试缺少输出路径时应拒绝运行");
                 string actualScreenshot = Convert.ToString(
                     screenshotPathProperty.GetValue(pngResult.Options, null),
                     CultureInfo.InvariantCulture);

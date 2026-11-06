@@ -320,6 +320,11 @@ namespace DlcvDemo
 
         private void MainWindow_Shown(object sender, EventArgs e)
         {
+            if (uiTestOptions?.TestMode == "dog-info")
+            {
+                BeginInvoke(new Action(RunDogInfoUiTest));
+                return;
+            }
             if (uiTestOptions?.TestMode == "model-dialog")
             {
                 BeginInvoke(new Action(RunModelDialogTest));
