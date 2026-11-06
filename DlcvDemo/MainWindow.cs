@@ -516,9 +516,9 @@ namespace DlcvDemo
             string text = string.Join(
                 "\r\n\r\n",
                 FormatDogListSection(I18n.T("Sentinel加密狗ID"), sentinelDevices),
-                FormatDogListSection(I18n.T("Sentinel加密狗特性"), sentinelFeatures),
+                FormatDogFeatureSection(I18n.T("Sentinel加密狗特性"), sentinelFeatures),
                 FormatDogListSection(I18n.T("Virbox加密狗ID"), virboxDevices),
-                FormatDogListSection(I18n.T("Virbox加密狗特性"), virboxFeatures));
+                FormatDogFeatureSection(I18n.T("Virbox加密狗特性"), virboxFeatures));
 
             if (prependNoDogHint)
             {
@@ -531,6 +531,24 @@ namespace DlcvDemo
         {
             JArray list = items ?? new JArray();
             return title + string.Format(I18n.T("（{0}个）："), list.Count) + "\r\n" + ToTextBoxNewlines(list.ToString(Formatting.Indented));
+        }
+
+        private static string FormatDogFeatureSection(string title, JArray features)
+        {
+            var counts = new SortedDictionary<long, int>();
+            foreach (JToken feature in features)
+            {
+                long id = feature.Value<long>();
+                counts.TryGetValue(id, out int count);
+                counts[id] = count + 1;
+            }
+
+            var lines = new List<string> { title + string.Format(I18n.T("（{0}个）："), features.Count) };
+            foreach (var pair in counts)
+            {
+                lines.Add(string.Format(I18n.T("{0}：{1}个"), pair.Key, pair.Value));
+            }
+            return string.Join("\r\n", lines);
         }
 
         private static string ToTextBoxNewlines(string text)
