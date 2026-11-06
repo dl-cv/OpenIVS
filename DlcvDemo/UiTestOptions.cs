@@ -163,9 +163,10 @@ namespace DlcvDemo
                         if (!string.Equals(value, "infer", StringComparison.OrdinalIgnoreCase)
                             && !string.Equals(value, "infer-json", StringComparison.OrdinalIgnoreCase)
                             && !string.Equals(value, "model-dialog", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(value, "dog-info", StringComparison.OrdinalIgnoreCase)
                             && !string.Equals(value, "pressure", StringComparison.OrdinalIgnoreCase))
                         {
-                            error = "--test-mode 必须是 infer、infer-json、model-dialog 或 pressure。";
+                            error = "--test-mode 必须是 infer、infer-json、model-dialog、dog-info 或 pressure。";
                             return false;
                         }
                         options.TestMode = value.ToLowerInvariant();
@@ -203,12 +204,13 @@ namespace DlcvDemo
                 }
             }
 
-            if (string.IsNullOrWhiteSpace(options.ModelPath))
+            bool requiresModelInput = options.TestMode != "dog-info";
+            if (requiresModelInput && string.IsNullOrWhiteSpace(options.ModelPath))
             {
                 error = "缺少必需参数: --model";
                 return false;
             }
-            if (string.IsNullOrWhiteSpace(options.ImagePath))
+            if (requiresModelInput && string.IsNullOrWhiteSpace(options.ImagePath))
             {
                 error = "缺少必需参数: --image";
                 return false;
@@ -218,20 +220,20 @@ namespace DlcvDemo
                 error = "缺少必需参数: --output";
                 return false;
             }
-            if (!File.Exists(options.ModelPath))
+            if (requiresModelInput && !File.Exists(options.ModelPath))
             {
                 error = "模型文件不存在: " + options.ModelPath;
                 return false;
             }
-            if (!File.Exists(options.ImagePath))
+            if (requiresModelInput && !File.Exists(options.ImagePath))
             {
                 error = "图片文件不存在: " + options.ImagePath;
                 return false;
             }
             try
             {
-                string model = Path.GetFullPath(options.ModelPath);
-                string image = Path.GetFullPath(options.ImagePath);
+                string model = options.ModelPath == null ? null : Path.GetFullPath(options.ModelPath);
+                string image = options.ImagePath == null ? null : Path.GetFullPath(options.ImagePath);
                 string output = Path.GetFullPath(options.OutputPath);
                 string screenshot = options.ScreenshotPath == null ? null : Path.GetFullPath(options.ScreenshotPath);
                 string saveJson = options.SaveJsonPath == null ? null : Path.GetFullPath(options.SaveJsonPath);
@@ -295,6 +297,7 @@ namespace DlcvDemo
             Console.Out.WriteLine("--save-json 在 infer 或 infer-json 测试中保存完整 JSON，并验证预览、结果切换与保存功能；父目录须已存在。");
             Console.Out.WriteLine("--test-mode=infer-json 复用推理 JSON 按钮生成原始 JSON 结果。");
             Console.Out.WriteLine("--test-mode=model-dialog 仅打开正式模型选择窗口供隔离采集，30 秒后退出；不加载模型或初始化设备。");
+            Console.Out.WriteLine("--test-mode=dog-info 使用固定测试编号和 50 项特性显示加密狗结果，无需 --model/--image，不初始化设备；可配合 --capture-delay-ms 采集完整窗口。");
             Console.Out.WriteLine("--capture-delay-ms 在结果生成后保持正式窗口消息循环，供隔离桌面采集完整窗口；默认 0。");
             Console.Out.WriteLine("--view-region x,y,width,height 放大原图指定区域，仅改变显示，推理仍使用完整图片。");
             Console.Out.WriteLine("--window-size width,height 指定验证窗口客户区的像素尺寸，须小于当前显示器工作区。");

@@ -16,7 +16,7 @@
   [--save-json <完整结果 JSON 路径>]
   [--language <zh-CN|en-US>]
   [--result-view <summary|json>]
-  [--test-mode <infer|infer-json|pressure>]
+  [--test-mode <infer|infer-json|pressure|dog-info>]
   [--batch-size <1..1024>]
   [--thread-count <1..32>]
   [--pressure-duration-ms <500..60000>]
@@ -29,6 +29,7 @@
 - `--save-json` 用于 `infer` 和 `infer-json`，使用正式保存方法导出完整缓存，父目录须存在，路径不得与模型、图片、状态 JSON、状态临时文件或截图相同。结果中的 `json_export_check` 记录 UTF-8 与 JSON 内容核验、预览和全选耗时、缓存切换、2 MB 文本、空结果、错误路径、输入文件保护及保存快照检查。测试实现位于 `Test/desktop_projects/DemoJsonResultTests.cs`，通过项目引用编入现有 UI 测试入口。
 - 启动测试时检查顶部实际控件几何：在中英文模式下检查默认、最小、中间宽度及原尺寸切换点相邻像素，分别缩小和放大；按钮尺寸保持不变，跨列按钮与下方两列具有相同左右端点，控件不得超出父容器，参数标签与输入框垂直居中。结果写入 `button_layout_check`，测试实现位于 `Test/desktop_projects/DemoButtonLayoutTests.cs`；结束后恢复原窗口尺寸及语言，不模拟鼠标键盘。
 - `--language` 只影响本次运行，不持久化；`--result-view` 默认 `summary`，切换至 `json` 不重新推理。
+- `--test-mode dog-info --output <JSON> --interactive-dialogs false --language zh-CN --capture-delay-ms 15000` 在正式主窗口显示 10 个测试编号及 50 项 Sentinel 特性，无需 `--model` 和 `--image`，跳过设备初始化。测试实现位于 `Test/desktop_projects/DemoDogInfoTests.cs`；输出状态 `displayed` 和实际文本，采集后按预期编号、数量与排序核验结果。
 - `--screenshot` 可选，必须使用 `.png`；通过 `Form.DrawToBitmap` 保存目标窗口，不操作鼠标键盘、不采集桌面。
 - `--label-font-scale` 默认 1.0，设置正式图像控件已有的标签字号倍率，只影响本次验证。
 - `--capture-delay-ms` 默认 0；成功结果生成后保持正式窗口消息循环指定时长，供隔离桌面采集完整标题栏、边框和客户区。采集时不传 `--screenshot`，以完整窗口 PNG 与 `--output` 的结果共同检查。完整窗口图可用 `python Test/verify_csharp_demo_button_center.py <PNG> --output <JSON>` 检查首行两个蓝色按钮的实际文字中心，水平、垂直偏差均不得超过 2 像素。

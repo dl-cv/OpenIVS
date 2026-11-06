@@ -563,11 +563,9 @@ namespace DlcvCSharpTest
                     "]",
                     "",
                     "Sentinel加密狗特性（3个）：",
-                    "[",
-                    "  \"1\",",
-                    "  \"2\",",
-                    "  \"3\"",
-                    "]",
+                    "1：1个",
+                    "2：1个",
+                    "3：1个",
                     "",
                     "Virbox加密狗ID（1个）：",
                     "[",
@@ -575,17 +573,55 @@ namespace DlcvCSharpTest
                     "]",
                     "",
                     "Virbox加密狗特性（2个）：",
-                    "[",
-                    "  \"10\",",
-                    "  \"11\"",
-                    "]");
+                    "10：1个",
+                    "11：1个");
                 RequireCliThreshold(
                     string.Equals(filledDogText, expectedFilled, StringComparison.Ordinal)
                     && filledDogText.IndexOf('\n') >= 0
                     && filledDogText.Replace("\r\n", string.Empty).IndexOf('\n') < 0,
                     "加密狗列表未使用界面换行");
-                RequireTextBoxLineCount(filledDogText, 23, "加密狗列表未在文本框中按行显示");
-                RequireTextBoxLineCount(emptyDogText, 11, "空加密狗列表未在文本框中按行显示");
+                RequireTextBoxLineCount(filledDogText, 19, "加密狗列表未在文本框中按行显示");
+                RequireTextBoxLineCount(emptyDogText, 9, "空加密狗列表未在文本框中按行显示");
+
+                var repeatedFeatures = new JArray();
+                for (int index = 0; index < 10; index++)
+                {
+                    repeatedFeatures.Add("0");
+                }
+                for (int index = 0; index < 10; index++)
+                {
+                    foreach (string feature in new[] { "10120", "3", "2", "1" })
+                    {
+                        repeatedFeatures.Add(feature);
+                    }
+                }
+                filledDogInfo["sentinel"]["features"] = repeatedFeatures;
+                filledDogInfo["virbox"]["features"] = new JArray { "120", "2", "120", "10" };
+                string originalDogInfo = filledDogInfo.ToString();
+                string repeatedDogText = (string)dogFormatter.Invoke(null, new object[] { filledDogInfo, false });
+                RequireCliThreshold(
+                    repeatedDogText.Contains(JoinTextBoxLines(
+                        "Sentinel加密狗特性（50个）：", "0：10个", "1：10个", "2：10个", "3：10个", "10120：10个"))
+                    && repeatedDogText.EndsWith(JoinTextBoxLines(
+                        "Virbox加密狗特性（4个）：", "2：1个", "10：1个", "120：2个"), StringComparison.Ordinal)
+                    && filledDogInfo.ToString() == originalDogInfo,
+                    "特性数量汇总、编号排序或原始列表保留错误");
+
+                Type i18nType = demoAssembly.GetType("DlcvDemo.I18n", throwOnError: true);
+                MethodInfo setLanguage = i18nType.GetMethod("SetLanguage", BindingFlags.NonPublic | BindingFlags.Static);
+                try
+                {
+                    setLanguage.Invoke(null, new object[] { "en-US", false });
+                    string englishDogText = (string)dogFormatter.Invoke(null, new object[] { filledDogInfo, false });
+                    RequireCliThreshold(
+                        englishDogText.Contains(JoinTextBoxLines(
+                            "Sentinel Dongle Features(50): ", "0: 10", "1: 10", "2: 10", "3: 10", "10120: 10")),
+                        "英文特性汇总显示错误");
+                }
+                finally
+                {
+                    setLanguage.Invoke(null, new object[] { "zh-CN", false });
+                }
 
                 var dogInfo = new JObject
                 {
@@ -708,6 +744,17 @@ namespace DlcvCSharpTest
                     "--screenshot", screenshotPng
                 });
                 RequireWinFormsSelfTest(pngResult.Ok, "合法 --screenshot 参数被拒绝: " + pngResult.Error);
+                UiTestOptionsParseResult dogInfoResult = InvokeUiTestOptionsParse(tryParseMethod, new[]
+                {
+                    "ui-test", "--test-mode", "dog-info", "--output", outputPath,
+                    "--interactive-dialogs", "false"
+                });
+                RequireWinFormsSelfTest(dogInfoResult.Ok, "加密狗界面测试应允许省略模型和图片: " + dogInfoResult.Error);
+                UiTestOptionsParseResult missingDogOutput = InvokeUiTestOptionsParse(tryParseMethod, new[]
+                {
+                    "ui-test", "--test-mode", "dog-info"
+                });
+                RequireWinFormsSelfTest(!missingDogOutput.Ok, "加密狗界面测试缺少输出路径时应拒绝运行");
                 string actualScreenshot = Convert.ToString(
                     screenshotPathProperty.GetValue(pngResult.Options, null),
                     CultureInfo.InvariantCulture);

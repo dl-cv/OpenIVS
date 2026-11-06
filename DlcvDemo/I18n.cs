@@ -66,6 +66,7 @@ namespace DlcvDemo
             { "Virbox加密狗特性", "Virbox Dongle Features" },
             { "未检测到加密狗", "No Dongle Detected" },
             { "（{0}个）：", "({0}): " },
+            { "{0}：{1}个", "{0}: {1}" },
             { "模型: ", "Model: " },
             { "图片: ", "Image: " },
             { "AI模型 (*.dvt;*.dvo;*.dvst;*.dvso)", "AI Model (*.dvt;*.dvo;*.dvst;*.dvso)" },
