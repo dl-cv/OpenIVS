@@ -580,6 +580,8 @@ namespace DlcvDemo
         private int batch_size = 1;
         private string lastSummaryText;
         private string lastJsonText;
+        private string modelInfoText;
+        private string modelInfoAfterInferText;
         private bool showJsonResult;
         private PressureTestRunner pressureTestRunner;
         private System.Windows.Forms.Timer updateTimer;
@@ -765,7 +767,15 @@ namespace DlcvDemo
             string infoText = result.ContainsKey("model_info")
                 ? result["model_info"].ToString()
                 : result.ToString();
-            richTextBox1.Text = WithLoadedModelPath(infoText);
+            richTextBox1.Text = WithLoadedModelPath(WithCudaMemoryInfo(infoText));
+        }
+
+        // 模型信息前显示当前显存占用，便于确认模型加载和释放后的显存变化。
+        private string WithCudaMemoryInfo(string infoText)
+        {
+            int deviceId = GetSelectedDeviceId();
+            uint deviceIndex = deviceId >= 0 ? (uint)deviceId : 0u;
+            return CudaMemoryInfo.Describe(deviceIndex) + Environment.NewLine + infoText;
         }
 
         private void button_openimage_Click(object sender, EventArgs e)
@@ -847,6 +857,11 @@ namespace DlcvDemo
                 {
                     throw new InvalidOperationException(I18n.T("模型加载失败: ") + richTextBox1.Text);
                 }
+                if (!richTextBox1.Text.Contains("CUDA"))
+                {
+                    throw new InvalidOperationException(I18n.T("模型信息未显示显存占用: ") + richTextBox1.Text);
+                }
+                modelInfoText = richTextBox1.Text;
                 if (uiTestOptions.InteractiveDialogs
                     && !PathsEqual(model_path, uiTestOptions.ModelPath))
                 {
@@ -859,6 +874,17 @@ namespace DlcvDemo
                 }
                 WriteUiTestResult("model_loaded", null);
                 await Task.Delay(600);
+
+                if (string.Equals(uiTestOptions.TestMode, "model-info", StringComparison.OrdinalIgnoreCase)
+                    && string.IsNullOrWhiteSpace(uiTestOptions.ImagePath))
+                {
+                    button_getmodelinfo_Click(this, EventArgs.Empty);
+                    modelInfoText = richTextBox1.Text;
+                    SaveUiTestScreenshot();
+                    UiTestExitCode = 0;
+                    WriteUiTestResult("passed", null);
+                    return;
+                }
 
                 if (uiTestOptions.InteractiveDialogs)
                 {
@@ -939,6 +965,11 @@ namespace DlcvDemo
                     if (uiTestOptions.SaveJsonPath != null)
                     {
                         jsonExportCheck = await RunJsonResultUiChecksAsync();
+                    }
+                    if (string.Equals(uiTestOptions.TestMode, "model-info", StringComparison.OrdinalIgnoreCase))
+                    {
+                        button_getmodelinfo_Click(this, EventArgs.Empty);
+                        modelInfoAfterInferText = richTextBox1.Text;
                     }
                 }
 
@@ -1033,6 +1064,8 @@ namespace DlcvDemo
                 ["thread_count"] = uiTestOptions.ThreadCount,
                 ["pressure_duration_ms"] = uiTestOptions.PressureDurationMs,
                 ["result_text"] = richTextBox1.Text ?? string.Empty,
+                ["model_info_text"] = modelInfoText,
+                ["model_info_text_after_infer"] = modelInfoAfterInferText,
                 ["error"] = error == null ? null : error.ToString()
             };
             string temporaryPath = outputPath + ".tmp";

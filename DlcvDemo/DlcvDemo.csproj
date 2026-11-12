@@ -136,6 +136,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="CliRunner.cs" />
+    <Compile Include="CudaMemoryInfo.cs" />
     <Compile Include="EnvironmentInfoCollector.cs" />
     <Compile Include="I18n.cs" />
     <Compile Include="UiTestOptions.cs" />
