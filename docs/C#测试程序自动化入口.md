@@ -37,7 +37,7 @@
 
 ## 输出与退出码
 
-状态 JSON 依次写入 `started`、`model_loaded`、`passed` 或 `failed`，包含模型、图片、阈值、设备、测试模式、批量大小、线程数、窗口标题、结果文本、界面类型（`ui_framework`）、截图路径（`screenshot`）和错误信息。自动测试中的产品错误写入界面和 JSON，不弹错误 MessageBox。
+状态 JSON 依次写入 `started`、`model_loaded`、`passed` 或 `failed`，包含模型、图片、阈值、设备、测试模式、批量大小、线程数、窗口标题、结果文本、模型信息文本（`model_info_text`，模型加载后显示的内容）、界面类型（`ui_framework`）、截图路径（`screenshot`）和错误信息。模型加载后要求模型信息文本包含 `CUDA` 显存行，否则判定失败。自动测试中的产品错误写入界面和 JSON，不弹错误 MessageBox。
 
 进程退出码：`0` 通过、`1` 运行或验证失败、`2` 参数错误。判断时同时读取退出码和无 BOM UTF-8 JSON，不能用窗口出现或截图文件存在代替通过。
 
