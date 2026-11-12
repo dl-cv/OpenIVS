@@ -4280,9 +4280,13 @@ namespace DlcvCSharpTest
                 var detCounts = new List<int>();
                 if (r.SampleResults != null)
                 {
-                    foreach (var sr in r.SampleResults)
+                    for (int sampleIndex = 0; sampleIndex < r.SampleResults.Count; sampleIndex++)
                     {
+                        var sr = r.SampleResults[sampleIndex];
                         detCounts.Add((sr.Results != null) ? sr.Results.Count : 0);
+                        Console.WriteLine("inspection[" + sampleIndex + "]: ok=" +
+                            (sr.Ok.HasValue ? sr.Ok.Value.ToString() : "<none>") +
+                            ", reason=" + (sr.Reason ?? string.Empty));
                     }
                 }
 

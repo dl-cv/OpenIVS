@@ -967,6 +967,22 @@ DlcvCResult dlcv_infer_cpp_infer_with_params_c(
     return result;
 }
 
+DlcvCInspectionStatus dlcv_infer_cpp_get_last_inspection_status_c(int sample_index) {
+    DlcvCInspectionStatus result{};
+    if (sample_index < 0) return result;
+
+    bool ok = false;
+    std::vector<std::string> reasons;
+    if (dlcv_infer::Model::GetLastInspectionStatus(
+            ok,
+            reasons,
+            static_cast<size_t>(sample_index))) {
+        result.has_status = 1;
+        result.ok = ok ? 1 : 0;
+    }
+    return result;
+}
+
 void dlcv_infer_cpp_free_model_result_c(DlcvCResult* result) {
     if (result == nullptr) return;
     ReleaseCResultMemory(result);

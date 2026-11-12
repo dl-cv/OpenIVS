@@ -8,7 +8,7 @@
 dlcv_infer_cpp/dlcv_infer_c_api.h
 ```
 
-该头文件可由 C 或 C++ 编译器直接包含，包含六个结构体定义、扩展 C 接口、结构化 C 接口和原生 JSON 转发接口。
+该头文件可由 C 或 C++ 编译器直接包含，包含七个结构体定义、扩展 C 接口、结构化 C 接口和原生 JSON 转发接口。
 
 日志位置、写入时机与错误返回方式见 [日志路径与写入条件](日志专题文档.md)。
 
@@ -21,6 +21,7 @@ dlcv_infer_cpp/dlcv_infer_c_api.h
 | `dlcv_infer_cpp_free_model_c` | `0` | 释放一次 C 包装持有；没有本地持有时返回成功 |
 | `dlcv_infer_cpp_infer_c` | `DlcvCResult` | 使用默认参数执行结构化推理 |
 | `dlcv_infer_cpp_infer_with_params_c` | `DlcvCResult` | 使用 JSON 参数执行结构化推理 |
+| `dlcv_infer_cpp_get_last_inspection_status_c` | `DlcvCInspectionStatus` | 按样本索引读取当前线程最近一次推理的流程判定 |
 | `dlcv_infer_cpp_free_model_result_c` | 无 | 释放 `DlcvCResult` 内部内存 |
 | `dlcv_infer_cpp_get_model_info_c` | UTF-8 JSON / `nullptr` | 返回普通模型兼容信息 |
 | `dlcv_infer_cpp_infer_json_c` | UTF-8 JSON / `nullptr` | 返回单图 JSON 结果 |
@@ -43,6 +44,7 @@ dlcv_infer_cpp/dlcv_infer_c_api.h
 - `DlcvCObjectResult`
 - `DlcvCSampleResult`
 - `DlcvCResult`
+- `DlcvCInspectionStatus`
 
 `DlcvCObjectResult` 只提供通用扩展字段 `char* extra_info`，不提供专用均值或中值成员。该指针为以零字节结尾的 UTF-8 JSON 对象字符串，可为 `nullptr`；统计键、折线和业务扩展均在此对象内。完整语义见 [结果标准](模块、流程与模型推理标准文档.md) 3.3.1。
 
@@ -163,6 +165,21 @@ const char* dlcv_infer_cpp_infer_json_c(
 ```
 
 返回字符串使用 `dlcv_infer_cpp_free_string_c()` 释放。
+
+### 流程判定读取
+
+```c
+typedef struct DlcvCInspectionStatus {
+    int has_status;
+    int ok;
+} DlcvCInspectionStatus;
+
+DlcvCInspectionStatus dlcv_infer_cpp_get_last_inspection_status_c(int sample_index);
+```
+
+结构化推理返回 `result.code == 0` 后，在同一线程、下一次推理之前调用。`sample_index` 从 0 开始；负数、超出范围或没有判定时返回 `has_status=0, ok=0`，不能将无判定当作 NG。`has_status=1` 时，`ok=1` 表示 OK，`ok=0` 表示 NG。
+
+接口读取现有 C++ 流程判定，不重复推理，不依赖目标数量，不修改 `DlcvCResult` 或 `DlcvCSampleResult` 的布局。返回结构按值传递，无需释放。推理失败时不要读取状态；该接口不把失败请求转换为业务 NG。
 
 ## 7. 模型列表
 

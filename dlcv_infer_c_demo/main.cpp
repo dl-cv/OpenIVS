@@ -579,6 +579,10 @@ private:
             << "，目标数=" << objectCount << "。\n";
 
         for (int sampleIndex = 0; sampleIndex < result.n; ++sampleIndex) {
+            const DlcvCInspectionStatus inspection = api_.getLastInspectionStatus(sampleIndex);
+            if (inspection.has_status != 0) {
+                std::cout << "  样本 " << sampleIndex << " 判定：" << (inspection.ok != 0 ? "OK" : "NG") << "。\n";
+            }
             const DlcvCSampleResult& sample = result.sample_results[sampleIndex];
             for (int objectIndex = 0; objectIndex < sample.n; ++objectIndex) {
                 const DlcvCObjectResult& object = sample.results[objectIndex];

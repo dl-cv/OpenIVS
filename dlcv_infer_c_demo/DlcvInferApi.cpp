@@ -17,6 +17,7 @@ bool DlcvInferApi::load() {
         !resolve("dlcv_infer_cpp_get_last_error_c", getLastError_) ||
         !resolve("dlcv_infer_cpp_free_model_c", freeModel_) ||
         !resolve("dlcv_infer_cpp_infer_with_params_c", inferWithParams_) ||
+        !resolve("dlcv_infer_cpp_get_last_inspection_status_c", getLastInspectionStatus_) ||
         !resolve("dlcv_infer_cpp_free_model_result_c", freeModelResult_) ||
         !resolve("dlcv_infer_cpp_get_model_info_c", getModelInfo_) ||
         !resolve("dlcv_infer_cpp_get_all_models_c", getAllModels_) ||
@@ -63,6 +64,10 @@ DlcvCResult DlcvInferApi::inferWithParams(
     return inferWithParams_(modelIndex, imageList, paramsJson);
 }
 
+DlcvCInspectionStatus DlcvInferApi::getLastInspectionStatus(int sampleIndex) const {
+    return getLastInspectionStatus_(sampleIndex);
+}
+
 void DlcvInferApi::freeModelResult(DlcvCResult* result) const {
     freeModelResult_(result);
 }
@@ -90,6 +95,7 @@ void DlcvInferApi::clearFunctions() {
     getLastError_ = nullptr;
     freeModel_ = nullptr;
     inferWithParams_ = nullptr;
+    getLastInspectionStatus_ = nullptr;
     freeModelResult_ = nullptr;
     getModelInfo_ = nullptr;
     getAllModels_ = nullptr;
