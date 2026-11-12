@@ -209,6 +209,7 @@ GUI 自动验证使用同一个 WinForms 主窗口的 `ui-test` 入口，模型�
 #### 5.2 绘制规则（框/文字/Mask）
 
 - **底图通道**：`ImageViewer.UpdateImage(Mat)` 在显示前若检测到 **4 通道**，会先 `BGRA2BGR` 再 `ToBitmap`，**不直接可视化四通道**（当前 UI 绘制按三通道位图处理）。
+- **超大图显示**：原图最长边超过 `MaxDisplayDimension = 8192` 时，`UpdateImage(Mat)` 先用 `INTER_AREA` 缩成预览位图再绘制（GDI+ 整幅缩放超大位图会报溢出错误）。框、Mask、polyline 和标签仍按原图像素坐标绘制，整图 Mask 先缩到预览尺寸再叠加；放大超过预览比例后按预览像素显示。
 - **输入**：仅可视化 `SampleResults[0]`（Batch中第一张图的结果）。
 - **坐标**：基于**原图像素坐标**。
 - **可视化输出**：
