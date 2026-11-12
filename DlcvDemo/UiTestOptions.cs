@@ -164,9 +164,10 @@ namespace DlcvDemo
                             && !string.Equals(value, "infer-json", StringComparison.OrdinalIgnoreCase)
                             && !string.Equals(value, "model-dialog", StringComparison.OrdinalIgnoreCase)
                             && !string.Equals(value, "dog-info", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(value, "model-info", StringComparison.OrdinalIgnoreCase)
                             && !string.Equals(value, "pressure", StringComparison.OrdinalIgnoreCase))
                         {
-                            error = "--test-mode 必须是 infer、infer-json、model-dialog、dog-info 或 pressure。";
+                            error = "--test-mode 必须是 infer、infer-json、model-dialog、dog-info、model-info 或 pressure。";
                             return false;
                         }
                         options.TestMode = value.ToLowerInvariant();
@@ -205,12 +206,13 @@ namespace DlcvDemo
             }
 
             bool requiresModelInput = options.TestMode != "dog-info";
+            bool requiresImageInput = requiresModelInput && options.TestMode != "model-info";
             if (requiresModelInput && string.IsNullOrWhiteSpace(options.ModelPath))
             {
                 error = "缺少必需参数: --model";
                 return false;
             }
-            if (requiresModelInput && string.IsNullOrWhiteSpace(options.ImagePath))
+            if (requiresImageInput && string.IsNullOrWhiteSpace(options.ImagePath))
             {
                 error = "缺少必需参数: --image";
                 return false;
@@ -225,7 +227,7 @@ namespace DlcvDemo
                 error = "模型文件不存在: " + options.ModelPath;
                 return false;
             }
-            if (requiresModelInput && !File.Exists(options.ImagePath))
+            if (requiresImageInput && !File.Exists(options.ImagePath))
             {
                 error = "图片文件不存在: " + options.ImagePath;
                 return false;
@@ -287,7 +289,7 @@ namespace DlcvDemo
         internal static void PrintHelp()
         {
             Console.Out.WriteLine("Usage:");
-            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>] [--save-json <jsonPath>] [--language <zh-CN|en-US>] [--result-view <summary|json>] [--test-mode <infer|infer-json|pressure>] [--batch-size <1..1024>] [--thread-count <1..32>] [--pressure-duration-ms <500..60000>] [--capture-delay-ms <0..60000>] [--label-font-scale <0.3..5.0>]");
+            Console.Out.WriteLine("  \"C# 测试程序.exe\" ui-test --model <path> --image <path> --output <jsonPath> [--threshold <0..1>] [--device <int>] [--interactive-dialogs <true|false>] [--screenshot <pngPath>] [--save-json <jsonPath>] [--language <zh-CN|en-US>] [--result-view <summary|json>] [--test-mode <infer|infer-json|model-info|pressure>] [--batch-size <1..1024>] [--thread-count <1..32>] [--pressure-duration-ms <500..60000>] [--capture-delay-ms <0..60000>] [--label-font-scale <0.3..5.0>]");
             Console.Out.WriteLine();
             Console.Out.WriteLine("ui-test 启动正式程序使用的 WinForms 窗口，将进度和结果写入 --output。");
             Console.Out.WriteLine("interactive-dialogs=false 不弹出文件对话框且不激活窗口；--screenshot 通过窗口绘制代码保存截图。");
@@ -296,6 +298,7 @@ namespace DlcvDemo
             Console.Out.WriteLine("--result-view 指定结果区显示汇总或 JSON，默认 summary；切换不重新推理。");
             Console.Out.WriteLine("--save-json 在 infer 或 infer-json 测试中保存完整 JSON，并验证预览、结果切换与保存功能；父目录须已存在。");
             Console.Out.WriteLine("--test-mode=infer-json 复用推理 JSON 按钮生成原始 JSON 结果。");
+            Console.Out.WriteLine("--test-mode=model-info 只加载模型并显示“获取模型信息”结果，供隔离采集模型信息与显存行；提供 --image 时先完成一次图片推理再显示。");
             Console.Out.WriteLine("--test-mode=model-dialog 仅打开正式模型选择窗口供隔离采集，30 秒后退出；不加载模型或初始化设备。");
             Console.Out.WriteLine("--test-mode=dog-info 使用固定测试编号和 50 项特性显示加密狗结果，无需 --model/--image，不初始化设备；可配合 --capture-delay-ms 采集完整窗口。");
             Console.Out.WriteLine("--capture-delay-ms 在结果生成后保持正式窗口消息循环，供隔离桌面采集完整窗口；默认 0。");

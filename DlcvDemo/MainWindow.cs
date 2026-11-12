@@ -581,6 +581,7 @@ namespace DlcvDemo
         private string lastSummaryText;
         private string lastJsonText;
         private string modelInfoText;
+        private string modelInfoAfterInferText;
         private bool showJsonResult;
         private PressureTestRunner pressureTestRunner;
         private System.Windows.Forms.Timer updateTimer;
@@ -874,6 +875,17 @@ namespace DlcvDemo
                 WriteUiTestResult("model_loaded", null);
                 await Task.Delay(600);
 
+                if (string.Equals(uiTestOptions.TestMode, "model-info", StringComparison.OrdinalIgnoreCase)
+                    && string.IsNullOrWhiteSpace(uiTestOptions.ImagePath))
+                {
+                    button_getmodelinfo_Click(this, EventArgs.Empty);
+                    modelInfoText = richTextBox1.Text;
+                    SaveUiTestScreenshot();
+                    UiTestExitCode = 0;
+                    WriteUiTestResult("passed", null);
+                    return;
+                }
+
                 if (uiTestOptions.InteractiveDialogs)
                 {
                     button_openimage_Click(this, EventArgs.Empty);
@@ -953,6 +965,11 @@ namespace DlcvDemo
                     if (uiTestOptions.SaveJsonPath != null)
                     {
                         jsonExportCheck = await RunJsonResultUiChecksAsync();
+                    }
+                    if (string.Equals(uiTestOptions.TestMode, "model-info", StringComparison.OrdinalIgnoreCase))
+                    {
+                        button_getmodelinfo_Click(this, EventArgs.Empty);
+                        modelInfoAfterInferText = richTextBox1.Text;
                     }
                 }
 
@@ -1048,6 +1065,7 @@ namespace DlcvDemo
                 ["pressure_duration_ms"] = uiTestOptions.PressureDurationMs,
                 ["result_text"] = richTextBox1.Text ?? string.Empty,
                 ["model_info_text"] = modelInfoText,
+                ["model_info_text_after_infer"] = modelInfoAfterInferText,
                 ["error"] = error == null ? null : error.ToString()
             };
             string temporaryPath = outputPath + ".tmp";
