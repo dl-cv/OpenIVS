@@ -216,7 +216,7 @@ namespace DLCV
 
                     e.Graphics.TranslateTransform(_imagePosition.X, _imagePosition.Y);
                     e.Graphics.ScaleTransform(_scale, _scale);
-                    e.Graphics.DrawImage(_image, 0, 0, _image.Width, _image.Height);
+                    DrawBaseImage(e.Graphics);
                 }
 
                 if (currentResults != null)
@@ -634,20 +634,12 @@ namespace DLCV
                         // 完整原图尺寸 Mask 已在原图坐标系；只有 ROI Mask 才映射到 bbox。
                         if (objResult.WithMask && objResult.Mask != null && !objResult.Mask.Empty())
                         {
-                            using (var maskBitmap = CreateTransparentMaskDirect(objResult.Mask))
-                            {
-                                bool fullImageMask = _image != null
-                                    && objResult.Mask.Width == _image.Width
-                                    && objResult.Mask.Height == _image.Height;
-                                if (fullImageMask)
-                                {
-                                    e.Graphics.DrawImage(maskBitmap, 0, 0, _image.Width, _image.Height);
-                                }
-                                else
-                                {
-                                    e.Graphics.DrawImage(maskBitmap, x, y, w, h);
-                                }
-                            }
+                            bool fullImageMask = _image != null
+                                && objResult.Mask.Width == _image.Width
+                                && objResult.Mask.Height == _image.Height;
+                            DrawVisiblePixels(e.Graphics, objResult.Mask, fullImageMask
+                                ? new RectangleF(0, 0, _image.Width, _image.Height)
+                                : new RectangleF(x, y, w, h), null);
                         }
 
                         // 绘制边界框
@@ -758,12 +750,12 @@ namespace DLCV
                 using (Graphics graphics = Graphics.FromImage(output))
                 {
                     graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-                    graphics.DrawImage(_image, 0, 0, _image.Width, _image.Height);
 
                     float originalScale = _scale;
                     try
                     {
                         _scale = 1.0f;
+                        DrawBaseImage(graphics);
                         using (PaintEventArgs paintArgs = new PaintEventArgs(graphics, new Rectangle(0, 0, output.Width, output.Height)))
                         {
                             DrawResults(paintArgs);
@@ -776,6 +768,73 @@ namespace DLCV
                 }
 
                 return output;
+            }
+        }
+
+        private void DrawBaseImage(Graphics graphics)
+        {
+            if ((long)_image.Width * _image.Height * 4 > int.MaxValue && _image is Bitmap bitmap)
+                DrawLargeImage(graphics, bitmap);
+            else
+                graphics.DrawImage(_image, 0, 0, _image.Width, _image.Height);
+        }
+
+        // 保留原图；只把可见像素交给 GDI+，避免其整图缩放缓冲区超过 2 GiB。
+        private void DrawLargeImage(Graphics graphics, Bitmap bitmap)
+        {
+            var data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+                ImageLockMode.ReadOnly, bitmap.PixelFormat);
+            try
+            {
+                int channels = Image.GetPixelFormatSize(bitmap.PixelFormat) / 8;
+                using (var pixels = Mat.FromPixelData(bitmap.Height, bitmap.Width,
+                    MatType.CV_8UC(channels), data.Scan0, data.Stride))
+                    DrawVisiblePixels(graphics, pixels, new RectangleF(0, 0, bitmap.Width, bitmap.Height), bitmap);
+            }
+            finally
+            {
+                bitmap.UnlockBits(data);
+            }
+        }
+
+        private void DrawVisiblePixels(Graphics graphics, Mat pixels, RectangleF bounds, Bitmap sourceBitmap)
+        {
+            RectangleF visible = RectangleF.Intersect(bounds, graphics.VisibleClipBounds);
+            if (visible.Width <= 0 || visible.Height <= 0) return;
+            float unitX = bounds.Width / pixels.Width;
+            float unitY = bounds.Height / pixels.Height;
+            // 多取一圈原像素，避免高倍率下把裁剪边缘当作图像外的透明区域。
+            int left = Math.Max(0, (int)Math.Floor((visible.Left - bounds.Left) / unitX) - 1);
+            int top = Math.Max(0, (int)Math.Floor((visible.Top - bounds.Top) / unitY) - 1);
+            int right = Math.Min(pixels.Width, (int)Math.Ceiling((visible.Right - bounds.Left) / unitX) + 1);
+            int bottom = Math.Min(pixels.Height, (int)Math.Ceiling((visible.Bottom - bounds.Top) / unitY) + 1);
+            float scaleX = unitX * _scale;
+            float scaleY = unitY * _scale;
+            // 屏幕绘制通常一次完成；原尺寸导出按小块生成透明 Mask，限制临时内存。
+            int stepX = Math.Max(1, (int)Math.Min(int.MaxValue, Math.Floor(2048.0 / scaleX)));
+            int stepY = Math.Max(1, (int)Math.Min(int.MaxValue, Math.Floor(2048.0 / scaleY)));
+            for (int y = top; y < bottom; y += Math.Min(stepY, bottom - y))
+            for (int x = left; x < right; x += Math.Min(stepX, right - x))
+            {
+                int width = Math.Min(stepX, right - x);
+                int height = Math.Min(stepY, bottom - y);
+                using (var region = new Mat(pixels, new OpenCvSharp.Rect(x, y, width, height)))
+                using (var display = new Mat())
+                {
+                    var size = new OpenCvSharp.Size(
+                        Math.Min(width, Math.Max(1, (int)Math.Ceiling(width * scaleX))),
+                        Math.Min(height, Math.Max(1, (int)Math.Ceiling(height * scaleY))));
+                    Cv2.Resize(region, display, size, 0, 0, InterpolationFlags.Nearest);
+                    using (Bitmap layer = sourceBitmap == null
+                        ? CreateTransparentMaskDirect(display)
+                        : BitmapConverter.ToBitmap(display, sourceBitmap.PixelFormat))
+                    {
+                        if (sourceBitmap != null && sourceBitmap.PixelFormat == PixelFormat.Format8bppIndexed)
+                            layer.Palette = sourceBitmap.Palette;
+                        graphics.DrawImage(layer, new RectangleF(bounds.X + x * unitX, bounds.Y + y * unitY,
+                            width * unitX, height * unitY), new RectangleF(0, 0, layer.Width, layer.Height), GraphicsUnit.Pixel);
+                    }
+                }
             }
         }
 
