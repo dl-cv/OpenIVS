@@ -25,6 +25,7 @@ public:
         int modelIndex,
         const DlcvCImageList* imageList,
         const char* paramsJson) const;
+    DlcvCInspectionStatus getLastInspectionStatus(int sampleIndex) const;
     void freeModelResult(DlcvCResult* result) const;
     const char* getModelInfo(int modelIndex) const;
     const char* getAllModels() const;
@@ -36,6 +37,7 @@ private:
     using GetLastErrorFunction = const char* (__cdecl*)();
     using FreeModelFunction = int(__cdecl*)(int);
     using InferWithParamsFunction = DlcvCResult(__cdecl*)(int, const DlcvCImageList*, const char*);
+    using GetLastInspectionStatusFunction = DlcvCInspectionStatus(__cdecl*)(int);
     using FreeModelResultFunction = void(__cdecl*)(DlcvCResult*);
     using GetModelInfoFunction = const char* (__cdecl*)(int);
     using GetAllModelsFunction = const char* (__cdecl*)();
@@ -63,6 +65,7 @@ private:
     GetLastErrorFunction getLastError_ = nullptr;
     FreeModelFunction freeModel_ = nullptr;
     InferWithParamsFunction inferWithParams_ = nullptr;
+    GetLastInspectionStatusFunction getLastInspectionStatus_ = nullptr;
     FreeModelResultFunction freeModelResult_ = nullptr;
     GetModelInfoFunction getModelInfo_ = nullptr;
     GetAllModelsFunction getAllModels_ = nullptr;
