@@ -18,12 +18,7 @@ namespace DLCV
     public class ImageViewer : Panel
     {
         private const float NormalizedDpi = 96.0f;
-        // GDI+ 缩放绘制时按 4 字节/像素计算整幅位图缓冲区，超过 32 位整数上限会抛出溢出错误；超长边先转成预览图，绘制和坐标仍按原图换算。
-        private const int MaxDisplayDimension = 8192;
         private Image _image;
-        private int _sourceWidth;
-        private int _sourceHeight;
-        private float _displayScale = 1.0f;
         private float _scale = 1.0f;
         private System.Drawing.PointF _imagePosition = new PointF(0, 0);
         private System.Drawing.Point _lastMousePosition;
@@ -41,40 +36,29 @@ namespace DLCV
             set
             {
                 Image clonedImage = value == null ? null : (Image)value.Clone();
-                SetDisplayImage(clonedImage, 1.0f,
-                    clonedImage == null ? 0 : clonedImage.Width,
-                    clonedImage == null ? 0 : clonedImage.Height);
-            }
-        }
-
-        // 显示位图可以是原图的缩小预览，绘制与结果坐标换算仍按原图尺寸进行。
-        private void SetDisplayImage(Image displayImage, float displayScale, int sourceWidth, int sourceHeight)
-        {
-            if (displayImage is Bitmap bitmap)
-            {
-                NormalizeBitmapDpi(bitmap);
-            }
-
-            lock (_Lock)
-            {
-                Image oldImage = _image;
-                _image = displayImage;
-                _displayScale = displayScale;
-                _sourceWidth = sourceWidth;
-                _sourceHeight = sourceHeight;
-
-                if (_image != null)
+                if (clonedImage is Bitmap bitmap)
                 {
-                    FitImageToPanelUnsafe();
-                    CalculateMinScaleUnsafe();
-                }
-                else
-                {
-                    _scale = 1.0f;
-                    _imagePosition = new PointF(0, 0);
+                    NormalizeBitmapDpi(bitmap);
                 }
 
-                oldImage?.Dispose();
+                lock (_Lock)
+                {
+                    Image oldImage = _image;
+                    _image = clonedImage;
+
+                    if (_image != null)
+                    {
+                        FitImageToPanelUnsafe();
+                        CalculateMinScaleUnsafe();
+                    }
+                    else
+                    {
+                        _scale = 1.0f;
+                        _imagePosition = new PointF(0, 0);
+                    }
+
+                    oldImage?.Dispose();
+                }
             }
         }
 
@@ -87,7 +71,7 @@ namespace DLCV
             lock (_Lock)
             {
                 if (_image == null || region.Width <= 0 || region.Height <= 0
-                    || !new RectangleF(0, 0, _sourceWidth, _sourceHeight).Contains(region))
+                    || !new RectangleF(0, 0, _image.Width, _image.Height).Contains(region))
                     throw new ArgumentOutOfRangeException(nameof(region), "显示区域超出输入图片范围。");
                 _scale = Math.Max(MinScale, Math.Min(MaxScale,
                     Math.Min(ClientSize.Width / region.Width, ClientSize.Height / region.Height)));
@@ -203,22 +187,22 @@ namespace DLCV
             }
 
             float panelAspect = (float)Width / Height;
-            float imageAspect = (float)_sourceWidth / _sourceHeight;
+            float imageAspect = (float)_image.Width / _image.Height;
 
             if (panelAspect > imageAspect)
             {
                 // 面板更宽，按高度填充
-                _scale = (float)Height / _sourceHeight;
+                _scale = (float)Height / _image.Height;
             }
             else
             {
                 // 面板更高，按宽度填充
-                _scale = (float)Width / _sourceWidth;
+                _scale = (float)Width / _image.Width;
             }
 
             // 计算图像初始位置以居中
-            _imagePosition.X = (Width - _sourceWidth * _scale) / 2;
-            _imagePosition.Y = (Height - _sourceHeight * _scale) / 2;
+            _imagePosition.X = (Width - _image.Width * _scale) / 2;
+            _imagePosition.Y = (Height - _image.Height * _scale) / 2;
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -230,27 +214,9 @@ namespace DLCV
                 {
                     e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
 
-                    if (_displayScale >= 1.0f)
-                    {
-                        ApplyImageTransform(e.Graphics);
-                        e.Graphics.DrawImage(_image, 0, 0, _image.Width, _image.Height);
-                    }
-                    else
-                    {
-                        var state = e.Graphics.Save();
-                        try
-                        {
-                            e.Graphics.ResetTransform();
-                            DrawImageLayerClipped(e.Graphics, _image, new RectangleF(0, 0, Width, Height));
-                        }
-                        finally
-                        {
-                            e.Graphics.Restore(state);
-                        }
-
-                        // 结果坐标按原图给出，绘制前恢复原图到面板的变换。
-                        ApplyImageTransform(e.Graphics);
-                    }
+                    e.Graphics.TranslateTransform(_imagePosition.X, _imagePosition.Y);
+                    e.Graphics.ScaleTransform(_scale, _scale);
+                    DrawBaseImage(e.Graphics);
                 }
 
                 if (currentResults != null)
@@ -258,59 +224,6 @@ namespace DLCV
                     DrawResults(e);
                 }
             }
-        }
-
-        private void ApplyImageTransform(Graphics graphics)
-        {
-            graphics.TranslateTransform(_imagePosition.X, _imagePosition.Y);
-            graphics.ScaleTransform(_scale, _scale);
-        }
-
-        // 只绘制裁剪范围内可见的部分：超大位图整幅缩放会被 GDI+ 拒绝，按区域绘制可保持原图坐标换算。
-        private void DrawImageLayerClipped(Graphics graphics, Image layer, RectangleF clipBounds)
-        {
-            if (layer == null || _sourceWidth <= 0 || _sourceHeight <= 0)
-            {
-                return;
-            }
-
-            float screenWidth = _sourceWidth * _scale;
-            float screenHeight = _sourceHeight * _scale;
-            if (screenWidth <= 0 || screenHeight <= 0)
-            {
-                return;
-            }
-
-            RectangleF fullRect = new RectangleF(_imagePosition.X, _imagePosition.Y, screenWidth, screenHeight);
-            RectangleF visibleRect = RectangleF.Intersect(fullRect, clipBounds);
-            if (visibleRect.Width <= 0 || visibleRect.Height <= 0)
-            {
-                return;
-            }
-
-            float screenPerLayerPixel = _scale / ((float)layer.Width / _sourceWidth);
-            if (screenPerLayerPixel <= 0)
-            {
-                return;
-            }
-
-            RectangleF sourceRect = new RectangleF(
-                (visibleRect.X - fullRect.X) / screenPerLayerPixel,
-                (visibleRect.Y - fullRect.Y) / screenPerLayerPixel,
-                visibleRect.Width / screenPerLayerPixel,
-                visibleRect.Height / screenPerLayerPixel);
-            sourceRect = RectangleF.Intersect(sourceRect, new RectangleF(0, 0, layer.Width, layer.Height));
-            if (sourceRect.Width <= 0 || sourceRect.Height <= 0)
-            {
-                return;
-            }
-
-            RectangleF destRect = new RectangleF(
-                fullRect.X + sourceRect.X * screenPerLayerPixel,
-                fullRect.Y + sourceRect.Y * screenPerLayerPixel,
-                sourceRect.Width * screenPerLayerPixel,
-                sourceRect.Height * screenPerLayerPixel);
-            graphics.DrawImage(layer, destRect, sourceRect, GraphicsUnit.Pixel);
         }
 
         public void UpdateImageAndResult(dynamic image, CSharpResult currentResults)
@@ -438,8 +351,8 @@ namespace DLCV
 
             int panelWidth = Width;
             int panelHeight = Height;
-            float scaledWidth = _sourceWidth * _scale;
-            float scaledHeight = _sourceHeight * _scale;
+            float scaledWidth = _image.Width * _scale;
+            float scaledHeight = _image.Height * _scale;
 
             // 自定义 Clamp 方法
             float Clamp(float value, float min, float max)
@@ -489,7 +402,6 @@ namespace DLCV
                 return;
             Mat display = image;
             Mat converted = null;
-            Mat resized = null;
             try
             {
                 if (image.Channels() == 4)
@@ -498,28 +410,13 @@ namespace DLCV
                     Cv2.CvtColor(image, converted, ColorConversionCodes.BGRA2BGR);
                     display = converted;
                 }
-
-                int sourceWidth = display.Width;
-                int sourceHeight = display.Height;
-                float displayScale = 1.0f;
-                if (sourceWidth > MaxDisplayDimension || sourceHeight > MaxDisplayDimension)
+                using (Bitmap bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(display))
                 {
-                    double ratio = Math.Min((double)MaxDisplayDimension / sourceWidth, (double)MaxDisplayDimension / sourceHeight);
-                    var previewSize = new OpenCvSharp.Size(
-                        Math.Max(1, (int)Math.Round(sourceWidth * ratio)),
-                        Math.Max(1, (int)Math.Round(sourceHeight * ratio)));
-                    resized = new Mat();
-                    Cv2.Resize(display, resized, previewSize, 0, 0, InterpolationFlags.Area);
-                    display = resized;
-                    displayScale = (float)previewSize.Width / sourceWidth;
+                    UpdateImage(bitmap);
                 }
-
-                Bitmap bitmap = BitmapConverter.ToBitmap(display);
-                SetDisplayImage(bitmap, displayScale, sourceWidth, sourceHeight);
             }
             finally
             {
-                resized?.Dispose();
                 converted?.Dispose();
             }
         }
@@ -737,39 +634,12 @@ namespace DLCV
                         // 完整原图尺寸 Mask 已在原图坐标系；只有 ROI Mask 才映射到 bbox。
                         if (objResult.WithMask && objResult.Mask != null && !objResult.Mask.Empty())
                         {
-                            bool fullImageMask = objResult.Mask.Width == _sourceWidth
-                                && objResult.Mask.Height == _sourceHeight;
-                            if (fullImageMask && _displayScale < 1.0f)
-                            {
-                                using (Mat displayMask = CreateDisplaySizeMask(objResult.Mask))
-                                using (var maskBitmap = CreateTransparentMaskDirect(displayMask))
-                                {
-                                    var state = e.Graphics.Save();
-                                    try
-                                    {
-                                        e.Graphics.ResetTransform();
-                                        DrawImageLayerClipped(e.Graphics, maskBitmap, e.Graphics.VisibleClipBounds);
-                                    }
-                                    finally
-                                    {
-                                        e.Graphics.Restore(state);
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                using (var maskBitmap = CreateTransparentMaskDirect(objResult.Mask))
-                                {
-                                    if (fullImageMask)
-                                    {
-                                        e.Graphics.DrawImage(maskBitmap, 0, 0, _sourceWidth, _sourceHeight);
-                                    }
-                                    else
-                                    {
-                                        e.Graphics.DrawImage(maskBitmap, x, y, w, h);
-                                    }
-                                }
-                            }
+                            bool fullImageMask = _image != null
+                                && objResult.Mask.Width == _image.Width
+                                && objResult.Mask.Height == _image.Height;
+                            DrawVisiblePixels(e.Graphics, objResult.Mask, fullImageMask
+                                ? new RectangleF(0, 0, _image.Width, _image.Height)
+                                : new RectangleF(x, y, w, h), null);
                         }
 
                         // 绘制边界框
@@ -880,18 +750,12 @@ namespace DLCV
                 using (Graphics graphics = Graphics.FromImage(output))
                 {
                     graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-                    graphics.DrawImage(_image, 0, 0, _image.Width, _image.Height);
 
                     float originalScale = _scale;
-                    PointF originalPosition = _imagePosition;
                     try
                     {
-                        if (_displayScale < 1.0f)
-                        {
-                            graphics.ScaleTransform(_displayScale, _displayScale);
-                            _imagePosition = new PointF(0, 0);
-                        }
-                        _scale = _displayScale;
+                        _scale = 1.0f;
+                        DrawBaseImage(graphics);
                         using (PaintEventArgs paintArgs = new PaintEventArgs(graphics, new Rectangle(0, 0, output.Width, output.Height)))
                         {
                             DrawResults(paintArgs);
@@ -900,7 +764,6 @@ namespace DLCV
                     finally
                     {
                         _scale = originalScale;
-                        _imagePosition = originalPosition;
                     }
                 }
 
@@ -908,12 +771,71 @@ namespace DLCV
             }
         }
 
-        // 完整原图 Mask 转成显示尺寸后再生成透明蒙版，避免超大 Mask 位图超出 GDI+ 缓冲区上限。
-        private Mat CreateDisplaySizeMask(Mat mask)
+        private void DrawBaseImage(Graphics graphics)
         {
-            var resized = new Mat();
-            Cv2.Resize(mask, resized, new OpenCvSharp.Size(_image.Width, _image.Height), 0, 0, InterpolationFlags.Nearest);
-            return resized;
+            if ((long)_image.Width * _image.Height * 4 > int.MaxValue && _image is Bitmap bitmap)
+                DrawLargeImage(graphics, bitmap);
+            else
+                graphics.DrawImage(_image, 0, 0, _image.Width, _image.Height);
+        }
+
+        // 保留原图；只把可见像素交给 GDI+，避免其整图缩放缓冲区超过 2 GiB。
+        private void DrawLargeImage(Graphics graphics, Bitmap bitmap)
+        {
+            var data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+                ImageLockMode.ReadOnly, bitmap.PixelFormat);
+            try
+            {
+                int channels = Image.GetPixelFormatSize(bitmap.PixelFormat) / 8;
+                using (var pixels = Mat.FromPixelData(bitmap.Height, bitmap.Width,
+                    MatType.CV_8UC(channels), data.Scan0, data.Stride))
+                    DrawVisiblePixels(graphics, pixels, new RectangleF(0, 0, bitmap.Width, bitmap.Height), bitmap);
+            }
+            finally
+            {
+                bitmap.UnlockBits(data);
+            }
+        }
+
+        private void DrawVisiblePixels(Graphics graphics, Mat pixels, RectangleF bounds, Bitmap sourceBitmap)
+        {
+            RectangleF visible = RectangleF.Intersect(bounds, graphics.VisibleClipBounds);
+            if (visible.Width <= 0 || visible.Height <= 0) return;
+            float unitX = bounds.Width / pixels.Width;
+            float unitY = bounds.Height / pixels.Height;
+            // 多取一圈原像素，避免高倍率下把裁剪边缘当作图像外的透明区域。
+            int left = Math.Max(0, (int)Math.Floor((visible.Left - bounds.Left) / unitX) - 1);
+            int top = Math.Max(0, (int)Math.Floor((visible.Top - bounds.Top) / unitY) - 1);
+            int right = Math.Min(pixels.Width, (int)Math.Ceiling((visible.Right - bounds.Left) / unitX) + 1);
+            int bottom = Math.Min(pixels.Height, (int)Math.Ceiling((visible.Bottom - bounds.Top) / unitY) + 1);
+            float scaleX = unitX * _scale;
+            float scaleY = unitY * _scale;
+            // 屏幕绘制通常一次完成；原尺寸导出按小块生成透明 Mask，限制临时内存。
+            int stepX = Math.Max(1, (int)Math.Min(int.MaxValue, Math.Floor(2048.0 / scaleX)));
+            int stepY = Math.Max(1, (int)Math.Min(int.MaxValue, Math.Floor(2048.0 / scaleY)));
+            for (int y = top; y < bottom; y += Math.Min(stepY, bottom - y))
+            for (int x = left; x < right; x += Math.Min(stepX, right - x))
+            {
+                int width = Math.Min(stepX, right - x);
+                int height = Math.Min(stepY, bottom - y);
+                using (var region = new Mat(pixels, new OpenCvSharp.Rect(x, y, width, height)))
+                using (var display = new Mat())
+                {
+                    var size = new OpenCvSharp.Size(
+                        Math.Min(width, Math.Max(1, (int)Math.Ceiling(width * scaleX))),
+                        Math.Min(height, Math.Max(1, (int)Math.Ceiling(height * scaleY))));
+                    Cv2.Resize(region, display, size, 0, 0, InterpolationFlags.Nearest);
+                    using (Bitmap layer = sourceBitmap == null
+                        ? CreateTransparentMaskDirect(display)
+                        : BitmapConverter.ToBitmap(display, sourceBitmap.PixelFormat))
+                    {
+                        if (sourceBitmap != null && sourceBitmap.PixelFormat == PixelFormat.Format8bppIndexed)
+                            layer.Palette = sourceBitmap.Palette;
+                        graphics.DrawImage(layer, new RectangleF(bounds.X + x * unitX, bounds.Y + y * unitY,
+                            width * unitX, height * unitY), new RectangleF(0, 0, layer.Width, layer.Height), GraphicsUnit.Pixel);
+                    }
+                }
+            }
         }
 
         // 操作Mat数据创建透明蒙版
@@ -1010,7 +932,7 @@ namespace DLCV
             float panelMinDimension = Math.Min(this.Width, this.Height);
 
             // 计算图像的最长边长度
-            float imageMaxDimension = Math.Max(_sourceWidth, _sourceHeight);
+            float imageMaxDimension = Math.Max(_image.Width, _image.Height);
 
             // 计算MinScale，使得图像能缩小到panel最短边的一半大小
             MinScale = (panelMinDimension / 2) / imageMaxDimension;

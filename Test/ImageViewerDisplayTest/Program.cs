@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Diagnostics;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Text;
@@ -12,7 +13,7 @@ using OpenCvSharp;
 
 namespace ImageViewerDisplayTest
 {
-    // 大图显示回归：底图超过 GDI+ 整幅缩放上限时，控件应先转预览位图，框与整图 Mask 仍按原图坐标绘制。
+    // 检查原图细节、可见区域的结果位置及原尺寸导出。
     internal static class Program
     {
         private const int PanelWidth = 1200;
@@ -39,6 +40,7 @@ namespace ImageViewerDisplayTest
             var failures = new List<string>();
             string status = "failed";
             Exception error = null;
+            var timings = new Dictionary<string, double>();
 
             try
             {
@@ -78,7 +80,9 @@ namespace ImageViewerDisplayTest
                         var inferenceResult = new Utils.CSharpResult(
                             new List<Utils.CSharpSampleResult> { sample }, "{}");
 
+                        image.Set(17000, 20000, new Vec3b(255, 255, 255));
                         viewer.UpdateImageAndResult(image, inferenceResult);
+                        checks["source_size_preserved"] = viewer.image.Width == SourceWidth && viewer.image.Height == SourceHeight;
 
                         float fitScale = Math.Min((float)PanelWidth / SourceWidth, (float)PanelHeight / SourceHeight);
                         float fitOffsetX = (PanelWidth - SourceWidth * fitScale) / 2f;
@@ -91,7 +95,8 @@ namespace ImageViewerDisplayTest
                         string fitPath = Path.Combine(outputDirectory, "fixture-fit.png");
                         using (Bitmap fitBitmap = Render(viewer, fitPath))
                         {
-                            checks["fit_image_drawn"] = IsImageDrawn(fitBitmap, fitBoxCenterX, fitBoxCenterY);
+                            checks["fit_image_drawn"] = HasColorNear(fitBitmap, fitOffsetX + 3000 * fitScale,
+                                fitOffsetY + 3000 * fitScale, 1, c => c.R == 90 && c.G == 60 && c.B == 30);
                             Check(checks, failures, "fit_image_drawn", "适配视图没有绘制底图");
                             bool boxDrawn = HasColorNear(fitBitmap, fitBoxLeft, fitBoxTop, 3, c => c.R > 190 && c.G < 90 && c.B < 90);
                             checks["fit_box_position"] = boxDrawn;
@@ -118,19 +123,110 @@ namespace ImageViewerDisplayTest
                             bool boxDrawn = HasColorNear(zoomBitmap, zoomBoxLeft, zoomBoxTop, 3, c => c.R > 190 && c.G < 90 && c.B < 90);
                             checks["zoom_box_position"] = boxDrawn;
                             Check(checks, failures, "zoom_box_position", "放大视图的框没有画在预期位置");
-                            bool imageDrawn = IsImageDrawn(zoomBitmap, PanelWidth / 2, PanelHeight / 2);
+                            bool imageDrawn = HasColorNear(zoomBitmap, 80, 100, 1,
+                                c => c.R == 90 && c.G == 60 && c.B == 30);
                             checks["zoom_image_drawn"] = imageDrawn;
                             Check(checks, failures, "zoom_image_drawn", "放大视图没有绘制底图");
                         }
+
+                        var watch = Stopwatch.StartNew();
+                        for (int i = 0; i < 12; i++)
+                        {
+                            viewer.FocusImageRegion(new RectangleF(regionX + i * 10, regionY, regionWidth, regionHeight));
+                            using (var frame = new Bitmap(PanelWidth, PanelHeight))
+                                viewer.DrawToBitmap(frame, new Rectangle(0, 0, PanelWidth, PanelHeight));
+                        }
+                        timings["pan_frame_average_ms"] = watch.Elapsed.TotalMilliseconds / 12;
+                        checks["pan_under_100ms"] = timings["pan_frame_average_ms"] < 100;
+
+                        viewer.FocusImageRegion(new RectangleF(19995, 16995, 10, 10));
+                        using (Bitmap detail = Render(viewer, Path.Combine(outputDirectory, "fixture-detail.png")))
+                        {
+                            checks["single_source_pixel_preserved"] = HasColorNear(detail, 620, 420, 1,
+                                c => c.R == 255 && c.G == 255 && c.B == 255);
+                            checks["detail_viewport_edge"] = detail.GetPixel(100, 790).ToArgb() == Color.FromArgb(90, 60, 30).ToArgb();
+                        }
+
+                        watch.Restart();
+                        using (Bitmap export = viewer.CreateVisualizationBitmap())
+                        {
+                            checks["export_original_size"] = export.Width == SourceWidth && export.Height == SourceHeight;
+                            checks["export_source_pixel"] = export.GetPixel(20000, 17000).ToArgb() == Color.White.ToArgb();
+                            checks["export_block_edges"] = export.GetPixel(2047, 2047).ToArgb() == Color.FromArgb(90, 60, 30).ToArgb()
+                                && export.GetPixel(2048, 2048).ToArgb() == Color.FromArgb(90, 60, 30).ToArgb();
+                            Color maskColor = export.GetPixel(BoxX + 100, BoxY + 100);
+                            checks["export_full_mask"] = maskColor.G > 120 && maskColor.R < 140 && maskColor.B < 120;
+                        }
+                        timings["export_ms"] = watch.Elapsed.TotalMilliseconds;
+                        viewer.image = null;
+                        viewer.ClearResults();
                     }
                 }
 
-                bool allPassed = checks.Count > 0;
-                foreach (bool value in checks.Values)
+                using (var viewer = new ImageViewer { Size = new System.Drawing.Size(PanelWidth, PanelHeight) })
+                using (var image = new Mat(24000, 1000, MatType.CV_8UC3, new Scalar(30, 60, 90)))
+                using (var mask = new Mat(24000, 1000, MatType.CV_8UC1, Scalar.All(0)))
                 {
-                    if (!value)
+                    image.Set(23600, 500, new Vec3b(255, 255, 255));
+                    using (var area = new Mat(mask, new OpenCvSharp.Rect(600, 23600, 10, 10)))
+                        area.SetTo(Scalar.All(255));
+                    var obj = new Utils.CSharpObjectResult(1, "框", 0.9f, 100,
+                        new List<double> { 600, 23600, 10, 10 }, true, mask, true, false, -100f, null);
+                    viewer.UpdateImageAndResult(image, new Utils.CSharpResult(
+                        new List<Utils.CSharpSampleResult> { new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult> { obj }, false, "NG") }, "{}"));
+                    viewer.FocusImageRegion(new RectangleF(0, 23200, 1000, 800));
+                    using (Bitmap frame = Render(viewer, Path.Combine(outputDirectory, "fixture-tall.png")))
+                    {
+                        checks["tall_source_pixel"] = HasColorNear(frame, 600, 400, 1, c => c.R == 255 && c.G == 255 && c.B == 255);
+                        checks["tall_mask_position"] = HasColorNear(frame, 705, 405, 1, c => c.G > 120 && c.R < 140 && c.B < 120);
+                    }
+                    viewer.image = null;
+                    viewer.ClearResults();
+                }
+
+                using (var viewer = new ImageViewer { Size = new System.Drawing.Size(PanelWidth, PanelHeight) })
+                using (var image = new Mat(20283, 28301, MatType.CV_8UC1, Scalar.All(90)))
+                {
+                    image.Set<byte>(19500, 20000, 255);
+                    viewer.UpdateImage(image);
+                    viewer.FocusImageRegion(new RectangleF(19500, 19100, 1000, 800));
+                    using (Bitmap frame = Render(viewer, Path.Combine(outputDirectory, "fixture-wide-gray.png")))
+                    {
+                        checks["wide_gray_source_pixel"] = HasColorNear(frame, 600, 400, 1, c => c.R == 255 && c.G == 255 && c.B == 255);
+                        checks["wide_gray_background"] = frame.GetPixel(50, 790).ToArgb() == Color.FromArgb(90, 90, 90).ToArgb();
+                    }
+                    viewer.image = null;
+                }
+
+                using (var viewer = new ImageViewer { Size = new System.Drawing.Size(PanelWidth, PanelHeight) })
+                using (var image = new Mat(900, 1600, MatType.CV_8UC4, new Scalar(30, 60, 90, 0)))
+                using (var mask = new Mat(10, 20, MatType.CV_8UC1, Scalar.All(0)))
+                {
+                    using (var area = new Mat(mask, new OpenCvSharp.Rect(0, 0, 10, 10)))
+                        area.SetTo(Scalar.All(255));
+                    var obj = new Utils.CSharpObjectResult(1, "框", 0.9f, 20000,
+                        new List<double> { 400, 300, 200, 100 }, true, mask, true, false, -100f, null);
+                    viewer.UpdateImageAndResult(image, new Utils.CSharpResult(
+                        new List<Utils.CSharpSampleResult> { new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult> { obj }, false, "NG") }, "{}"));
+                    using (Bitmap frame = Render(viewer, Path.Combine(outputDirectory, "fixture-small-roi.png")))
+                    {
+                        checks["small_bgra_background"] = frame.GetPixel(100, 200).ToArgb() == Color.FromArgb(90, 60, 30).ToArgb();
+                        checks["roi_mask_left"] = frame.GetPixel(340, 325).G > 120;
+                        checks["roi_mask_right"] = frame.GetPixel(420, 325).ToArgb() == Color.FromArgb(90, 60, 30).ToArgb();
+                    }
+                    using (Bitmap export = viewer.CreateVisualizationBitmap())
+                        checks["small_export_original_size"] = export.Width == 1600 && export.Height == 900;
+                    viewer.image = null;
+                    viewer.ClearResults();
+                }
+
+                bool allPassed = checks.Count > 0;
+                foreach (var check in checks)
+                {
+                    if (!check.Value)
                     {
                         allPassed = false;
+                        failures.Add(check.Key);
                     }
                 }
                 status = allPassed ? "passed" : "failed";
@@ -145,6 +241,7 @@ namespace ImageViewerDisplayTest
             {
                 ["status"] = status,
                 ["checks"] = checks,
+                ["timings"] = timings,
                 ["failures"] = failures,
                 ["output_directory"] = outputDirectory,
                 ["source_size"] = new[] { SourceWidth, SourceHeight },
@@ -179,14 +276,6 @@ namespace ImageViewerDisplayTest
                 bitmap.Dispose();
                 throw;
             }
-        }
-
-        private static bool IsImageDrawn(Bitmap bitmap, float x, float y)
-        {
-            Color background = bitmap.GetPixel(2, 2);
-            int left = Math.Max(0, (int)Math.Round(x) - 8);
-            int top = Math.Max(0, (int)Math.Round(y) - 8);
-            return HasPixel(bitmap, left, top, 16, c => c != background);
         }
 
         private static bool HasColorNear(Bitmap bitmap, float x, float y, int radius, Func<Color, bool> predicate)
