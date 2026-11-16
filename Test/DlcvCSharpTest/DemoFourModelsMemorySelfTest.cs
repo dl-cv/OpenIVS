@@ -160,6 +160,8 @@ namespace DlcvCSharpTest
                                             throw new InvalidOperationException("无 CAD 整板推理结果为空");
                                         if (single) display = noCad;
                                         object viewer = windowType.GetField("imagePanel1", PrivateInstance).GetValue(window);
+                                        var labelMode = viewer.GetType().GetProperty("LabelDisplayMode");
+                                        labelMode.SetValue(viewer, Enum.Parse(labelMode.PropertyType, "None"));
                                         viewer.GetType().GetMethod("UpdateImageAndResult").Invoke(viewer, new object[] { bgr, display });
                                     }
                                     await Task.Delay(500);
