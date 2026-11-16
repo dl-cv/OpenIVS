@@ -82,9 +82,17 @@ namespace DlcvCSharpTest
         private static int Main(string[] args)
         {
             Console.OutputEncoding = Encoding.UTF8;
+            if (args != null && args.Length == 1 && args[0] == "memory-validation-selftest")
+                return MemoryValidationSelfTest.Run();
             Model.EnableConsoleLog = false;
             try
             {
+                if (args != null && args.Length >= 1 && (args[0] == "demo-four-models-memory-selftest" || args[0] == "demo-single-model-memory-selftest"))
+                    return DemoFourModelsMemorySelfTest.Run(args);
+                if (args != null && args.Length >= 1 && args[0] == "flow-models-memory-selftest")
+                    return FlowModelsMemorySelfTest.Run(args);
+                if (args != null && args.Length >= 1 && args[0] == "backend-reuse-selftest")
+                    return BackendReuseSelfTest.Run(args);
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "all-tests", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunAllTests(args);
