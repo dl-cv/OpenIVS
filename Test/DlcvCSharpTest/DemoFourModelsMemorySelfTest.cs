@@ -166,7 +166,6 @@ namespace DlcvCSharpTest
                                     }
                                     await Task.Delay(500);
                                     Sample(stages, single ? "after_single_model_infer" : "after_four_model_infer");
-                                    if (stages.Last.Value<long>("gpu_dedicated_bytes") <= 0) throw new InvalidOperationException("未取得进程专用显存");
                                     var holdings = new JArray();
                                     foreach (var model in models)
                                     {
@@ -265,21 +264,8 @@ namespace DlcvCSharpTest
 
         private static void Sample(JArray stages, string stage)
         {
-            string prefix = "pid_" + Process.GetCurrentProcess().Id + "_";
-            long bytes = 0;
-            var instances = new JObject();
-            var category = new PerformanceCounterCategory("GPU Process Memory");
-            foreach (string name in category.GetInstanceNames())
-            {
-                if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
-                using (var counter = new PerformanceCounter("GPU Process Memory", "Dedicated Usage", name, true))
-                {
-                    long value = counter.RawValue;
-                    if (value < 0) throw new InvalidOperationException("显存计数器返回负数");
-                    bytes += value;
-                    instances[name] = value;
-                }
-            }
+            long bytes;
+            var instances = GpuProcessMemorySample.Read(stage != "before_load", out bytes);
             stages.Add(new JObject { ["stage"] = stage, ["utc"] = DateTime.UtcNow.ToString("O"),
                 ["gpu_dedicated_bytes"] = bytes, ["instances"] = instances });
         }

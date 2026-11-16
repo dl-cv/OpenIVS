@@ -67,22 +67,8 @@ namespace DlcvCSharpTest
         private static void Sample(JArray stages, string stage, string model)
         {
             Thread.Sleep(1500);
-            int pid = Process.GetCurrentProcess().Id;
-            string prefix = "pid_" + pid + "_";
-            var instances = new JObject();
-            long total = 0;
-            var category = new PerformanceCounterCategory("GPU Process Memory");
-            foreach (string name in category.GetInstanceNames())
-            {
-                if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
-                using (var counter = new PerformanceCounter("GPU Process Memory", "Dedicated Usage", name, true))
-                {
-                    long bytes = counter.RawValue;
-                    if (bytes < 0) throw new InvalidOperationException("显存计数器返回负数");
-                    instances[name] = bytes;
-                    total += bytes;
-                }
-            }
+            long total;
+            var instances = GpuProcessMemorySample.Read(model != null, out total);
             using (var process = Process.GetCurrentProcess())
             {
                 stages.Add(new JObject

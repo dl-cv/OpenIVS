@@ -66,8 +66,7 @@ namespace DlcvCSharpTest
                     report["variant_results_differ"] = new JArray(
                         !JToken.DeepEquals(expected[0][0], expected[0][1]),
                         !JToken.DeepEquals(expected[1][0], expected[1][1]));
-                    Check(checks, "参考图片产生实际识别结果", HasObjects(expected[0][0]) || HasObjects(expected[0][1]),
-                        new JObject { ["expected"] = "至少一个输入产生非空结果" });
+                    VerifyReferences(expected, checks);
                     VerifyPair(paths, images, expected, false, checks);
                     VerifyPair(paths, images, expected, true, checks);
                     for (int i = 0; i < paths.Length; i++)
@@ -169,6 +168,20 @@ namespace DlcvCSharpTest
                 ["with_mask"] = true
             });
             return result as JToken ?? JToken.FromObject(result);
+        }
+
+        internal static void VerifyReferences(JToken[][] expected, JArray checks)
+        {
+            for (int model = 0; model < expected.Length; model++)
+            {
+                string name = model == 0 ? "A" : "B";
+                Check(checks, "模型" + name + "参考图片产生实际识别结果",
+                    HasObjects(expected[model][0]) || HasObjects(expected[model][1]),
+                    new JObject { ["expected"] = "至少一个输入产生非空结果" });
+                Check(checks, "模型" + name + "两个输入的参考结果可区分",
+                    !JToken.DeepEquals(expected[model][0], expected[model][1]),
+                    new JObject { ["expected"] = "原图与水平翻转结果不同" });
+            }
         }
 
         private static bool HasObjects(JToken result)

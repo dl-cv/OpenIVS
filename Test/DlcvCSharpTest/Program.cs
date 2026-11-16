@@ -82,6 +82,8 @@ namespace DlcvCSharpTest
         private static int Main(string[] args)
         {
             Console.OutputEncoding = Encoding.UTF8;
+            if (args != null && args.Length == 1 && args[0] == "memory-validation-selftest")
+                return MemoryValidationSelfTest.Run();
             Model.EnableConsoleLog = false;
             try
             {

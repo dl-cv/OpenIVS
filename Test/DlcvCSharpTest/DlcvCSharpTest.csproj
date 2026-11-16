@@ -98,6 +98,8 @@
     <Compile Include="FlowModelsMemorySelfTest.cs" />
     <Compile Include="DemoFourModelsMemorySelfTest.cs" />
     <Compile Include="BackendReuseSelfTest.cs" />
+    <Compile Include="GpuProcessMemorySample.cs" />
+    <Compile Include="MemoryValidationSelfTest.cs" />
     <Compile Include="RegionMaskSelfTest.cs" />
     <Compile Include="MaskAreaSelfTest.cs" />
     <Compile Include="DvsTempArtifactMonitor.cs" />
