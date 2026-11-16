@@ -13,6 +13,7 @@ namespace DlcvDemo
         internal string OutputPath { get; private set; }
         internal string ScreenshotPath { get; private set; }
         internal string SaveJsonPath { get; private set; }
+        internal string ScenarioConfigPath { get; private set; }
         internal decimal Threshold { get; private set; } = 0.5m;
         internal bool HasThreshold { get; private set; }
         internal int DeviceId { get; private set; } = 0;
@@ -69,6 +70,9 @@ namespace DlcvDemo
                         break;
                     case "--save-json":
                         options.SaveJsonPath = value;
+                        break;
+                    case "--scenario-config":
+                        options.ScenarioConfigPath = value;
                         break;
                     case "--view-region":
                         string[] regionParts = value.Split(',');
@@ -165,9 +169,10 @@ namespace DlcvDemo
                             && !string.Equals(value, "model-dialog", StringComparison.OrdinalIgnoreCase)
                             && !string.Equals(value, "dog-info", StringComparison.OrdinalIgnoreCase)
                             && !string.Equals(value, "model-info", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(value, "four-model-memory", StringComparison.OrdinalIgnoreCase)
                             && !string.Equals(value, "pressure", StringComparison.OrdinalIgnoreCase))
                         {
-                            error = "--test-mode 必须是 infer、infer-json、model-dialog、dog-info、model-info 或 pressure。";
+                            error = "--test-mode 必须是 infer、infer-json、model-dialog、dog-info、model-info、four-model-memory 或 pressure。";
                             return false;
                         }
                         options.TestMode = value.ToLowerInvariant();
@@ -230,6 +235,12 @@ namespace DlcvDemo
             if (requiresImageInput && !File.Exists(options.ImagePath))
             {
                 error = "图片文件不存在: " + options.ImagePath;
+                return false;
+            }
+            if (options.TestMode == "four-model-memory" &&
+                (!File.Exists(options.ScenarioConfigPath) || options.InteractiveDialogs || options.ScreenshotPath != null || options.SaveJsonPath != null))
+            {
+                error = "four-model-memory 需要有效 --scenario-config、--interactive-dialogs false，截图通过隔离桌面采集，不使用 --screenshot 或 --save-json。";
                 return false;
             }
             try
@@ -299,6 +310,7 @@ namespace DlcvDemo
             Console.Out.WriteLine("--save-json 在 infer 或 infer-json 测试中保存完整 JSON，并验证预览、结果切换与保存功能；父目录须已存在。");
             Console.Out.WriteLine("--test-mode=infer-json 复用推理 JSON 按钮生成原始 JSON 结果。");
             Console.Out.WriteLine("--test-mode=model-info 只加载模型并显示“获取模型信息”结果，供隔离采集模型信息与显存行；提供 --image 时先完成一次图片推理再显示。");
+            Console.Out.WriteLine("--test-mode=four-model-memory --scenario-config <JSON> 在当前窗口保留四个模型，执行 Demo2 三模型流程及第四流程；配置包含 model2、model3、model4、demo2_assembly、crops_directory、comparison_label。");
             Console.Out.WriteLine("--test-mode=model-dialog 仅打开正式模型选择窗口供隔离采集，30 秒后退出；不加载模型或初始化设备。");
             Console.Out.WriteLine("--test-mode=dog-info 使用固定测试编号和 50 项特性显示加密狗结果，无需 --model/--image，不初始化设备；可配合 --capture-delay-ms 采集完整窗口。");
             Console.Out.WriteLine("--capture-delay-ms 在结果生成后保持正式窗口消息循环，供隔离桌面采集完整窗口；默认 0。");

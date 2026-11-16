@@ -398,7 +398,9 @@ namespace DlcvDemo2
             }
         }
 
-        private PipelineRunResult RunPipeline(Mat fullImageRgb, SlidingWindowConfig config, IProgress<InferenceProgressInfo> progress = null)
+        private PipelineRunResult RunPipeline(Mat fullImageRgb, SlidingWindowConfig config, IProgress<InferenceProgressInfo> progress = null,
+            Action<Mat, CSharpObjectResult, bool, double[]> observeRoi = null,
+            Action<Mat, Rect, int> observeTile = null)
         {
             var runResult = new PipelineRunResult();
 
@@ -413,7 +415,7 @@ namespace DlcvDemo2
             runResult.SlidingWindowCount = windows.Count;
 
             ReportInferenceProgress(progress, 12, $"元件提取模型滑窗推理 0/{windows.Count}");
-            List<ExtractDetection> extractDetections = InferExtractModelOnWindows(fullImageRgb, windows, progress);
+            List<ExtractDetection> extractDetections = InferExtractModelOnWindows(fullImageRgb, windows, progress, observeTile);
             ReportInferenceProgress(progress, 62, "合并元件提取结果");
             List<ExtractDetection> mergedExtract = ExtractMergeUtils.MergeExtractResults(extractDetections);
             runResult.MergedExtractCount = mergedExtract.Count;
@@ -437,6 +439,8 @@ namespace DlcvDemo2
                         runResult.Logs.Add($"跳过目标[{target.ObjectResult.CategoryName}]：{roi.InvalidReason}");
                         continue;
                     }
+
+                    observeRoi?.Invoke(roi.NormalizedRoi, target.ObjectResult, useIcDetectModel, roi.NormToFullAffine);
 
                     try
                     {
@@ -483,7 +487,8 @@ namespace DlcvDemo2
                 || string.Equals(baseName, "晶振", StringComparison.OrdinalIgnoreCase);
         }
 
-        private List<ExtractDetection> InferExtractModelOnWindows(Mat fullImageRgb, List<Rect> windows, IProgress<InferenceProgressInfo> progress)
+        private List<ExtractDetection> InferExtractModelOnWindows(Mat fullImageRgb, List<Rect> windows, IProgress<InferenceProgressInfo> progress,
+            Action<Mat, Rect, int> observeTile = null)
         {
             var output = new List<ExtractDetection>();
             int order = 0;
@@ -505,6 +510,7 @@ namespace DlcvDemo2
                 Rect window = windows[i];
                 using (var tile = new Mat(fullImageRgb, window).Clone())
                 {
+                    observeTile?.Invoke(tile, window, i + 1);
                     CSharpResult tileResult = extractModel.Infer(tile, inferParams);
                     if (tileResult.SampleResults == null || tileResult.SampleResults.Count == 0)
                     {
