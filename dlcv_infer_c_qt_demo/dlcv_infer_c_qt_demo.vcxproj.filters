@@ -47,6 +47,9 @@
     <ClInclude Include="DlcvInferApi.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="ImageFileReader.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
     <ClInclude Include="CliRunner.h">
       <Filter>头文件</Filter>
     </ClInclude>

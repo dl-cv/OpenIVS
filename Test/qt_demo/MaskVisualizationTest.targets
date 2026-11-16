@@ -7,5 +7,7 @@
     <Copy SourceFiles="@(_MaskTestRuntime)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
     <MakeDir Directories="$(TargetDir)platforms" />
     <Copy SourceFiles="$(QtPluginsDir)\platforms\qoffscreen$(QtDllSuffix).dll" DestinationFolder="$(TargetDir)platforms" SkipUnchangedFiles="true" />
+    <MakeDir Directories="$(TargetDir)imageformats" Condition="'$(MaskTestDefinition)'=='DLCV_QT_C_MASK_TEST'" />
+    <Copy SourceFiles="$(QtPluginsDir)\imageformats\qgif$(QtDllSuffix).dll" DestinationFolder="$(TargetDir)imageformats" SkipUnchangedFiles="true" Condition="'$(MaskTestDefinition)'=='DLCV_QT_C_MASK_TEST'" />
   </Target>
 </Project>

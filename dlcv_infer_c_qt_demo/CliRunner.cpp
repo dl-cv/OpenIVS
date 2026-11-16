@@ -23,6 +23,7 @@
 
 #include "DlcvInferApi.h"
 #include "MainWindow.h"
+#include "ImageFileReader.h"
 #include "json/json.hpp"
 #include "ExtraInfoComparison.h"
 
@@ -329,12 +330,7 @@ cv::Mat LoadImageUnicode(const QString& imagePath) {
         throw std::runtime_error("image file is too large");
     }
 
-    const cv::Mat encodedMat(
-        1,
-        static_cast<int>(encoded.size()),
-        CV_8UC1,
-        const_cast<char*>(encoded.constData()));
-    cv::Mat decoded = cv::imdecode(encodedMat, cv::IMREAD_UNCHANGED);
+    cv::Mat decoded = ImageFileReader::Decode(encoded);
     if (decoded.empty()) {
         throw std::runtime_error("image decode failed");
     }
