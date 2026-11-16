@@ -845,16 +845,6 @@ namespace DlcvDemo
                 }
                 WriteUiTestResult("started", null);
 
-                if (uiTestOptions.TestMode == "four-model-memory")
-                {
-                    await RunFourModelMemoryTest();
-                    UiTestExitCode = 0;
-                    WriteUiTestResult("passed", null);
-                    Text += " | " + fourModelScenario.Value<string>("comparison_label") + " · 四模型推理完成";
-                    Refresh();
-                    return;
-                }
-
                 if (uiTestOptions.InteractiveDialogs)
                 {
                     button_loadmodel_Click(this, EventArgs.Empty);
@@ -1076,7 +1066,6 @@ namespace DlcvDemo
                 ["result_text"] = richTextBox1.Text ?? string.Empty,
                 ["model_info_text"] = modelInfoText,
                 ["model_info_text_after_infer"] = modelInfoAfterInferText,
-                ["four_model_scenario"] = fourModelScenario,
                 ["error"] = error == null ? null : error.ToString()
             };
             string temporaryPath = outputPath + ".tmp";
@@ -1664,7 +1653,6 @@ namespace DlcvDemo
 
             try
             {
-                ReleaseFourModelMemoryTest();
                 var disposable = model as IDisposable;
                 disposable?.Dispose();
             }

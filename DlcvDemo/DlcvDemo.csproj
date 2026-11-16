@@ -152,9 +152,6 @@
     <Compile Include="..\Test\desktop_projects\DemoDogInfoTests.cs">
       <Link>Tests\DemoDogInfoTests.cs</Link>
     </Compile>
-    <Compile Include="..\Test\desktop_projects\DemoFourModelMemoryTest.cs">
-      <Link>Tests\DemoFourModelMemoryTest.cs</Link>
-    </Compile>
     <Compile Include="MainWindow.cs">
       <SubType>Form</SubType>
     </Compile>

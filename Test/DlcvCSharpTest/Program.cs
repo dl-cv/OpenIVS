@@ -9011,9 +9011,9 @@ namespace DlcvCSharpTest
                 manualRgb = PrepareDemo2ExpectedInput(imageBgr);
                 object config = CreateDemo2SlidingWindowConfig(configType, 2560, 2560, 1024, 1024);
 
-                entryRunResult = runPipeline.Invoke(form, new object[] { entryRgb, config, null, null, null });
-                manualRunResult = runPipeline.Invoke(form, new object[] { manualRgb, config, null, null, null });
-                rawBgrRunResult = runPipeline.Invoke(form, new object[] { imageBgr, config, null, null, null });
+                entryRunResult = runPipeline.Invoke(form, new object[] { entryRgb, config, null });
+                manualRunResult = runPipeline.Invoke(form, new object[] { manualRgb, config, null });
+                rawBgrRunResult = runPipeline.Invoke(form, new object[] { imageBgr, config, null });
 
                 string entrySig = BuildDemo2PipelineSignature(entryRunResult);
                 string manualSig = BuildDemo2PipelineSignature(manualRunResult);

@@ -43,31 +43,6 @@
   - 支持 `demo2-rgb-selftest` 子命令：反射驱动 `DlcvDemo2.Form1` 的私有图片加载与 `RunPipeline`，对同一张图分别执行“Demo2 实际入口 RGB”“手工 RGB”“原始 BGR”三条路径并输出签名比对结果
   - 支持 `shared-index-csharp-selftest` 子命令：验证 C# 加载普通模型后底层 index 查询、底层 C 接口加载普通模型后 C# 恢复、C# 加载 DVST 后流程注册信息读取与 C# 恢复，并检查借用实例释放后持有方仍可推理、持有方释放后 index 被清理
 
-### 四模型整板显存场景
-
-正式 `DlcvDemo` 窗口提供测试入口：
-
-```text
-"C# 测试程序.exe" ui-test --test-mode four-model-memory --model <元件提取PLUS模型> --image <整板图片> --output <结果JSON> --scenario-config <场景JSON> --interactive-dialogs false --capture-delay-ms 30000
-```
-
-场景 JSON 的六个字段均为必填字符串：
-
-| 字段 | 内容 |
-| --- | --- |
-| `model2` | 元件检测 PLUS 模型的绝对路径 |
-| `model3` | IC 检测 PLUS 模型的绝对路径 |
-| `model4` | 无 CAD PLUS 模型的绝对路径 |
-| `demo2_assembly` | 对应源码构建的 `C# 测试程序2.exe` 绝对路径 |
-| `crops_directory` | ROI 裁图目录的绝对路径；目录为空或尚未创建，修改前后使用不同目录 |
-| `comparison_label` | 界面首行的比较对象名称，如 `master` 或对应 PR |
-
-场景先加载全部四个模型，保留到截图完成及窗口退出。前三个对象直接注入 Demo2，调用其正式 `RunPipeline`；滑窗为 2560×2560、水平和垂直重叠均为 1024，图像统一转为 RGB，阈值沿用各流程模型配置。元件与 IC 的实际归一化 ROI 在送入推理前保存至对应分流目录，PNG 保持正常可视颜色；`裁图清单.json` 记录类别、原图框、角度、归一化尺寸及回到原图的逆变换。第四个无 CAD 流程随后对同张 RGB 整板推理。两分流均须实际执行，局部模型推理失败使场景失败，跳过日志保留在结果中。
-
-元件提取模型的每张实际滑窗在推理前保存至 `crops_directory/滑窗/`，文件名按 1 开始的窗口序号生成；`滑窗清单.json` 和结果中的 `sliding_window_crops` 记录序号、原图矩形 `[x,y,width,height]`、尺寸及相对图片名。观察回调只读取正式 RGB 输入并转换颜色后保存 PNG，保存数量须与实际推理窗口数一致。
-
-窗口右侧显示三模型实际结果框，关闭类别及分数文字以避免标签遮挡整板；左侧显示四模型清单及数量、原图尺寸、滑窗数量和正式显存信息。结果 JSON 的 `four_model_scenario` 保留完整结构化结果、滑窗与 ROI 清单及失败/跳过日志、各阶段按 PID 读取的专用显存字节数、实际加载的推理 DLL 路径与版本、四个仍有效的模型索引及模型表快照。先写入 `passed`，再给正式主窗口标题追加 `四模型推理完成`；隔离桌面截图程序等待该标题后采集完整窗框。此模式不接受 `--screenshot` 或 `--save-json`，窗口按 `--capture-delay-ms` 保持消息循环。
-
 ### 2.2 C++ 工程
 
 - 工程名：`Test/dlcv_infer_cpp_test`
