@@ -139,8 +139,7 @@ namespace DlcvDemo
                     options.Threshold = ResolveModelThreshold(modelInfo);
                 }
 
-                byte[] imageBytes = File.ReadAllBytes(options.ImagePath);
-                decodedImage = Cv2.ImDecode(imageBytes, ImreadModes.Unchanged);
+                decodedImage = ImageFileReader.Read(options.ImagePath);
                 if (decodedImage == null || decodedImage.Empty())
                 {
                     throw new InvalidOperationException("图像解码失败。");
