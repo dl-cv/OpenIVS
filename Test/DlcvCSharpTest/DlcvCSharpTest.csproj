@@ -95,6 +95,7 @@
   <ItemGroup>
     <Compile Include="DvsArchiveDuplicateSelfTest.cs" />
     <Compile Include="FlowModelsMemorySelfTest.cs" />
+    <Compile Include="DemoFourModelsMemorySelfTest.cs" />
     <Compile Include="BackendReuseSelfTest.cs" />
     <Compile Include="RegionMaskSelfTest.cs" />
     <Compile Include="MaskAreaSelfTest.cs" />

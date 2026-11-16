@@ -22,6 +22,11 @@
   - `model-load-free-memory-selftest <modelPath> [device] [loopCount] [sampleInterval]` 独立执行指定次数，默认 100 次、每 10 次输出私有内存、工作集、相对增量和活动模型数，并计算排除第 1 次后的线性变化
   - `model-load-free-stage-selftest <modelPath> [device] [loopCount]` 分别输出程序启动、每次加载完成和每次释放完成时的私有内存、工作集与活动模型数，默认循环 3 次
   - `flow-models-memory-selftest <输出JSON> <模型1> [模型2 ...]` 在设备 0 依次加载并保留全部模型；加载前、每次加载后及全部释放后等待 1.5 秒，按 PID 读取 Windows `GPU Process Memory / Dedicated Usage`。输出 UTF-8 JSON，记录各实例专用显存字节数、私有内存、工作集、加载耗时和实际 API 程序集位置，拒绝覆盖已有结果。显存包含该进程的运行库开销。
+  - `demo-four-models-memory-selftest <输出JSON> <图片> <模型1> <模型2> <模型3> <模型4> <DlcvDemo.exe> <DlcvDemo2.exe> <capture-delay-ms>` 在独立 STA 线程运行正式 C# Demo 窗口，模型依次为元件提取、元件检测、IC 检测、无 CAD。四个已加速 PLUS 模型同时驻留设备 0；前三个注入隐藏的 Demo2，调用正式三参数 `RunPipeline`，使用 2560×2560 滑窗、1024×1024 重叠及原有角度归一、ROI 分流和结果回写；第四个执行整板 RGB 推理。测试入口只编入 `DlcvCSharpTest`。
+    - 必须由独立不可见 Desktop 和 Job 启动。传入对应构建的两个 Demo EXE；驱动复用其窗体、控件和模型信息显示方法，图像区展示三模型整板结果，模型信息区保留原有 CUDA 显存显示。窗口创建使用原 `UiTestOptions`，固定 `--interactive-dialogs false --language zh-CN`，历史模型和图片路径、语言均不写入用户设置；隐藏 Demo2 不触发设置读写事件。
+    - 所有推理与四个有效索引核验完成后，先写 UTF-8 JSON，再显示原窗口并等待 `capture-delay-ms` 毫秒。等待期间消息循环持续运行且模型保持驻留，结束释放模型并退出。外部截图可等待原窗口出现，标题保持正式程序标题。测试不保存 ROI 裁图。
+    - 输出拒绝覆盖已有文件；退出码 0 表示通过，1 表示执行失败。JSON 的 `status` 为 `passed` 或 `failed`，失败包含 `error`；`pid`、`api_assembly`、`demo_assembly`、`demo2_assembly`、`native_modules` 标识进程与实际程序集/DLL，`holdings` 记录四个路径、有效索引、资源类型及 DVS 信息，`loaded_models` 保留后端查询结果。`three_model_result` 与 `no_cad_result` 保存各样本类别、分数、框、角度及额外信息，`pipeline_logs` 和四项数量记录正式流程结果。`stages` 包含各时点 UTC、PID 专用显存字节数及计数器实例，`three_model_elapsed_ms`、`no_cad_elapsed_ms` 为推理耗时；`gpu_dedicated_bytes` 为四模型推理后值。元件、IC、无 CAD 三路均须有实际结果，局部推理失败按失败返回。
+  - `demo-single-model-memory-selftest <输出JSON> <图片> <无CAD模型> <DlcvDemo.exe> <capture-delay-ms>` 复用上述驱动，单独加载无 CAD 模型并执行 RGB 整板推理（`with_mask=false`）。窗口显示该模型的整板结果及原模型信息；输出 `model_count=1`、`loaded_1` 与 `after_single_model_infer` 的 PID 专用显存，`no_cad_result` 与 `no_cad_elapsed_ms` 保存推理结果及耗时。截图等待、隔离运行、结果文件和退出码要求与四模型入口相同。
   - `backend-reuse-selftest <输出JSON> <模型A> <模型B> <图片>` 使用同源分别加速且密文字节不同的两个 DVT，在设备 0 分别建立原图和水平翻转图的非空结果参考，检查两轮不同输入的并发推理、返回对象保持、双向释放及重载。JSON 保存完整参考结果和各项判定。
   - 推理 3 秒内存增量
 
