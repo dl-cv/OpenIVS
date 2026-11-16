@@ -85,6 +85,10 @@ namespace DlcvCSharpTest
             Model.EnableConsoleLog = false;
             try
             {
+                if (args != null && args.Length >= 1 && args[0] == "flow-models-memory-selftest")
+                    return FlowModelsMemorySelfTest.Run(args);
+                if (args != null && args.Length >= 1 && args[0] == "backend-reuse-selftest")
+                    return BackendReuseSelfTest.Run(args);
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "all-tests", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunAllTests(args);

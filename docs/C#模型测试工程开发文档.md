@@ -21,6 +21,8 @@
   - 统一回归加载/释放循环 10 次的内存增量
   - `model-load-free-memory-selftest <modelPath> [device] [loopCount] [sampleInterval]` 独立执行指定次数，默认 100 次、每 10 次输出私有内存、工作集、相对增量和活动模型数，并计算排除第 1 次后的线性变化
   - `model-load-free-stage-selftest <modelPath> [device] [loopCount]` 分别输出程序启动、每次加载完成和每次释放完成时的私有内存、工作集与活动模型数，默认循环 3 次
+  - `flow-models-memory-selftest <输出JSON> <模型1> [模型2 ...]` 在设备 0 依次加载并保留全部模型；加载前、每次加载后及全部释放后等待 1.5 秒，按 PID 读取 Windows `GPU Process Memory / Dedicated Usage`。输出 UTF-8 JSON，记录各实例专用显存字节数、私有内存、工作集、加载耗时和实际 API 程序集位置，拒绝覆盖已有结果。显存包含该进程的运行库开销。
+  - `backend-reuse-selftest <输出JSON> <模型A> <模型B> <图片>` 使用同源分别加速且密文字节不同的两个 DVT，在设备 0 分别建立原图和水平翻转图的非空结果参考，检查两轮不同输入的并发推理、返回对象保持、双向释放及重载。JSON 保存完整参考结果和各项判定。
   - 推理 3 秒内存增量
 
 默认模型目录：`Y:\测试模型`
