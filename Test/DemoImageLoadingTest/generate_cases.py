@@ -1,7 +1,14 @@
-"""Generate orientation/pixel references with Pillow, independently of the C# loader.
+"""C# 读图回归：用 Pillow/NumPy 独立生成像素参考，不需要模型或 GPU。
 
-Usage: python Test/DemoImageLoadingTest/generate_cases.py <output-directory>
-Then run DemoImageLoadingTest.exe <output-directory>/cases.tsv [--baseline].
+在仓库目录执行（使用已有 Python 环境中的 Pillow、NumPy）：
+1. python build_script/build.py Test/DemoImageLoadingTest/DemoImageLoadingTest.csproj
+2. python Test/DemoImageLoadingTest/generate_cases.py <输出目录>
+3. Test/DemoImageLoadingTest/bin/x64/Debug/net472/DemoImageLoadingTest.exe <输出目录>/cases.tsv
+追加 --baseline 对照旧 Unchanged 逻辑。C# 只比较原文件、反复覆盖的改名副本。
+
+覆盖常见格式、方向 1–8、灰度、透明、16 位、GIF 首帧及异常元数据。
+无损图逐像素相等；JPEG 解码差异容差 2；TIFF 预乘颜色舍入容差 1。
+测试材料生成到指定目录，不提交客户图片；不验证 Windows 右键菜单写文件过程。
 """
 import sys
 import struct
@@ -50,7 +57,7 @@ def add_case(name, image, extension, orientation=None, **options):
     cases.append((name, path, reference, 2 if extension in (".jpg", ".jpeg") else 1 if extension in (".tif", ".tiff") and image.mode == "RGBA" else 0))
 
 for extension in (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp", ".gif"):
-    image = Image.fromarray(rgb)
+    image = Image.fromarray(rgb).convert("L" if extension == ".jpeg" else "RGB")
     options = {"lossless": True} if extension == ".webp" else {}
     add_case(extension[1:] + "-pixels-rotated", image.transpose(Image.Transpose.ROTATE_180), extension, **options)
     if extension in (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"):
