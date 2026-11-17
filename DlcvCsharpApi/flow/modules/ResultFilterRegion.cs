@@ -868,6 +868,7 @@ namespace DlcvModules
         {
             // SDK RLE 解码为 0/255；JSON mask_array 严格沿用 Python 的 >127 前景阈值。
             var raw = det["mask_array"];
+            bool useBbox = false;
             using (var mask = new Mat())
             {
                 if (raw != null && raw.Type != JTokenType.Null)
@@ -896,8 +897,8 @@ namespace DlcvModules
                         Cv2.Threshold(decoded, mask, 127, 255, ThresholdTypes.Binary);
                     }
                 }
-                else return null;
-                if (Cv2.CountNonZero(mask) == 0) return null;
+                else useBbox = true;
+                if (!useBbox && Cv2.CountNonZero(mask) == 0) return null;
                 int W = wrap.TransformState.OriginalWidth, H = wrap.TransformState.OriginalHeight;
                 int sourceW = W, sourceH = H;
                 double[] inv = { 1, 0, 0, 0, 1, 0 };
@@ -935,7 +936,25 @@ namespace DlcvModules
                 }
                 if (Math.Min(Math.Min(W, H), Math.Min(sourceW, sourceH)) <= 0) throw new ArgumentException("Invalid mask image size");
                 int x1 = 0, y1 = 0, x2 = sourceW, y2 = sourceH;
-                if (mask.Cols != sourceW || mask.Rows != sourceH)
+                if (useBbox)
+                {
+                    if (!(det["bbox"] is JArray bbox) || bbox.Count < 4) return null;
+                    for (int i = 0; i < 4; i++)
+                        if ((bbox[i].Type != JTokenType.Integer && bbox[i].Type != JTokenType.Float)
+                            || !IsFinite(bbox[i].Value<double>())) return null;
+                    if (bbox[2].Value<double>() <= 0 || bbox[3].Value<double>() <= 0
+                        || !TryExtractBboxAabbCurrent(det, out double bx1, out double by1, out double bx2, out double by2)
+                        || !IsFinite(bx1) || !IsFinite(by1) || !IsFinite(bx2) || !IsFinite(by2)) return null;
+                    // 先裁到当前图，避免为图外的大框分配临时 Mask。
+                    x1 = (int)Math.Max(0, Math.Min(sourceW, Math.Floor(bx1)));
+                    y1 = (int)Math.Max(0, Math.Min(sourceH, Math.Floor(by1)));
+                    x2 = (int)Math.Max(0, Math.Min(sourceW, Math.Ceiling(bx2)));
+                    y2 = (int)Math.Max(0, Math.Min(sourceH, Math.Ceiling(by2)));
+                    if (x2 <= x1 || y2 <= y1) return null;
+                    mask.Create(y2 - y1, x2 - x1, MatType.CV_8UC1);
+                    mask.SetTo(Scalar.All(255));
+                }
+                else if (mask.Cols != sourceW || mask.Rows != sourceH)
                 {
                     if (!(det["bbox"] is JArray bbox) || bbox.Count < 4 || bbox[2].Value<double>() <= 0 || bbox[3].Value<double>() <= 0
                         || !TryExtractBboxAabbCurrent(det, out double bx1, out double by1, out double bx2, out double by2)

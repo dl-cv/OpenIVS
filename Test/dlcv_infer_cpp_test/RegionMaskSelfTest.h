@@ -50,8 +50,33 @@ static int RunRegionMaskSelfTest() {
         check("above-threshold",det(8,9,10,10),entries(det(13,9,10,10)),false,"ios",0.51);
         check("zero-needs-intersection",det(8,9,10,10),entries(det(18,9,10,10)),false,"ios",0);
         auto missing = det(8,9,10,10); missing.erase("mask_array");
-        check("missing-target-mask",missing,entries(det(8,9,10,10)),false,"",0.5);
-        check("missing-region-mask",det(8,9,10,10),entries(missing),false,"",0.5);
+        check("missing-target-mask",missing,entries(det(8,9,10,10)),true,"",0.5);
+        check("missing-region-mask",det(8,9,10,10),entries(missing),true,"",0.5);
+        check("both-missing-iou",missing,entries(missing),true,"iou",1);
+        check("fallback-ios",missing,entries(det(8,9,2,2)),true,"ios",1);
+        check("fallback-iou",missing,entries(det(8,9,2,2)),false,"iou",0.5);
+        check("fallback-shape",missing,entries(det(8,9,10,10,0,4)),false,"iou",0.5);
+        auto nullMask = missing; nullMask["mask_array"] = nullptr; nullMask["mask_rle"] = nullptr;
+        check("null-mask",nullMask,entries(missing),true,"iou",1);
+        auto empty = missing; empty["mask_array"] = Json::array();
+        check("empty-array-no-fallback",empty,entries(missing),false,"",0);
+        check("empty-region-mask-no-fallback",missing,entries(empty),false,"",0);
+        auto rle = missing; rle["mask_rle"] = {{"width",10},{"height",10},{"runs",{100}}};
+        check("zero-rle-no-fallback",rle,entries(missing),false,"",0);
+        rle["mask_rle"]["runs"] = {0,100};
+        check("rle-with-missing-array",rle,entries(missing),true,"iou",1);
+        for (const auto& bbox : std::vector<Json>{{-5,9,10,10},{0.2,9.2,4.6,9.6}}) {
+            auto clipped = missing; clipped["bbox"] = bbox;
+            check("bbox-clipping-rounding",clipped,entries(det(0,9,5,10)),true,"iou",1);
+        }
+        for (const auto& bbox : std::vector<Json>{Json::array(),{0,0,0,10},{0,0,-1,10},
+            {40,40,10,10},{"bad",0,10,10},{std::numeric_limits<double>::infinity(),0,10,10}}) {
+            auto invalid = missing; invalid["bbox"] = bbox;
+            check("unusable-bbox",invalid,entries(missing),false,"",0);
+        }
+        check("missing-bbox",Json::object(),entries(missing),false,"",0);
+        auto huge = missing; huge["bbox"] = {-1e12,-1e12,2e12,2e12};
+        check("huge-bbox-clipped-before-allocation",huge,entries(det(0,0,32,32)),true,"iou",1);
         check("empty-mask",det(8,9,10,10,0,0),entries(det(8,9,10,10)),false,"",0.5);
         check("empty-region",det(8,9,10,10),Json::array(),false,"",0.5);
         check("source-clipping",det(-5,9,10,10),entries(det(0,9,5,10)),true,"",1);
@@ -64,9 +89,9 @@ static int RunRegionMaskSelfTest() {
             check("foreground-"+std::to_string(value),binary,entries(det(8,9,2,2)),value>127,"",1);
         }
         regionMode = "top1_bbox";
-        auto highMissing = missing; highMissing["score"] = 1;
+        auto highMissing = missing; highMissing["score"] = 1; highMissing["bbox"] = {20,20,2,2};
         auto topRegions = entries(highMissing); topRegions[0]["sample_results"].push_back(det(8,9,2,2));
-        check("top1-skips-missing-mask",det(8,9,2,2),topRegions,true,"",1);
+        check("top1-includes-bbox-fallback",det(8,9,2,2),topRegions,false,"",1);
         auto highFar = det(20,20,2,2); highFar["score"] = 1;
         topRegions = entries(det(8,9,2,2)); topRegions[0]["sample_results"].push_back(highFar);
         check("top1-highest-valid-score",det(8,9,2,2),topRegions,false,"",1);
@@ -75,6 +100,7 @@ static int RunRegionMaskSelfTest() {
         regionMode = "any_bbox";
         global = true;
         check("global-mask-iou",det(8,9,10,10),entries(det(8,9,2,2)),false,"iou",0.5);
+        check("global-bbox-fallback",missing,entries(missing),true,"iou",1);
         global = false;
         // Compare cropped window warping with the full original-canvas reference.
         for (const auto& spec : std::vector<std::pair<double,double>>{{17,1},{45,0.7},{-33,1.4},{90,1},{180,1},{0,-1}}) {
@@ -104,6 +130,14 @@ static int RunRegionMaskSelfTest() {
                 }
                 auto transformed = entries(local); transformed[0]["transform"]=transform;
                 check("affine-"+std::to_string(spec.first)+"-"+std::to_string(spec.second)+(native?"-native":"-python"),expected,transformed,true,"iou",1);
+                cv::Mat rectangle(16,16,CV_8UC1,cv::Scalar::all(0)),rectangleReference;
+                rectangle(cv::Rect(5,4,6,7)).setTo(cv::Scalar(255));
+                cv::warpAffine(rectangle,rectangleReference,inverse,cv::Size(32,32),cv::INTER_NEAREST,cv::BORDER_CONSTANT,cv::Scalar::all(0));
+                auto expectedRectangle = det(0,0,32,32);
+                for (int iy=0;iy<32;++iy) for (int ix=0;ix<32;++ix)
+                    expectedRectangle["mask_array"][iy][ix]=rectangleReference.at<unsigned char>(iy,ix);
+                transformed[0]["sample_results"][0].erase("mask_array");
+                check("bbox-affine-"+std::to_string(spec.first)+"-"+std::to_string(spec.second)+(native?"-native":"-python"),expectedRectangle,transformed,true,"iou",1);
             }
         }
         // A region branch may reindex image 1 to index 0; origin remains authoritative.
@@ -122,6 +156,19 @@ static int RunRegionMaskSelfTest() {
             || isolated->ExtraOutputs[0].ResultList.size() != 1 || isolated->ExtraOutputs[0].ImageList[0].OriginalIndex != 0)
             throw std::runtime_error("origin-isolation-reindexed-region: wrong source image");
         std::cout << "PASS origin-isolation-reindexed-region" << std::endl; ++count;
+        for (bool badTransform : {false,true}) {
+            auto badInput = entries(missing);
+            if (badTransform)
+                badInput[0]["transform"] = {{"original_width",32},{"original_height",32},
+                    {"output_size",{32,32}},{"affine_2x3",{0,0,0,0,0,0}}};
+            else badInput[0]["sample_results"][0]["mask_array"] = Json::array({Json::array({256})});
+            auto invalidModule = factory(1,"",Json{{"filter_mode","mask"}},nullptr);
+            invalidModule->ExtraInputsIn.emplace_back(std::vector<ModuleImage>{},entries(det(8,9,10,10)));
+            bool failed=false;
+            try { invalidModule->Process(images,badInput); } catch (const std::invalid_argument&) { failed=true; }
+            if (!failed) throw std::runtime_error("invalid mask/transform silently replaced by bbox");
+            std::cout << "PASS invalid-mask-or-transform-no-fallback" << std::endl; ++count;
+        }
         for (Json invalid : std::vector<Json>{{{"metric","bad"}},{{"overlap_threshold",-1}},{{"overlap_threshold",2}},{{"overlap_threshold","nan"}}}) {
             invalid["filter_mode"]="mask";
             auto invalidModule = factory(1,"",invalid,nullptr);

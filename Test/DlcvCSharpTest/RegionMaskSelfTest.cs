@@ -62,8 +62,36 @@ namespace DlcvCSharpTest
                     check("above-threshold", Det(8, 9, 10, 10), Entries(Det(13, 9, 10, 10)), false, "ios", 0.51);
                     check("zero-needs-intersection", Det(8, 9, 10, 10), Entries(Det(18, 9, 10, 10)), false, "ios", 0);
                     var missing = Det(8, 9, 10, 10); missing.Remove("mask_array");
-                    check("missing-target-mask", missing, Entries(Det(8, 9, 10, 10)), false, null, 0.5);
-                    check("missing-region-mask", Det(8, 9, 10, 10), Entries(missing), false, null, 0.5);
+                    check("missing-target-mask", missing, Entries(Det(8, 9, 10, 10)), true, null, 0.5);
+                    check("missing-region-mask", Det(8, 9, 10, 10), Entries(missing), true, null, 0.5);
+                    check("both-missing-iou", missing, Entries(missing), true, "iou", 1);
+                    check("fallback-ios", missing, Entries(Det(8, 9, 2, 2)), true, "ios", 1);
+                    check("fallback-iou", missing, Entries(Det(8, 9, 2, 2)), false, "iou", 0.5);
+                    check("fallback-shape", missing, Entries(Det(8, 9, 10, 10, 0, 4)), false, "iou", 0.5);
+                    var nullMask = (JObject)missing.DeepClone(); nullMask["mask_array"] = null; nullMask["mask_rle"] = null;
+                    check("null-mask", nullMask, Entries(missing), true, "iou", 1);
+                    var empty = (JObject)missing.DeepClone(); empty["mask_array"] = new JArray();
+                    check("empty-array-no-fallback", empty, Entries(missing), false, null, 0);
+                    check("empty-region-mask-no-fallback", missing, Entries(empty), false, null, 0);
+                    var rle = (JObject)missing.DeepClone();
+                    rle["mask_rle"] = new JObject { ["width"] = 10, ["height"] = 10, ["runs"] = new JArray(100) };
+                    check("zero-rle-no-fallback", rle, Entries(missing), false, null, 0);
+                    rle["mask_rle"]["runs"] = new JArray(0, 100);
+                    check("rle-with-missing-array", rle, Entries(missing), true, "iou", 1);
+                    foreach (var bbox in new[] { new JArray(-5, 9, 10, 10), new JArray(0.2, 9.2, 4.6, 9.6) })
+                    {
+                        var clipped = (JObject)missing.DeepClone(); clipped["bbox"] = bbox;
+                        check("bbox-clipping-rounding", clipped, Entries(Det(0, 9, 5, 10)), true, "iou", 1);
+                    }
+                    foreach (var bbox in new[] { new JArray(), new JArray(0, 0, 0, 10), new JArray(0, 0, -1, 10),
+                        new JArray(40, 40, 10, 10), new JArray("bad", 0, 10, 10), new JArray(double.NaN, 0, 10, 10) })
+                    {
+                        var invalid = (JObject)missing.DeepClone(); invalid["bbox"] = bbox;
+                        check("unusable-bbox", invalid, Entries(missing), false, null, 0);
+                    }
+                    check("missing-bbox", new JObject(), Entries(missing), false, null, 0);
+                    var huge = (JObject)missing.DeepClone(); huge["bbox"] = new JArray(-1e12, -1e12, 2e12, 2e12);
+                    check("huge-bbox-clipped-before-allocation", huge, Entries(Det(0, 0, 32, 32)), true, "iou", 1);
                     check("empty-mask", Det(8, 9, 10, 10, 0, 0), Entries(Det(8, 9, 10, 10)), false, null, 0.5);
                     check("empty-region", Det(8, 9, 10, 10), new JArray(), false, null, 0.5);
                     check("source-clipping", Det(-5, 9, 10, 10), Entries(Det(0, 9, 5, 10)), true, null, 1);
@@ -77,8 +105,8 @@ namespace DlcvCSharpTest
                         check("foreground-" + value, binary, Entries(Det(8, 9, 2, 2)), value > 127, null, 1);
                     }
                     regionMode = "top1_bbox";
-                    var highMissing = (JObject)missing.DeepClone(); highMissing["score"] = 1;
-                    check("top1-skips-missing-mask", Det(8, 9, 2, 2), Entries(highMissing, Det(8, 9, 2, 2)), true, null, 1);
+                    var highMissing = (JObject)missing.DeepClone(); highMissing["score"] = 1; highMissing["bbox"] = new JArray(20, 20, 2, 2);
+                    check("top1-includes-bbox-fallback", Det(8, 9, 2, 2), Entries(highMissing, Det(8, 9, 2, 2)), false, null, 1);
                     var highFar = Det(20, 20, 2, 2); highFar["score"] = 1;
                     check("top1-highest-valid-score", Det(8, 9, 2, 2), Entries(Det(8, 9, 2, 2), highFar), false, null, 1);
                     var noScore = Det(8, 9, 2, 2); noScore.Remove("score"); highFar.Remove("score");
@@ -86,6 +114,7 @@ namespace DlcvCSharpTest
                     regionMode = "any_bbox";
                     global = true;
                     check("global-mask-iou", Det(8, 9, 10, 10), Entries(Det(8, 9, 2, 2)), false, "iou", 0.5);
+                    check("global-bbox-fallback", missing, Entries(missing), true, "iou", 1);
                     global = false;
                     // Compare window warping to a full original-canvas reference, including crop and native affine semantics.
                     foreach (var spec in new[] { new[] { 17.0, 1.0 }, new[] { 45.0, 0.7 }, new[] { -33.0, 1.4 }, new[] { 90.0, 1.0 }, new[] { 180.0, 1.0 }, new[] { 0.0, -1.0 } })
@@ -123,8 +152,20 @@ namespace DlcvCSharpTest
                                 transform["original_size"] = new JArray(32, 32);
                                 transform["affine_matrix"] = new JArray(new JArray(affine.At<double>(0, 0), affine.At<double>(0, 1), affine.At<double>(0, 2)), new JArray(affine.At<double>(1, 0), affine.At<double>(1, 1), affine.At<double>(1, 2)));
                             }
-                            var transformed = Entries(local); transformed[0]["transform"] = transform;
+                            var transformed = Entries((JObject)local.DeepClone()); transformed[0]["transform"] = transform;
                             check("affine-" + spec[0] + "-" + spec[1] + (native ? "-native" : "-python"), expected, transformed, true, "iou", 1);
+                            using (var rectangle = new Mat(16, 16, MatType.CV_8UC1, Scalar.Black))
+                            using (var roi = new Mat(rectangle, new Rect(5, 4, 6, 7)))
+                            using (var rectangleReference = new Mat())
+                            {
+                                roi.SetTo(Scalar.All(255));
+                                Cv2.WarpAffine(rectangle, rectangleReference, inverse, new Size(32, 32), InterpolationFlags.Nearest, BorderTypes.Constant, Scalar.Black);
+                                var expectedRectangle = Det(0, 0, 32, 32);
+                                for (int iy = 0; iy < 32; iy++)
+                                for (int ix = 0; ix < 32; ix++) expectedRectangle["mask_array"][iy][ix] = rectangleReference.At<byte>(iy, ix);
+                                ((JObject)transformed[0]["sample_results"][0]).Remove("mask_array");
+                                check("bbox-affine-" + spec[0] + "-" + spec[1] + (native ? "-native" : "-python"), expectedRectangle, transformed, true, "iou", 1);
+                            }
                         }
                     }
                     // 分流后区域 index 可从 1 重排成 0，原图身份不能随 index 改变。
@@ -142,6 +183,20 @@ namespace DlcvCSharpTest
                         || isolated.ExtraOutputs[0].ResultList.Count != 1 || isolated.ExtraOutputs[0].ImageList[0].OriginalIndex != 0)
                         throw new Exception("origin-isolation-reindexed-region: wrong source image");
                     Console.WriteLine("PASS origin-isolation-reindexed-region"); count++;
+                    foreach (bool badTransform in new[] { false, true })
+                    {
+                        var badInput = Entries((JObject)missing.DeepClone());
+                        if (badTransform)
+                            badInput[0]["transform"] = new JObject { ["original_width"] = 32, ["original_height"] = 32,
+                                ["output_size"] = new JArray(32, 32), ["affine_2x3"] = new JArray(0, 0, 0, 0, 0, 0) };
+                        else badInput[0]["sample_results"][0]["mask_array"] = new JArray(new JArray(256));
+                        var invalidModule = new ResultFilterRegion(1, properties: new Dictionary<string, object> { ["filter_mode"] = "mask" });
+                        invalidModule.ExtraInputsIn.Add(new ModuleChannel(null, Entries(Det(8, 9, 10, 10))));
+                        bool failed = false;
+                        try { invalidModule.Process(images, badInput); } catch (ArgumentException) { failed = true; }
+                        if (!failed) throw new Exception("invalid mask/transform silently replaced by bbox");
+                        Console.WriteLine("PASS invalid-mask-or-transform-no-fallback"); count++;
+                    }
                     foreach (var invalid in new[] { new Dictionary<string, object> { ["metric"] = "bad" }, new Dictionary<string, object> { ["overlap_threshold"] = -1 }, new Dictionary<string, object> { ["overlap_threshold"] = 2 }, new Dictionary<string, object> { ["overlap_threshold"] = double.NaN } })
                     {
                         invalid["filter_mode"] = "mask";
