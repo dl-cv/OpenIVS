@@ -36,6 +36,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "ImageViewerWidget.h"
+#include "ImageFileReader.h"
 #include "json/json.hpp"
 
 namespace {
@@ -547,8 +548,7 @@ bool MainWindow::loadCurrentImage(cv::Mat& image, bool silentOnDecodeFail) const
     QFile input(imagePath_);
     if (input.open(QIODevice::ReadOnly)) {
         const QByteArray bytes = input.readAll();
-        const std::vector<uchar> encoded(bytes.begin(), bytes.end());
-        image = cv::imdecode(encoded, cv::IMREAD_UNCHANGED);
+        image = ImageFileReader::Decode(bytes);
     }
     if (image.empty() && !silentOnDecodeFail && !offscreen_) {
         QMessageBox::warning(

@@ -75,7 +75,7 @@
 | `threshold` | 0.00～1.00 | 0.50 |
 | 线程数 | 1～32 | 1 |
 
-图片由 OpenCV 按原始位深和通道读取。三通道 BGR 与四通道 BGRA 在调用 C 接口前转换为连续 RGB 数据；单通道图片保持单通道。输入内存在接口返回前保持有效。
+主界面与命令行共用 `ImageFileReader::Decode`：JPEG 应用 EXIF 方向；PNG/WebP 保留通道和位深后处理方向 1–8；TIFF 沿用解码器已有方向处理，避免重复旋转；BMP 按像素读取。GIF 使用 Qt GIF 插件读取首帧，并将完全透明像素的颜色置零，避免去掉 alpha 后显示隐藏的调色板颜色。显示和推理共用方向处理后的图像。三通道 BGR 与四通道 BGRA 在调用 C 接口前转换为连续 RGB 数据；单通道图片保持单通道。输入内存在接口返回前保持有效。
 
 结构化结果在释放前复制为显示数据。类别、分数、普通框、旋转框、mask、面积和角度直接使用本次结构化结果显示；`extra_info` 的 UTF-8 JSON 对象解析为程序内部的通用扩展对象，同时展示均值、中值及空侧 `null`，有效零值仍为数值。不为显示统计再次执行 JSON 推理。mask 在调用结果释放函数前复制到程序内部的 `cv::Mat`，扩展信息解析后不再持有 C 借用指针。节点语义见 `模块、流程与模型推理标准文档.md` 6.4.1，公开 C 结果及释放要求见 `C API文档.md` 3。
 
@@ -99,7 +99,19 @@ python "build_script/build.py" "dlcv_infer_c_qt_demo/dlcv_infer_c_qt_demo.vcxpro
 dlcv_infer_c_qt_demo/Debug/dlcv_infer_c_qt_demo/dlcv_infer_c_qt_demo.exe
 ```
 
-工程不链接 C API 导入库。运行时通过 `LoadLibraryW` 加载 `dlcv_infer_cpp.dll`，通过 `GetProcAddress` 解析 C 接口；构建后事件复制 `dlcv_infer_cpp.dll`、Qt Core/Gui/Widgets 运行库以及平台和样式插件。
+工程不链接 C API 导入库。运行时通过 `LoadLibraryW` 加载 `dlcv_infer_cpp.dll`，通过 `GetProcAddress` 解析 C 接口；构建后事件复制 `dlcv_infer_cpp.dll`、Qt Core/Gui/Widgets 运行库以及平台、样式和 GIF 解码插件。
+
+### 图像方向回归
+
+复用 `Test/qt_demo/dlcv_infer_c_qt_mask_test.vcxproj` 与 `Test/DemoImageLoadingTest/generate_cases.py`，无需模型或新增测试工程：
+
+```text
+python build_script/build.py Test/qt_demo/dlcv_infer_c_qt_mask_test.vcxproj --configuration Release
+python Test/DemoImageLoadingTest/generate_cases.py <输出目录>
+Test/qt_demo/Release/dlcv_infer_c_qt_mask_test/dlcv_infer_c_qt_mask_test.exe --image-cases <输出目录>/cases.tsv
+```
+
+测试比较原始文件与反复覆盖的改名副本，覆盖常见格式、EXIF 方向、灰度、透明、16 位和异常元数据。16 位仅验证读取保持位深，C 推理接口仍要求 8 位输入。
 
 ## 5. 已验证能力
 

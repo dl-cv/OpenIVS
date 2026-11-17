@@ -724,7 +724,7 @@ namespace DlcvDemo
 					return;
 				}
 
-				Mat image = Cv2.ImRead(image_path, ImreadModes.Unchanged);
+				Mat image = ImageFileReader.Read(image_path);
 				if (image.Empty())
 				{
 					Console.WriteLine("图像解码失败！");
@@ -1120,7 +1120,7 @@ namespace DlcvDemo
                     return;
                 }
 
-                Mat image = Cv2.ImRead(image_path, ImreadModes.Unchanged);
+                Mat image = ImageFileReader.Read(image_path);
                 if (image.Empty())
                 {
                     throw new Exception(I18n.T("图像解码失败！"));
@@ -1523,7 +1523,7 @@ namespace DlcvDemo
                 batch_size = (int)numericUpDown_batch_size.Value;
                 int threadCount = (int)numericUpDown_num_thread.Value;
 
-                Mat image = Cv2.ImRead(image_path, ImreadModes.Unchanged);
+                Mat image = ImageFileReader.Read(image_path);
                 Mat inferImage = PrepareImageForModelInput(image);
 
                 var image_list = new List<Mat>();

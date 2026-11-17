@@ -187,6 +187,7 @@
     <ClInclude Include="DisplayResult.h" />
     <ClInclude Include="ImageViewerWidget.h" />
     <ClInclude Include="CliRunner.h" />
+    <ClInclude Include="ImageFileReader.h" />
   </ItemGroup>
 
   <ItemGroup>
@@ -214,6 +215,8 @@
   <Target Name="CopyCQtOffscreenRuntime" AfterTargets="CopyDlcvQtRuntime" Condition="'$(Platform)'=='x64'">
     <Error Condition="!Exists('$(QtPluginsDir)\platforms\qoffscreen$(QtDllSuffix).dll')" Text="Qt offscreen 平台插件不存在。" />
     <Copy SourceFiles="$(QtPluginsDir)\platforms\qoffscreen$(QtDllSuffix).dll" DestinationFolder="$(TargetDir)platforms" SkipUnchangedFiles="true" />
+    <MakeDir Directories="$(TargetDir)imageformats" />
+    <Copy SourceFiles="$(QtPluginsDir)\imageformats\qgif$(QtDllSuffix).dll" DestinationFolder="$(TargetDir)imageformats" SkipUnchangedFiles="true" />
   </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
