@@ -1147,6 +1147,7 @@ private:
 
     static RegionMask PrepareRegionMask(const Json& det, const Json& entry, const ModuleImage& wrap) {
         cv::Mat mask;
+        bool useBbox = false;
         if (det.contains("mask_array") && !det.at("mask_array").is_null()) {
             const auto& rows = det.at("mask_array");
             if (!rows.is_array()) throw std::invalid_argument("Mask array must be two-dimensional uint8");
@@ -1168,8 +1169,8 @@ private:
             mask = MaskInfoToMat(det.at("mask_rle"));
             if (mask.empty()) return {};
             cv::threshold(mask, mask, 127, 255, cv::THRESH_BINARY);
-        } else return {};
-        if (!cv::countNonZero(mask)) return {};
+        } else useBbox = true;
+        if (!useBbox && !cv::countNonZero(mask)) return {};
         const int W = wrap.TransformState.OriginalWidth, H = wrap.TransformState.OriginalHeight;
         int sourceW = W, sourceH = H;
         cv::Matx23d inverse(1,0,0,0,1,0);
@@ -1205,7 +1206,23 @@ private:
         }
         if (std::min({W,H,sourceW,sourceH}) <= 0) throw std::invalid_argument("Invalid mask image size");
         int x1 = 0, y1 = 0, x2 = sourceW, y2 = sourceH;
-        if (mask.cols != sourceW || mask.rows != sourceH) {
+        if (useBbox) {
+            if (!det.contains("bbox") || !det.at("bbox").is_array() || det.at("bbox").size() < 4) return {};
+            const auto& bbox = det.at("bbox");
+            for (int i = 0; i < 4; ++i)
+                if (!bbox.at(i).is_number() || !std::isfinite(bbox.at(i).get<double>())) return {};
+            double bx1,by1,bx2,by2;
+            if (bbox.at(2).get<double>() <= 0 || bbox.at(3).get<double>() <= 0 ||
+                !TryExtractBboxAabbCurrent(det,bx1,by1,bx2,by2) ||
+                !std::isfinite(bx1) || !std::isfinite(by1) || !std::isfinite(bx2) || !std::isfinite(by2)) return {};
+            // 先裁到当前图，避免为图外的大框分配临时 Mask。
+            x1 = static_cast<int>(std::max(0.0,std::min(static_cast<double>(sourceW),std::floor(bx1))));
+            y1 = static_cast<int>(std::max(0.0,std::min(static_cast<double>(sourceH),std::floor(by1))));
+            x2 = static_cast<int>(std::max(0.0,std::min(static_cast<double>(sourceW),std::ceil(bx2))));
+            y2 = static_cast<int>(std::max(0.0,std::min(static_cast<double>(sourceH),std::ceil(by2))));
+            if (x2 <= x1 || y2 <= y1) return {};
+            mask = cv::Mat(y2-y1,x2-x1,CV_8UC1,cv::Scalar(255));
+        } else if (mask.cols != sourceW || mask.rows != sourceH) {
             double bx1,by1,bx2,by2;
             if (!det.contains("bbox") || !det.at("bbox").is_array() || det.at("bbox").size() < 4 ||
                 det.at("bbox").at(2).get<double>() <= 0 || det.at("bbox").at(3).get<double>() <= 0 ||
