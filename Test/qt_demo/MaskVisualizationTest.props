@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildThisFileDirectory)..\..\build_script\OpenCvVersion.props" />
   <PropertyGroup>
     <Qt6Dir Condition="'$(Qt6Dir)'==''">$(Qt6_DIR)</Qt6Dir>
     <QtInstallDir Condition="'$(QtInstallDir)'==''">$([System.IO.Path]::GetFullPath('$(Qt6Dir)\..\..'))</QtInstallDir>
@@ -7,14 +8,13 @@
     <QtIncludeDir>$(QtInstallDir)\include</QtIncludeDir>
     <QtLibDir>$(QtInstallDir)\lib</QtLibDir>
     <QtPluginsDir>$(QtInstallDir)\plugins</QtPluginsDir>
-    <OpenCvRoot Condition="'$(OpenCvRoot)'==''">C:\OpenCV\build</OpenCvRoot>
     <DlcvSdkIncludeDir Condition="'$(DlcvSdkIncludeDir)'==''">C:\dlcv\Lib\site-packages\dlcvpro_infer\include</DlcvSdkIncludeDir>
     <QtDllSuffix Condition="'$(Configuration)'=='Debug'">d</QtDllSuffix>
     <QtDllSuffix Condition="'$(Configuration)'=='Release'"></QtDllSuffix>
     <OutDir>$(ProjectDir)$(Configuration)\$(ProjectName)\</OutDir>
     <IntDir>$(ProjectDir)$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-    <IncludePath>$(DemoSourceDir);$(ProjectDir)..\..\dlcv_infer_cpp;$(OpenCvRoot)\include;$(DlcvSdkIncludeDir);$(QtIncludeDir);$(QtIncludeDir)\QtCore;$(QtIncludeDir)\QtGui;$(QtIncludeDir)\QtWidgets;$(IncludePath)</IncludePath>
-    <LibraryPath>$(OpenCvRoot)\x64\vc16\lib;$(QtLibDir);$(LibraryPath)</LibraryPath>
+    <IncludePath>$(DemoSourceDir);$(ProjectDir)..\..\dlcv_infer_cpp;$(OpenCvIncludeDir);$(DlcvSdkIncludeDir);$(QtIncludeDir);$(QtIncludeDir)\QtCore;$(QtIncludeDir)\QtGui;$(QtIncludeDir)\QtWidgets;$(IncludePath)</IncludePath>
+    <LibraryPath>$(OpenCvLibDir);$(QtLibDir);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
@@ -30,7 +30,8 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>opencv_world4100$(QtDllSuffix).lib;Qt6Widgets$(QtDllSuffix).lib;Qt6Gui$(QtDllSuffix).lib;Qt6Core$(QtDllSuffix).lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies Condition="'$(Configuration)'=='Debug'">$(OpenCvWorldDebugLib);Qt6Widgetsd.lib;Qt6Guid.lib;Qt6Cored.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies Condition="'$(Configuration)'!='Debug'">$(OpenCvWorldReleaseLib);Qt6Widgets.lib;Qt6Gui.lib;Qt6Core.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
 </Project>
