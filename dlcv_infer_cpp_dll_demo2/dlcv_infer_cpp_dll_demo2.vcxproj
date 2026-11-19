@@ -57,6 +57,7 @@
   </PropertyGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="$(MSBuildThisFileDirectory)\..\build_script\DlcvProInfer.props" />
 
   <ImportGroup Label="ExtensionSettings" />
   <ImportGroup Label="Shared" />
@@ -78,11 +79,6 @@
   <Import Project="$(MSBuildThisFileDirectory)..\build_script\OpenCvVersion.props" />
 
   <PropertyGroup>
-
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and '$(DLCVPRO_INFER_INCLUDE)'!=''">$(DLCVPRO_INFER_INCLUDE)</DlcvProInferIncludeDir>
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(SolutionDir)third_party\dlcvpro_infer\include')">$(SolutionDir)third_party\dlcvpro_infer\include</DlcvProInferIncludeDir>
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(ProjectDir)..\third_party\dlcvpro_infer\include')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\dlcvpro_infer\include'))</DlcvProInferIncludeDir>
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('C:\dlcv\Lib\site-packages\dlcvpro_infer\include')">C:\dlcv\Lib\site-packages\dlcvpro_infer\include</DlcvProInferIncludeDir>
 
     <DlcvInferCppDllOutDir Condition="'$(DlcvInferCppDllOutDir)'=='' and '$(SolutionDir)'!=''">$(SolutionDir)$(Configuration)\</DlcvInferCppDllOutDir>
     <DlcvInferCppDllOutDir Condition="'$(DlcvInferCppDllOutDir)'==''">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\dlcv_infer_cpp\$(Configuration)\'))</DlcvInferCppDllOutDir>
