@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import locale
 import shutil
 import subprocess
 import sys
@@ -127,7 +128,7 @@ def main() -> int:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        encoding="utf-8",
+        encoding=locale.getpreferredencoding(False),
         errors="replace",
     )
 
