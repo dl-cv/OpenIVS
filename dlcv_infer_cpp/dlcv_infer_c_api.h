@@ -1,4 +1,4 @@
-#ifndef DLCV_INFER_C_API_H
+﻿#ifndef DLCV_INFER_C_API_H
 #define DLCV_INFER_C_API_H
 
 #ifndef __cplusplus

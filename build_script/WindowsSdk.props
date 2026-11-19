@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- VS2017 的 MSBuild 不识别 WindowsTargetPlatformVersion=10.0 的“最新 SDK”别名，
+       会报 MSB8036。这里在 VS2017 下换成它支持的、本机已安装的具体 SDK 版本；
+       VS2019/2022 保持 10.0，由 VS 解析到已安装的最新 SDK。
+       可用 DlcvWindowsSdkRoot 覆盖 Windows Kits 安装根目录。 -->
+  <PropertyGroup>
+    <DlcvWindowsSdkRoot Condition="'$(DlcvWindowsSdkRoot)'==''">C:\Program Files (x86)\Windows Kits\10</DlcvWindowsSdkRoot>
+    <WindowsTargetPlatformVersion Condition="'$(WindowsTargetPlatformVersion)'=='10.0' and '$(VisualStudioVersion)'=='15.0' and Exists('$(DlcvWindowsSdkRoot)\Include\10.0.17763.0')">10.0.17763.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion Condition="'$(WindowsTargetPlatformVersion)'=='10.0' and '$(VisualStudioVersion)'=='15.0' and Exists('$(DlcvWindowsSdkRoot)\Include\10.0.17134.0')">10.0.17134.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion Condition="'$(WindowsTargetPlatformVersion)'=='10.0' and '$(VisualStudioVersion)'=='15.0' and Exists('$(DlcvWindowsSdkRoot)\Include\10.0.16299.0')">10.0.16299.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion Condition="'$(WindowsTargetPlatformVersion)'=='10.0' and '$(VisualStudioVersion)'=='15.0' and Exists('$(DlcvWindowsSdkRoot)\Include\10.0.15063.0')">10.0.15063.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion Condition="'$(WindowsTargetPlatformVersion)'=='10.0' and '$(VisualStudioVersion)'=='15.0' and Exists('$(DlcvWindowsSdkRoot)\Include\10.0.14393.0')">10.0.14393.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion Condition="'$(WindowsTargetPlatformVersion)'=='' and '$(VisualStudioVersion)'!='15.0'">10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+</Project>
