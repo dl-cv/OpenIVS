@@ -16,7 +16,7 @@ OpenIVS 是一个 .NET WPF 工业视觉框架。**本 AGENTS.md 聚焦 API 层�
   - C：`dlcv_infer_c_qt_demo`（Qt 桌面应用，推理功能只调用 C ABI）与 `dlcv_infer_c_demo`（纯 C API 控制台动态调用）
   - C#：`DlcvDemo` / `DlcvDemo2` / `DlcvDemo3`（WinForms 桌面应用）
 - **控制台测试**：`Test/DlcvCSharpTest`、`Test/dlcv_infer_cpp_test`、`Test/dlcv_infer_c_test`
-- **控制台 Demo**：`dlcv_infer_cpp_dll_demo` 支持 C++ API 组合命令；`dlcv_infer_c_demo` 只包含 C 头文件并通过 `LoadLibraryW`、`GetProcAddress` 调用 `dlcv_infer_cpp.dll`
+- **控制台测试程序**：`Test\dlcv_infer_cpp_cli` 支持 C++ API 组合命令，`dlcv_infer_cpp_dll_demo` 是最小推理示例；`dlcv_infer_c_demo` 只包含 C 头文件并通过 `LoadLibraryW`、`GetProcAddress` 调用 `dlcv_infer_cpp.dll`
 
 ## 构建方式
 
