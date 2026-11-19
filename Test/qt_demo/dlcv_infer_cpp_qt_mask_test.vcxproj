@@ -14,7 +14,7 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
     <UseDebugLibraries Condition="'$(Configuration)'=='Release'">false</UseDebugLibraries>
