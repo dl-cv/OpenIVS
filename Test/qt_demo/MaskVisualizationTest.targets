@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Target Name="CopyMaskTestRuntime" AfterTargets="Build">
+  <Import Project="$(MSBuildThisFileDirectory)..\..\build_script\OpenCvDiagnostics.targets" />
+  <Target Name="CopyMaskTestRuntime" AfterTargets="Build" DependsOnTargets="ValidateOpenCvRuntime">
     <ItemGroup>
-      <_MaskTestRuntime Include="$(QtBinDir)\Qt6Core$(QtDllSuffix).dll;$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll;$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll;$(OpenCvRoot)\x64\vc16\bin\opencv_world4100$(QtDllSuffix).dll" />
+      <_MaskTestRuntime Include="$(QtBinDir)\Qt6Core$(QtDllSuffix).dll;$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll;$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll;$(OpenCvBinDir)\$(OpenCvWorldDebugDll)" Condition="'$(Configuration)'=='Debug'" />
+      <_MaskTestRuntime Include="$(QtBinDir)\Qt6Core$(QtDllSuffix).dll;$(QtBinDir)\Qt6Gui$(QtDllSuffix).dll;$(QtBinDir)\Qt6Widgets$(QtDllSuffix).dll;$(OpenCvBinDir)\$(OpenCvWorldReleaseDll)" Condition="'$(Configuration)'!='Debug'" />
     </ItemGroup>
     <Copy SourceFiles="@(_MaskTestRuntime)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
     <MakeDir Directories="$(TargetDir)platforms" />

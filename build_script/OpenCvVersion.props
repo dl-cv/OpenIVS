@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- 统一解析 OpenCV 目录与 world 库文件名：目录优先取环境变量，其次仓库 third_party，最后 C:\OpenCV。
+       库文件名由实际存在的 opencv_world*.lib 决定，工程不再固定 4.10 版本。 -->
+  <PropertyGroup>
+    <OpenCvRepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))</OpenCvRepoRoot>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_INCLUDE_DIR)'!='' and Exists('$(OpenCV_INCLUDE_DIR)\opencv2\core.hpp')">$(OpenCV_INCLUDE_DIR)</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\opencv2\core.hpp')">$(OpenCV_DIR)</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\include\opencv2\core.hpp')">$(OpenCV_DIR)\include</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\..\..\include\opencv2\core.hpp')">$([System.IO.Path]::GetFullPath('$(OpenCV_DIR)\..\..\include'))</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\..\..\..\include\opencv2\core.hpp')">$([System.IO.Path]::GetFullPath('$(OpenCV_DIR)\..\..\..\include'))</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(SolutionDir)'!='' and Exists('$(SolutionDir)third_party\opencv\build\include\opencv2\core.hpp')">$(SolutionDir)third_party\opencv\build\include</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and Exists('$(ProjectDir)..\third_party\opencv\build\include\opencv2\core.hpp')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\opencv\build\include'))</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCvNoLocalSearch)'!='true' and Exists('$(OpenCvRepoRoot)\third_party\opencv\build\include\opencv2\core.hpp')">$([System.IO.Path]::GetFullPath('$(OpenCvRepoRoot)\third_party\opencv\build\include'))</OpenCvIncludeDir>
+    <OpenCvIncludeDir Condition="'$(OpenCvIncludeDir)'=='' and '$(OpenCvNoLocalSearch)'!='true' and Exists('C:\OpenCV\build\include\opencv2\core.hpp')">C:\OpenCV\build\include</OpenCvIncludeDir>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <_OpenCvLib1 Condition="'$(OpenCV_LIB_DIR)'!='' and Exists('$(OpenCV_LIB_DIR)')">$([System.IO.Directory]::GetFiles('$(OpenCV_LIB_DIR)','opencv_world*.lib'))</_OpenCvLib1>
+    <_OpenCvLib2 Condition="'$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)')">$([System.IO.Directory]::GetFiles('$(OpenCV_DIR)','opencv_world*.lib'))</_OpenCvLib2>
+    <_OpenCvLib3 Condition="'$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\lib')">$([System.IO.Directory]::GetFiles('$(OpenCV_DIR)\lib','opencv_world*.lib'))</_OpenCvLib3>
+    <_OpenCvLib4 Condition="'$(OpenCV_DIR)'!='' and Exists('$(OpenCV_DIR)\x64\vc16\lib')">$([System.IO.Directory]::GetFiles('$(OpenCV_DIR)\x64\vc16\lib','opencv_world*.lib'))</_OpenCvLib4>
+    <_OpenCvLib5 Condition="'$(SolutionDir)'!='' and Exists('$(SolutionDir)third_party\opencv\build\x64\vc16\lib')">$([System.IO.Directory]::GetFiles('$(SolutionDir)third_party\opencv\build\x64\vc16\lib','opencv_world*.lib'))</_OpenCvLib5>
+    <_OpenCvLib6 Condition="Exists('$(ProjectDir)..\third_party\opencv\build\x64\vc16\lib')">$([System.IO.Directory]::GetFiles('$(ProjectDir)..\third_party\opencv\build\x64\vc16\lib','opencv_world*.lib'))</_OpenCvLib6>
+    <_OpenCvLib7 Condition="'$(OpenCvNoLocalSearch)'!='true' and Exists('$(OpenCvRepoRoot)\third_party\opencv\build\x64\vc16\lib')">$([System.IO.Directory]::GetFiles('$(OpenCvRepoRoot)\third_party\opencv\build\x64\vc16\lib','opencv_world*.lib'))</_OpenCvLib7>
+    <_OpenCvLib8 Condition="'$(OpenCvNoLocalSearch)'!='true' and Exists('C:\OpenCV\build\x64\vc16\lib')">$([System.IO.Directory]::GetFiles('C:\OpenCV\build\x64\vc16\lib','opencv_world*.lib'))</_OpenCvLib8>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(_OpenCvLib1)'!=''">$(OpenCV_LIB_DIR)</OpenCvLibDir>
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(_OpenCvLib2)'!=''">$(OpenCV_DIR)</OpenCvLibDir>
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(_OpenCvLib3)'!=''">$(OpenCV_DIR)\lib</OpenCvLibDir>
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(_OpenCvLib4)'!=''">$(OpenCV_DIR)\x64\vc16\lib</OpenCvLibDir>
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(_OpenCvLib5)'!=''">$(SolutionDir)third_party\opencv\build\x64\vc16\lib</OpenCvLibDir>
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(_OpenCvLib6)'!=''">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\opencv\build\x64\vc16\lib'))</OpenCvLibDir>
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(_OpenCvLib7)'!=''">$([System.IO.Path]::GetFullPath('$(OpenCvRepoRoot)\third_party\opencv\build\x64\vc16\lib'))</OpenCvLibDir>
+    <OpenCvLibDir Condition="'$(OpenCvLibDir)'=='' and '$(_OpenCvLib8)'!=''">C:\OpenCV\build\x64\vc16\lib</OpenCvLibDir>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <_OpenCvLibFiles Condition="'$(OpenCvLibDir)'!='' and Exists('$(OpenCvLibDir)')">$([System.IO.Directory]::GetFiles('$(OpenCvLibDir)','opencv_world*.lib'))</_OpenCvLibFiles>
+    <OpenCvWorldReleaseBase>$([System.Text.RegularExpressions.Regex]::Match('$(_OpenCvLibFiles)','opencv_world\d+\.lib').Value)</OpenCvWorldReleaseBase>
+    <OpenCvWorldDebugBase>$([System.Text.RegularExpressions.Regex]::Match('$(_OpenCvLibFiles)','opencv_world\d+d\.lib').Value)</OpenCvWorldDebugBase>
+    <OpenCvWorldReleaseBase Condition="'$(OpenCvWorldReleaseBase)'!=''">$([System.IO.Path]::GetFileNameWithoutExtension('$(OpenCvWorldReleaseBase)'))</OpenCvWorldReleaseBase>
+    <OpenCvWorldDebugBase Condition="'$(OpenCvWorldDebugBase)'!=''">$([System.IO.Path]::GetFileNameWithoutExtension('$(OpenCvWorldDebugBase)'))</OpenCvWorldDebugBase>
+    <OpenCvWorldReleaseLib>$(OpenCvWorldReleaseBase).lib</OpenCvWorldReleaseLib>
+    <OpenCvWorldDebugLib>$(OpenCvWorldDebugBase).lib</OpenCvWorldDebugLib>
+    <OpenCvWorldReleaseDll>$(OpenCvWorldReleaseBase).dll</OpenCvWorldReleaseDll>
+    <OpenCvWorldDebugDll>$(OpenCvWorldDebugBase).dll</OpenCvWorldDebugDll>
+    <OpenCvBinDir Condition="'$(OpenCvBinDir)'=='' and '$(OpenCvLibDir)'!=''">$([System.IO.Path]::GetFullPath('$(OpenCvLibDir)\..\bin'))</OpenCvBinDir>
+  </PropertyGroup>
+</Project>

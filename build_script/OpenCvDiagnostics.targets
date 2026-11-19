@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <OpenCvDiagnosticRepoRoot>$(MSBuildThisFileDirectory)..\</OpenCvDiagnosticRepoRoot>
+  </PropertyGroup>
+  <Target Name="PrepareOpenCvDiagnostics">
+    <PropertyGroup>
+      <OpenCvDiagnosticIncludeDir Condition="'$(OpenCvDiagnosticIncludeDir)'==''">$(OpenCvIncludeDir)</OpenCvDiagnosticIncludeDir>
+      <OpenCvDiagnosticLibDir Condition="'$(OpenCvDiagnosticLibDir)'==''">$(OpenCvLibDir)</OpenCvDiagnosticLibDir>
+      <OpenCvDiagnosticBinDir Condition="'$(OpenCvDiagnosticBinDir)'==''">$(OpenCvBinDir)</OpenCvDiagnosticBinDir>
+      <OpenCvDiagnosticBinDir Condition="'$(OpenCvDiagnosticBinDir)'=='' and '$(OpenCvDiagnosticLibDir)'!=''">$([System.IO.Path]::GetFullPath('$(OpenCvDiagnosticLibDir)\..\bin'))</OpenCvDiagnosticBinDir>
+      <OpenCvDiagnosticCheckLibrary Condition="'$(OpenCvDiagnosticCheckLibrary)'==''">true</OpenCvDiagnosticCheckLibrary>
+      <_OpenCvDiagnosticLibFiles Condition="'$(OpenCvDiagnosticLibDir)'!='' and Exists('$(OpenCvDiagnosticLibDir)')">$([System.IO.Directory]::GetFiles('$(OpenCvDiagnosticLibDir)','opencv_world*.lib'))</_OpenCvDiagnosticLibFiles>
+      <OpenCvDiagnosticReleaseBase>$([System.Text.RegularExpressions.Regex]::Match('$(_OpenCvDiagnosticLibFiles)','opencv_world\d+\.lib').Value)</OpenCvDiagnosticReleaseBase>
+      <OpenCvDiagnosticDebugBase>$([System.Text.RegularExpressions.Regex]::Match('$(_OpenCvDiagnosticLibFiles)','opencv_world\d+d\.lib').Value)</OpenCvDiagnosticDebugBase>
+      <OpenCvDiagnosticReleaseBase Condition="'$(OpenCvDiagnosticReleaseBase)'!=''">$([System.IO.Path]::GetFileNameWithoutExtension('$(OpenCvDiagnosticReleaseBase)'))</OpenCvDiagnosticReleaseBase>
+      <OpenCvDiagnosticDebugBase Condition="'$(OpenCvDiagnosticDebugBase)'!=''">$([System.IO.Path]::GetFileNameWithoutExtension('$(OpenCvDiagnosticDebugBase)'))</OpenCvDiagnosticDebugBase>
+      <OpenCvDiagnosticExpectedBase Condition="'$(Configuration)'=='Debug' and '$(OpenCvDiagnosticDebugBase)'!=''">$(OpenCvDiagnosticDebugBase)</OpenCvDiagnosticExpectedBase>
+      <OpenCvDiagnosticExpectedBase Condition="'$(Configuration)'=='Debug' and '$(OpenCvDiagnosticDebugBase)'=='' and '$(OpenCvDiagnosticReleaseBase)'!=''">$(OpenCvDiagnosticReleaseBase)d</OpenCvDiagnosticExpectedBase>
+      <OpenCvDiagnosticExpectedBase Condition="'$(Configuration)'!='Debug' and '$(OpenCvDiagnosticReleaseBase)'!=''">$(OpenCvDiagnosticReleaseBase)</OpenCvDiagnosticExpectedBase>
+      <OpenCvDiagnosticExpectedBase Condition="'$(Configuration)'!='Debug' and '$(OpenCvDiagnosticReleaseBase)'=='' and '$(OpenCvDiagnosticDebugBase)'!=''">$([System.Text.RegularExpressions.Regex]::Match('$(OpenCvDiagnosticDebugBase)','opencv_world\d+').Value)</OpenCvDiagnosticExpectedBase>
+      <OpenCvDiagnosticLibraryName Condition="'$(OpenCvDiagnosticExpectedBase)'!=''">$(OpenCvDiagnosticExpectedBase).lib</OpenCvDiagnosticLibraryName>
+      <OpenCvDiagnosticRuntimeName Condition="'$(OpenCvDiagnosticExpectedBase)'!=''">$(OpenCvDiagnosticExpectedBase).dll</OpenCvDiagnosticRuntimeName>
+    </PropertyGroup>
+    <ItemGroup>
+      <OpenCvDiagnosticEnvironment Include="OpenCV_DIR">
+        <Value>$([System.Environment]::GetEnvironmentVariable('OpenCV_DIR'))</Value>
+      </OpenCvDiagnosticEnvironment>
+      <OpenCvDiagnosticEnvironment Include="OpenCV_INCLUDE_DIR">
+        <Value>$([System.Environment]::GetEnvironmentVariable('OpenCV_INCLUDE_DIR'))</Value>
+      </OpenCvDiagnosticEnvironment>
+      <OpenCvDiagnosticEnvironment Include="OpenCV_LIB_DIR">
+        <Value>$([System.Environment]::GetEnvironmentVariable('OpenCV_LIB_DIR'))</Value>
+      </OpenCvDiagnosticEnvironment>
+      <OpenCvDiagnosticEnvironment Include="OpenCV_BIN_DIR">
+        <Value>$([System.Environment]::GetEnvironmentVariable('OpenCV_BIN_DIR'))</Value>
+      </OpenCvDiagnosticEnvironment>
+      <OpenCvDiagnosticEnvironment Include="OpenCvIncludeDir">
+        <Value>$([System.Environment]::GetEnvironmentVariable('OpenCvIncludeDir'))</Value>
+      </OpenCvDiagnosticEnvironment>
+      <OpenCvDiagnosticEnvironment Include="OpenCvLibDir">
+        <Value>$([System.Environment]::GetEnvironmentVariable('OpenCvLibDir'))</Value>
+      </OpenCvDiagnosticEnvironment>
+      <OpenCvDiagnosticEnvironment Include="OpenCvBinDir">
+        <Value>$([System.Environment]::GetEnvironmentVariable('OpenCvBinDir'))</Value>
+      </OpenCvDiagnosticEnvironment>
+      <OpenCvDiagnosticEnvironment>
+        <State>未设置</State>
+        <State Condition="'%(Value)'!=''">已设置</State>
+      </OpenCvDiagnosticEnvironment>
+      <OpenCvDiagnosticLibrary Include="$(OpenCvDiagnosticLibDir)\opencv_world*.lib" Condition="'$(OpenCvDiagnosticLibDir)'!=''" />
+      <OpenCvDiagnosticLibrary Include="$(OpenCvDiagnosticBinDir)\opencv_world*.dll" Condition="'$(OpenCvDiagnosticBinDir)'!=''" />
+      <OpenCvDiagnosticLibrary Include="$(OpenCV_DIR)\opencv_world*.lib;$(OpenCV_DIR)\lib\opencv_world*.lib;$(OpenCV_DIR)\x64\vc16\lib\opencv_world*.lib;$(OpenCV_DIR)\x64\vc16\bin\opencv_world*.dll" Condition="'$(OpenCV_DIR)'!=''" />
+      <OpenCvDiagnosticLibrary Include="$(SolutionDir)third_party\opencv\build\x64\vc16\lib\opencv_world*.lib" Condition="Exists('$(SolutionDir)third_party\opencv\build\x64\vc16\lib')" />
+      <OpenCvDiagnosticLibrary Include="$(OpenCvDiagnosticRepoRoot)third_party\opencv\build\x64\vc16\lib\opencv_world*.lib;C:\OpenCV\build\x64\vc16\lib\opencv_world*.lib" />
+    </ItemGroup>
+    <PropertyGroup>
+      <OpenCvDiagnosticLibraries>@(OpenCvDiagnosticLibrary->'%(FullPath)'->Distinct(), '；')</OpenCvDiagnosticLibraries>
+      <OpenCvDiagnosticLibraries Condition="'$(OpenCvDiagnosticLibraries)'==''">未找到 opencv_world*.lib 或 opencv_world*.dll</OpenCvDiagnosticLibraries>
+      <OpenCvDiagnosticLibraryNote Condition="'$(OpenCvDiagnosticCheckLibrary)'=='false'">（当前工程未直接链接 OpenCV 库）</OpenCvDiagnosticLibraryNote>
+      <OpenCvDiagnosticDetails>&#xA;工程：$(MSBuildProjectName)（$(Configuration)|$(Platform)）&#xA;进程环境变量：&#xA;@(OpenCvDiagnosticEnvironment->'%(Identity)：%(State)，当前值="%(Value)"', '&#xA;')&#xA;当前工程属性：OpenCV_DIR="$(OpenCV_DIR)"；OpenCV_INCLUDE_DIR="$(OpenCV_INCLUDE_DIR)"；OpenCV_LIB_DIR="$(OpenCV_LIB_DIR)"；OpenCV_BIN_DIR="$(OpenCV_BIN_DIR)"；OpenCvIncludeDir="$(OpenCvIncludeDir)"；OpenCvLibDir="$(OpenCvLibDir)"；OpenCvBinDir="$(OpenCvBinDir)"&#xA;最终头文件目录："$(OpenCvDiagnosticIncludeDir)"&#xA;最终库目录："$(OpenCvDiagnosticLibDir)"$(OpenCvDiagnosticLibraryNote)&#xA;最终运行库目录："$(OpenCvDiagnosticBinDir)"（目录为空表示未解析到路径）&#xA;自动匹配的库文件："$(OpenCvDiagnosticLibraryName)"；运行库文件："$(OpenCvDiagnosticRuntimeName)"&#xA;找到的 OpenCV 库：$(OpenCvDiagnosticLibraries)&#xA;本工程按 OpenCV 库目录中实际存在的 opencv_world*.lib 自动匹配版本（4.10 为 4100、4.11 为 4110），修改环境变量后请重新启动 Visual Studio。</OpenCvDiagnosticDetails>
+    </PropertyGroup>
+  </Target>
+  <Target Name="ValidateOpenCvDependencies" BeforeTargets="ClCompile" DependsOnTargets="PrepareOpenCvDiagnostics" Condition="'$(Platform)'=='x64'">
+    <Error Condition="!Exists('$(OpenCvDiagnosticIncludeDir)\opencv2\core.hpp')"
+           Text="未找到 OpenCV 头文件。检查路径：&quot;$(OpenCvDiagnosticIncludeDir)\opencv2\core.hpp&quot;。$(OpenCvDiagnosticDetails)" />
+    <Error Condition="'$(OpenCvDiagnosticCheckLibrary)'!='false' and '$(OpenCvDiagnosticLibraryName)'==''"
+           Text="未在 OpenCV 库目录找到 opencv_world*.lib。$(OpenCvDiagnosticDetails)" />
+    <Error Condition="'$(OpenCvDiagnosticCheckLibrary)'!='false' and '$(OpenCvDiagnosticLibraryName)'!='' and !Exists('$(OpenCvDiagnosticLibDir)\$(OpenCvDiagnosticLibraryName)')"
+           Text="缺少 OpenCV $(Configuration) 库 &quot;$(OpenCvDiagnosticLibraryName)&quot;。检查路径：&quot;$(OpenCvDiagnosticLibDir)\$(OpenCvDiagnosticLibraryName)&quot;。$(OpenCvDiagnosticDetails)" />
+  </Target>
+  <Target Name="ValidateOpenCvRuntime" DependsOnTargets="PrepareOpenCvDiagnostics" Condition="'$(Platform)'=='x64'">
+    <Error Condition="'$(OpenCvDiagnosticRuntimeName)'==''"
+           Text="未在 OpenCV 运行库目录找到 opencv_world*.dll。$(OpenCvDiagnosticDetails)" />
+    <Error Condition="'$(OpenCvDiagnosticRuntimeName)'!='' and !Exists('$(OpenCvDiagnosticBinDir)\$(OpenCvDiagnosticRuntimeName)')"
+           Text="缺少 OpenCV 运行库 &quot;$(OpenCvDiagnosticRuntimeName)&quot;。检查路径：&quot;$(OpenCvDiagnosticBinDir)\$(OpenCvDiagnosticRuntimeName)&quot;。$(OpenCvDiagnosticDetails)" />
+  </Target>
+</Project>
