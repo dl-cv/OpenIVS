@@ -248,6 +248,11 @@ namespace DlcvCSharpTest
                     return RunCategoryCountCheckSelfTest();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "merge-results-shared-source-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    return RunMergeResultsSharedSourceSelfTest();
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "template-count-priority-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunTemplateCountPrioritySelfTest();
@@ -1321,6 +1326,7 @@ namespace DlcvCSharpTest
                 new UnifiedTestCase("检测框重复结果过滤", RunBBoxIoUDedupSelfTest),
                 new UnifiedTestCase("结果数量检查", RunCountResultsSelfTest),
                 new UnifiedTestCase("类别数量检查", RunCategoryCountCheckSelfTest),
+                new UnifiedTestCase("结果合并同源图复用", RunMergeResultsSharedSourceSelfTest),
                 new UnifiedTestCase("模板数量优先级", RunTemplateCountPrioritySelfTest),
                 new UnifiedTestCase("生成图扩展", RunImageGenerationExpandSelfTest),
                 new UnifiedTestCase("跨模型标签合并", RunCrossModelLabelMergeSelfTest),
@@ -7824,6 +7830,86 @@ namespace DlcvCSharpTest
 
             Console.WriteLine("BBOX IoU 去重自测通过");
             return 0;
+        }
+
+        private static int RunMergeResultsSharedSourceSelfTest()
+        {
+            Console.WriteLine("==== 结果合并同源图复用自测 ====");
+            try
+            {
+                using (var firstImage = new Mat(64, 64, MatType.CV_8UC3, Scalar.Black))
+                using (var secondImage = new Mat(64, 64, MatType.CV_8UC3, Scalar.White))
+                {
+                    var source = new ModuleImage(firstImage, firstImage, new TransformationState(64, 64), 0);
+
+                    var merge = new MergeResults(220);
+                    merge.ExtraInputsIn.Add(new ModuleChannel(
+                        new List<ModuleImage> { source },
+                        new JArray { BuildCategoryCountEntry(0, 0, "极性点") }));
+                    merge.ExtraInputsIn.Add(new ModuleChannel(
+                        new List<ModuleImage> { source },
+                        new JArray { BuildCategoryCountEntry(0, 0, "打点") }));
+                    ModuleIO merged = merge.Process(
+                        new List<ModuleImage> { source },
+                        new JArray { BuildCategoryCountEntry(0, 0, "字符", "字符", "字符") });
+
+                    if (merged.ImageList.Count != 1 || merged.ImageList[0].OriginalIndex != 0)
+                    {
+                        throw new InvalidOperationException("同一源图多分支合并后未复用同一原图编号");
+                    }
+                    foreach (JToken token in merged.ResultList)
+                    {
+                        var entry = token as JObject;
+                        if (entry == null || entry.Value<int?>("index") != 0 || entry.Value<int?>("origin_index") != 0)
+                        {
+                            throw new InvalidOperationException("同一源图结果仍被拆到不同编号");
+                        }
+                    }
+
+                    var count = new CategoryCountCheck(
+                        221,
+                        properties: new Dictionary<string, object>
+                        {
+                            ["rules"] = new JArray
+                            {
+                                new JObject { ["category"] = "字符", ["operator"] = "equal", ["expect"] = 3 },
+                                new JObject { ["category"] = "极性点", ["operator"] = "equal", ["expect"] = 1 },
+                                new JObject { ["category"] = "打点", ["operator"] = "equal", ["expect"] = 1 }
+                            }
+                        });
+                    ModuleIO counted = count.Process(merged.ImageList, merged.ResultList);
+                    if (!Convert.ToBoolean(count.ScalarOutputsByName["ok"]) ||
+                        counted.ResultList.Any(x => x["ok"] == null || !x["ok"].Value<bool>()))
+                    {
+                        throw new InvalidOperationException("同源图分支合并后数量校验未通过");
+                    }
+
+                    var secondSource = new ModuleImage(secondImage, secondImage, new TransformationState(64, 64), 0);
+                    var distinctMerge = new MergeResults(222);
+                    distinctMerge.ExtraInputsIn.Add(new ModuleChannel(
+                        new List<ModuleImage> { secondSource },
+                        new JArray { BuildCategoryCountEntry(0, 0, "极性点") }));
+                    ModuleIO distinct = distinctMerge.Process(
+                        new List<ModuleImage> { source },
+                        new JArray { BuildCategoryCountEntry(0, 0, "字符") });
+                    if (distinct.ImageList.Count != 2 ||
+                        distinct.ImageList[0].OriginalIndex != 0 ||
+                        distinct.ImageList[1].OriginalIndex != 1 ||
+                        distinct.ResultList[0].Value<int?>("origin_index") != 0 ||
+                        distinct.ResultList[1].Value<int?>("origin_index") != 1)
+                    {
+                        throw new InvalidOperationException("不同源图合并后未保留独立编号");
+                    }
+                }
+
+                Console.WriteLine("结果合并同源图复用自测通过");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("结果合并同源图复用自测失败: " + ex.Message);
+                return 1;
+            }
         }
 
         private static int RunCategoryCountCheckSelfTest()

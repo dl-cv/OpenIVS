@@ -2490,10 +2490,10 @@ int RunCategoryCountCheckSelfTest() {
     const json equalEight = json::array({
         json::object({{"category", "黑块"}, {"operator", "equal"}, {"expect", 8}})
     });
-    const std::string countOneReason = "类别黑块期望=8,实际1";
+    const std::string countSevenReason = "类别黑块期望=8,实际7";
     std::string error;
     if (!RunCategoryCountCheckFlowCase(equalOne, 1, 1, true, std::string(), error)) return fail(error);
-    if (!RunCategoryCountCheckFlowCase(equalEight, 7, 1, false, countOneReason, error)) return fail(error);
+    if (!RunCategoryCountCheckFlowCase(equalEight, 7, 1, false, countSevenReason, error)) return fail(error);
     if (!RunCategoryCountCheckFlowCase(
             json::array({json::object({{"category", "黑块"}, {"operator", "gt"}, {"expect", 0}})}),
             2, 1, true, std::string(), error)) return fail(error);
@@ -2502,7 +2502,7 @@ int RunCategoryCountCheckSelfTest() {
             1, 1, true, std::string(), error)) return fail(error);
     if (!RunCategoryCountCheckFlowCase(
             json::array({json::object({{"category", ""}, {"operator", "equal"}, {"expect", 1}})}),
-            2, 1, true, std::string(), error)) return fail(error);
+            2, 1, false, "类别全部类别期望=1,实际2", error)) return fail(error);
     if (!RunCategoryCountCheckFlowCase(equalOne.dump(), 1, 1, true, std::string(), error)) return fail(error);
     if (!RunCategoryCountCheckFlowCase(
             json::array({json::object({{"category", "黑块"}, {"operator", "invalid"}, {"expect", 1}})}),

@@ -327,6 +327,17 @@ private:
         std::vector<ModuleImage> mergedImages;
         Json mergedResults = Json::array();
         auto& mergedResultsArr = mergedResults.get_ref<Json::array_t&>();
+        std::unordered_map<std::string, int> globalIndexBySource;
+        const auto sourceKey = [](const ModuleImage& image) {
+            const unsigned char* ptr = image.OriginalImage.data != nullptr
+                ? image.OriginalImage.data
+                : image.ImageObject.data;
+            return std::to_string(reinterpret_cast<std::uintptr_t>(ptr)) + ":" +
+                std::to_string(image.OriginalImage.rows) + "x" +
+                std::to_string(image.OriginalImage.cols) + "x" +
+                std::to_string(image.OriginalImage.type()) + ":" +
+                std::to_string(image.OriginalIndex);
+        };
 
         size_t estimatedImageCount = 0;
         size_t estimatedResultCount = 0;
@@ -342,20 +353,28 @@ private:
             const auto& imgs = *(g.Images);
             const Json* res = (g.Results != nullptr && g.Results->is_array()) ? g.Results : nullptr;
 
-            const int baseIndex = static_cast<int>(mergedImages.size());
             std::vector<int> localToGlobal(imgs.size(), -1);
-            int added = 0;
 
             for (int i = 0; i < static_cast<int>(imgs.size()); i++) {
                 const ModuleImage& im = imgs[static_cast<size_t>(i)];
                 if (im.ImageObject.empty()) continue;
-                const int globalIdx = baseIndex + added;
+
+                const std::string key = sourceKey(im);
+                int globalIdx = -1;
+                auto found = globalIndexBySource.find(key);
+                if (found != globalIndexBySource.end()) {
+                    globalIdx = found->second;
+                } else {
+                    globalIdx = static_cast<int>(mergedImages.size());
+                    globalIndexBySource.emplace(key, globalIdx);
+
+                    // 同一源图可能在分类、OCR 等分支中重复出现。这里只追加一次并复用编号，
+                    // 避免下游按 origin_index 聚合时把同一原图拆成多张逻辑原图。
+                    ModuleImage newWrap(im.ImageObject, im.OriginalImage, im.TransformState, globalIdx);
+                    newWrap.UniqueId = im.UniqueId;
+                    mergedImages.push_back(newWrap);
+                }
                 localToGlobal[static_cast<size_t>(i)] = globalIdx;
-                added++;
-                // 重包：确保 OriginalIndex 与全局顺序一致
-                ModuleImage newWrap(im.ImageObject, im.OriginalImage, im.TransformState, globalIdx);
-                newWrap.UniqueId = im.UniqueId;
-                mergedImages.push_back(newWrap);
             }
             if (res == nullptr) continue;
 
@@ -370,9 +389,9 @@ private:
                 int oidx = localIndex.OriginIndex;
                 Json& r2 = token;
 
-                if (added == 1) {
-                    r2["index"] = baseIndex;
-                    r2["origin_index"] = baseIndex;
+                if (imgs.size() == 1 && !localToGlobal.empty() && localToGlobal[0] >= 0) {
+                    r2["index"] = localToGlobal[0];
+                    r2["origin_index"] = localToGlobal[0];
                 } else {
                     if (idx >= 0 && idx < static_cast<int>(localToGlobal.size()) && localToGlobal[static_cast<size_t>(idx)] >= 0) {
                         r2["index"] = localToGlobal[static_cast<size_t>(idx)];

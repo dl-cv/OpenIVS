@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using DlcvModules;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -272,8 +273,9 @@ namespace DlcvCSharpTest
                 var merge = new MergeResults(1);
                 merge.ExtraInputsIn.Add(new ModuleChannel(shared, new JArray(Entry(new JArray(Det("B", 13, 14))))));
                 var merged = merge.Process(shared, new JArray(Entry(new JArray(Det("A", 10)))));
-                Require(merged.ImageList.Count == 2, "实际 merge 两路图像");
-                Require(Outcome(Execute(Offset, merged.ImageList, merged.ResultList)) == "OK;距离：5", "merge 重编号后按原图身份归组");
+                Require(merged.ImageList.Count == 1, "同一源图两路结果应复用原图");
+                Require(merged.ResultList.All(x => x.Value<int?>("index") == 0 && x.Value<int?>("origin_index") == 0), "同一源图结果编号");
+                Require(Outcome(Execute(Offset, merged.ImageList, merged.ResultList)) == "OK;距离：5", "merge 后按同一原图归组");
             }
         }
 
