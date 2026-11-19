@@ -1,4 +1,4 @@
-"""检查 C++ 控制台示例仅通过显式参数读取推理输入。"""
+﻿"""检查 C++ 控制台示例仅通过显式参数读取推理输入。"""
 import json
 import os
 from pathlib import Path
@@ -9,7 +9,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "dlcv_infer_cpp_dll_demo" / "main.cpp"
+SOURCE = ROOT / "Test" / "dlcv_infer_cpp_cli" / "main.cpp"
 
 
 class CliSourceTest(unittest.TestCase):

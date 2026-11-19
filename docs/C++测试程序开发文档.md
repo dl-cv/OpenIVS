@@ -95,7 +95,7 @@ python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.e
 
 ### 3.3 C++ DLL 控制台示例
 
-- 工程：`dlcv_infer_cpp_dll_demo`。
+- 工程：`Test\dlcv_infer_cpp_cli`（`dlcv_infer_cpp_cli`）；`dlcv_infer_cpp_cli` 是最小推理示例。
 - 无参数时保留原有 `ModelRoot`、10 组 `DefaultCases` 和 `RunDefaultCases`，执行通用测试模型清单并输出汇总；缺失输入按原逻辑跳过。`-h`、`--help` 或 `help` 仅显示帮助并返回 0，不初始化推理运行库。
 - 单次推理显式使用 `--case <model.dvst> <image.png>` 或 `--model <model.dvst> --image <image.png>`；多组输入重复添加 `--case`。
 - 缺少成对的模型与图片参数返回 1；加载或推理异常返回 2。
@@ -219,11 +219,11 @@ python Test/run_qt_demo_regression.py --c-exe <C_Demo.exe> --cpp-exe <CPP_Demo.e
 
 ## 5. C++ 控制台 Demo 组合命令
 
-`dlcv_infer_cpp_dll_demo` 是与 C++ API 对应的控制台程序，默认模式、`--case`、`--model` 和 `--pressure` 入口保持可用。新增组合命令通过 `--then` 在同一进程内保留已加载模型：
+`dlcv_infer_cpp_cli` 是与 C++ API 对应的控制台测试程序，默认模式、`--case`、`--model` 和 `--pressure` 入口保持可用。新增组合命令通过 `--then` 在同一进程内保留已加载模型：
 
 ```text
-dlcv_infer_cpp_dll_demo.exe load-model <名称> <模型路径> [--device N] --then model-info <名称> --then infer <名称> <图片路径>
-dlcv_infer_cpp_dll_demo.exe load-model <名称> <模型路径> --then benchmark <名称> <图片路径> [--threads N] [--runs N]
+dlcv_infer_cpp_cli.exe load-model <名称> <模型路径> [--device N] --then model-info <名称> --then infer <名称> <图片路径>
+dlcv_infer_cpp_cli.exe load-model <名称> <模型路径> --then benchmark <名称> <图片路径> [--threads N] [--runs N]
 ```
 
 组合命令包括 `load-model`、`list-models`、`model-info`、`dvs-model-info`、`infer`、`benchmark`、`free-model` 和 `free-all-models`。`benchmark` 使用同一模型和图片建立基准结果，再由多个线程重复推理并比较批量数量、目标数量、类别、框、分数、角度、面积、mask 和通用扩展信息（包括均值与中值）；线程数范围为 1～32。模型编号由实际加载或注册接口返回，不按数值区段推断资源类型或 DLL。
@@ -340,4 +340,4 @@ Debug\dlcv_infer_cpp_test.exe mask-area-selftest
 
 ## 已加载模型列表
 
-`dlcv_infer_cpp_dll_demo.exe list-sdk-models` 与 `dlcv_infer_c_demo.exe list-sdk-models` 返回已加载推理模块的模型快照。单独执行该命令不会初始化 GPU 时钟或加载底层推理模块；尚无模块时返回空 `modules` 数组。结果字段及释放方式参见 [C++ API文档.md](C++%20API文档.md) 和 [C API文档.md](C%20API文档.md)。
+`dlcv_infer_cpp_cli.exe list-sdk-models` 与 `dlcv_infer_c_demo.exe list-sdk-models` 返回已加载推理模块的模型快照。单独执行该命令不会初始化 GPU 时钟或加载底层推理模块；尚无模块时返回空 `modules` 数组。结果字段及释放方式参见 [C++ API文档.md](C++%20API文档.md) 和 [C API文档.md](C%20API文档.md)。
