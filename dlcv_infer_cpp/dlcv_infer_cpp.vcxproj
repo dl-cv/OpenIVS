@@ -216,12 +216,42 @@
   </ItemGroup>
 
   <Target Name="ValidatePortableDeps" BeforeTargets="ClCompile" Condition="'$(Platform)'=='x64'">
+    <ItemGroup>
+      <OpenCvDiagnosticEnvironment Include="OpenCV_DIR">
+        <Value>$([System.Environment]::GetEnvironmentVariable('OpenCV_DIR'))</Value>
+      </OpenCvDiagnosticEnvironment>
+      <OpenCvDiagnosticEnvironment Include="OpenCV_INCLUDE_DIR">
+        <Value>$([System.Environment]::GetEnvironmentVariable('OpenCV_INCLUDE_DIR'))</Value>
+      </OpenCvDiagnosticEnvironment>
+      <OpenCvDiagnosticEnvironment Include="OpenCV_LIB_DIR">
+        <Value>$([System.Environment]::GetEnvironmentVariable('OpenCV_LIB_DIR'))</Value>
+      </OpenCvDiagnosticEnvironment>
+      <OpenCvDiagnosticEnvironment Include="OpenCvIncludeDir">
+        <Value>$([System.Environment]::GetEnvironmentVariable('OpenCvIncludeDir'))</Value>
+      </OpenCvDiagnosticEnvironment>
+      <OpenCvDiagnosticEnvironment Include="OpenCvLibDir">
+        <Value>$([System.Environment]::GetEnvironmentVariable('OpenCvLibDir'))</Value>
+      </OpenCvDiagnosticEnvironment>
+      <OpenCvDiagnosticEnvironment>
+        <State>未设置</State>
+        <State Condition="'%(Value)'!=''">已设置</State>
+      </OpenCvDiagnosticEnvironment>
+      <OpenCvDiagnosticLibrary Include="$(OpenCvLibDir)\opencv_world*.lib" Condition="'$(OpenCvLibDir)'!=''" />
+      <OpenCvDiagnosticLibrary Include="$(OpenCV_DIR)\opencv_world*.lib;$(OpenCV_DIR)\lib\opencv_world*.lib;$(OpenCV_DIR)\x64\vc16\lib\opencv_world*.lib" Condition="'$(OpenCV_DIR)'!=''" />
+      <OpenCvDiagnosticLibrary Include="$(SolutionDir)third_party\opencv\build\x64\vc16\lib\opencv_world*.lib" Condition="'$(SolutionDir)'!=''" />
+      <OpenCvDiagnosticLibrary Include="$(ProjectDir)..\third_party\opencv\build\x64\vc16\lib\opencv_world*.lib;C:\OpenCV\build\x64\vc16\lib\opencv_world*.lib" />
+    </ItemGroup>
+    <PropertyGroup>
+      <OpenCvDiagnosticLibraries>@(OpenCvDiagnosticLibrary->'%(FullPath)'->Distinct(), '；')</OpenCvDiagnosticLibraries>
+      <OpenCvDiagnosticLibraries Condition="'$(OpenCvDiagnosticLibraries)'==''">未找到 opencv_world*.lib</OpenCvDiagnosticLibraries>
+      <OpenCvDiagnosticDetails>&#xA;进程环境变量：&#xA;@(OpenCvDiagnosticEnvironment->'%(Identity)：%(State)，当前值="%(Value)"', '&#xA;')&#xA;当前工程属性：OpenCV_DIR="$(OpenCV_DIR)"；OpenCV_INCLUDE_DIR="$(OpenCV_INCLUDE_DIR)"；OpenCV_LIB_DIR="$(OpenCV_LIB_DIR)"&#xA;最终头文件目录：OpenCvIncludeDir="$(OpenCvIncludeDir)"&#xA;最终库目录：OpenCvLibDir="$(OpenCvLibDir)"（目录为空表示未解析到路径）&#xA;找到的 OpenCV 库：$(OpenCvDiagnosticLibraries)&#xA;本工程固定使用 OpenCV 4.10.0：Debug 需要 opencv_world4100d.lib，Release 需要 opencv_world4100.lib。修改环境变量后请重新启动 Visual Studio。</OpenCvDiagnosticDetails>
+    </PropertyGroup>
     <Error Condition="!Exists('$(OpenCvIncludeDir)\opencv2\core.hpp')"
-           Text="未找到 OpenCV 头文件。请确保以下任一路径可用：1) 设置 OpenCV_DIR；2) 仓库 third_party\opencv\build；3) C:\OpenCV\build。" />
+           Text="未找到 OpenCV 头文件。检查路径：&quot;$(OpenCvIncludeDir)\opencv2\core.hpp&quot;。请设置 OpenCV_DIR 或 OpenCV_INCLUDE_DIR，或放入仓库 third_party\opencv\build、C:\OpenCV\build。$(OpenCvDiagnosticDetails)" />
     <Error Condition="!Exists('$(OpenCvLibDir)\opencv_world4100d.lib') and '$(Configuration)'=='Debug'"
-           Text="未找到 OpenCV Debug 库 opencv_world4100d.lib。请检查 OpenCV 库目录是否正确。" />
+           Text="未找到 OpenCV Debug 库 opencv_world4100d.lib。检查路径：&quot;$(OpenCvLibDir)\opencv_world4100d.lib&quot;。请检查 OpenCV_DIR 或 OpenCV_LIB_DIR。$(OpenCvDiagnosticDetails)" />
     <Error Condition="!Exists('$(OpenCvLibDir)\opencv_world4100.lib') and '$(Configuration)'!='Debug'"
-           Text="未找到 OpenCV Release 库 opencv_world4100.lib。请检查 OpenCV 库目录是否正确。" />
+           Text="未找到 OpenCV Release 库 opencv_world4100.lib。检查路径：&quot;$(OpenCvLibDir)\opencv_world4100.lib&quot;。请检查 OpenCV_DIR 或 OpenCV_LIB_DIR。$(OpenCvDiagnosticDetails)" />
   </Target>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
