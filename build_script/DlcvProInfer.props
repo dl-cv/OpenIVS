@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- 解析 dlcvpro_infer 头文件目录：DLCVPRO_INFER_INCLUDE 环境变量、仓库 third_party、
+       dlcvpro_infer Python 包的 include 目录。单独设置 DlcvProInferNoLocalSearch=true 可跳过本机安装。 -->
+  <PropertyGroup>
+    <DlcvProInferRepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..'))</DlcvProInferRepoRoot>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and '$(DLCVPRO_INFER_INCLUDE)'!='' and Exists('$(DLCVPRO_INFER_INCLUDE)\json\json.hpp')">$(DLCVPRO_INFER_INCLUDE)</DlcvProInferIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and '$(SolutionDir)'!='' and Exists('$(SolutionDir)third_party\dlcvpro_infer\include\json\json.hpp')">$(SolutionDir)third_party\dlcvpro_infer\include</DlcvProInferIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(ProjectDir)..\third_party\dlcvpro_infer\include\json\json.hpp')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\dlcvpro_infer\include'))</DlcvProInferIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(ProjectDir)..\..\third_party\dlcvpro_infer\include\json\json.hpp')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\..\third_party\dlcvpro_infer\include'))</DlcvProInferIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(DlcvProInferRepoRoot)\third_party\dlcvpro_infer\include\json\json.hpp')">$([System.IO.Path]::GetFullPath('$(DlcvProInferRepoRoot)\third_party\dlcvpro_infer\include'))</DlcvProInferIncludeDir>
+    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and '$(DlcvProInferNoLocalSearch)'!='true' and Exists('C:\dlcv\Lib\site-packages\dlcvpro_infer\include\json\json.hpp')">C:\dlcv\Lib\site-packages\dlcvpro_infer\include</DlcvProInferIncludeDir>
+  </PropertyGroup>
+
+  <Target Name="ValidateDlcvProInfer" BeforeTargets="ClCompile" Condition="'$(Platform)'=='x64'">
+    <Error Condition="!Exists('$(DlcvProInferIncludeDir)\json\json.hpp')"
+           Text="未找到 dlcvpro_infer 头文件。安装 dlcvpro_infer Python 包，或把 include 目录放到仓库 third_party\dlcvpro_infer\include，或设置环境变量 DLCVPRO_INFER_INCLUDE。" />
+  </Target>
+</Project>

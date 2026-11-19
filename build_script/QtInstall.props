@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- 解析 Qt6 安装目录：优先 QtInstallDir，其次 Qt6_DIR（支持 lib\cmake、lib、安装根三种形态）、
+       Qt6_ROOT/QT_ROOT，最后扫描常见安装位置。单独设置 QtNoLocalSearch=true 可跳过本机安装扫描。 -->
+  <PropertyGroup>
+    <QtInstallDir Condition="'$(QtInstallDir)'!='' and Exists('$(QtInstallDir)\bin\Qt6Core.dll')">$(QtInstallDir)</QtInstallDir>
+    <QtInstallDir Condition="'$(QtInstallDir)'=='' and '$(Qt6_DIR)'!='' and Exists('$(Qt6_DIR)\..\..\bin\Qt6Core.dll')">$([System.IO.Path]::GetFullPath('$(Qt6_DIR)\..\..'))</QtInstallDir>
+    <QtInstallDir Condition="'$(QtInstallDir)'=='' and '$(Qt6_DIR)'!='' and Exists('$(Qt6_DIR)\..\bin\Qt6Core.dll')">$([System.IO.Path]::GetFullPath('$(Qt6_DIR)\..'))</QtInstallDir>
+    <QtInstallDir Condition="'$(QtInstallDir)'=='' and '$(Qt6_DIR)'!='' and Exists('$(Qt6_DIR)\bin\Qt6Core.dll')">$(Qt6_DIR)</QtInstallDir>
+    <QtInstallDir Condition="'$(QtInstallDir)'=='' and '$(Qt6_ROOT)'!='' and Exists('$(Qt6_ROOT)\bin\Qt6Core.dll')">$(Qt6_ROOT)</QtInstallDir>
+    <QtInstallDir Condition="'$(QtInstallDir)'=='' and '$(QT_ROOT)'!='' and Exists('$(QT_ROOT)\bin\Qt6Core.dll')">$(QT_ROOT)</QtInstallDir>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(QtInstallDir)'=='' and '$(QtNoLocalSearch)'!='true'">
+    <_QtCandidate Include="C:\Qt\*\msvc2022_64" />
+    <_QtCandidate Include="C:\Qt\*\msvc2019_64" />
+    <_QtCandidate Include="C:\Qt\*\*\msvc2022_64" />
+    <_QtCandidate Include="D:\Qt\*\msvc2022_64" />
+    <_QtCandidate Include="D:\Qt\*\msvc2019_64" />
+    <_QtCandidate Include="D:\Qt\*\*\msvc2022_64" />
+  </ItemGroup>
+  <PropertyGroup>
+    <_QtCandidates>@(_QtCandidate)</_QtCandidates>
+    <QtInstallDir Condition="'$(QtInstallDir)'=='' and '$(_QtCandidates)'!=''">$(_QtCandidates)</QtInstallDir>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <QtBinDir Condition="'$(QtBinDir)'=='' and '$(QtInstallDir)'!=''">$(QtInstallDir)\bin</QtBinDir>
+    <QtIncludeDir Condition="'$(QtIncludeDir)'=='' and '$(QtInstallDir)'!=''">$(QtInstallDir)\include</QtIncludeDir>
+    <QtLibDir Condition="'$(QtLibDir)'=='' and '$(QtInstallDir)'!=''">$(QtInstallDir)\lib</QtLibDir>
+    <QtPluginsDir Condition="'$(QtPluginsDir)'=='' and '$(QtInstallDir)'!=''">$(QtInstallDir)\plugins</QtPluginsDir>
+    <QtDllSuffix Condition="'$(QtDllSuffix)'=='' and '$(Configuration)'=='Debug'">d</QtDllSuffix>
+    <QtDllSuffix Condition="'$(QtDllSuffix)'=='' and '$(Configuration)'!='Debug'"></QtDllSuffix>
+  </PropertyGroup>
+
+  <Target Name="ValidateQtInstall" BeforeTargets="ClCompile" Condition="'$(Platform)'=='x64'">
+    <Error Condition="'$(QtInstallDir)'==''"
+           Text="未找到 Qt6。设置环境变量 Qt6_DIR 指向 Qt 安装目录（例如 C:\Qt\6.10.2\msvc2022_64 或其 lib\cmake 目录），或设置 QtInstallDir。" />
+    <Error Condition="'$(QtInstallDir)'!='' and !Exists('$(QtInstallDir)\bin\Qt6Core.dll')"
+           Text="Qt 安装目录 &quot;$(QtInstallDir)&quot; 中缺少 bin\Qt6Core.dll。请使用 Qt6 的 MSVC 64 位版本；若检测到多个 Qt 目录，请用 Qt6_DIR 指定其中一个。" />
+  </Target>
+</Project>

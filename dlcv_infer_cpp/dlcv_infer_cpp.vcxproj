@@ -28,6 +28,8 @@
   </PropertyGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <Import Project="$(MSBuildThisFileDirectory)build\WindowsSdk.props" Condition="Exists('$(MSBuildThisFileDirectory)build\WindowsSdk.props')" />
+  <Import Project="$(MSBuildThisFileDirectory)..\build_script\WindowsSdk.props" Condition="!Exists('$(MSBuildThisFileDirectory)build\WindowsSdk.props')" />
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
@@ -57,6 +59,8 @@
   </PropertyGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="$(MSBuildThisFileDirectory)build\DlcvProInfer.props" Condition="Exists('$(MSBuildThisFileDirectory)build\DlcvProInfer.props')" />
+  <Import Project="$(MSBuildThisFileDirectory)\..\build_script\DlcvProInfer.props" Condition="!Exists('$(MSBuildThisFileDirectory)build\DlcvProInfer.props')" />
 
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
@@ -81,13 +85,10 @@
     <TargetName>dlcv_infer_cpp</TargetName>
   </PropertyGroup>
 
-  <Import Project="$(MSBuildThisFileDirectory)..\build_script\OpenCvVersion.props" />
+  <Import Project="$(MSBuildThisFileDirectory)build\OpenCvVersion.props" Condition="Exists('$(MSBuildThisFileDirectory)build\OpenCvVersion.props')" />
+  <Import Project="$(MSBuildThisFileDirectory)..\build_script\OpenCvVersion.props" Condition="!Exists('$(MSBuildThisFileDirectory)build\OpenCvVersion.props')" />
 
   <PropertyGroup>
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and '$(DLCVPRO_INFER_INCLUDE)'!=''">$(DLCVPRO_INFER_INCLUDE)</DlcvProInferIncludeDir>
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(SolutionDir)third_party\dlcvpro_infer\include')">$(SolutionDir)third_party\dlcvpro_infer\include</DlcvProInferIncludeDir>
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('$(ProjectDir)..\third_party\dlcvpro_infer\include')">$([System.IO.Path]::GetFullPath('$(ProjectDir)..\third_party\dlcvpro_infer\include'))</DlcvProInferIncludeDir>
-    <DlcvProInferIncludeDir Condition="'$(DlcvProInferIncludeDir)'=='' and Exists('C:\dlcv\Lib\site-packages\dlcvpro_infer\include')">C:\dlcv\Lib\site-packages\dlcvpro_infer\include</DlcvProInferIncludeDir>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -207,7 +208,8 @@
   <PropertyGroup>
     <OpenCvDiagnosticBinDir>$(OpenCvLibDir)\..\bin</OpenCvDiagnosticBinDir>
   </PropertyGroup>
-  <Import Project="$(MSBuildThisFileDirectory)..\build_script\OpenCvDiagnostics.targets" />
+  <Import Project="$(MSBuildThisFileDirectory)build\OpenCvDiagnostics.targets" Condition="Exists('$(MSBuildThisFileDirectory)build\OpenCvDiagnostics.targets')" />
+  <Import Project="$(MSBuildThisFileDirectory)..\build_script\OpenCvDiagnostics.targets" Condition="!Exists('$(MSBuildThisFileDirectory)build\OpenCvDiagnostics.targets')" />
   <Import Project="$(MSBuildThisFileDirectory)ZXingRuntime.targets" />
   <Target Name="GetFlowRuntimeFiles" DependsOnTargets="ValidateOpenCvRuntime" Returns="@(_FlowRuntimeFiles)">
     <ItemGroup>
