@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
-    <ZXingRuntimeFile>$(MSBuildThisFileDirectory)..\packages\ZXingCpp.0.5.3\runtimes\win-x64\native\ZXing.dll</ZXingRuntimeFile>
+    <!-- 优先使用 NuGet 还原的 ZXingCpp 包；没有还原时使用 DLCV 环境的共享 ZXing.dll。 -->
+    <ZXingRuntimeFile Condition="'$(ZXingRuntimeFile)'=='' and Exists('$(MSBuildThisFileDirectory)..\packages\ZXingCpp.0.5.3\runtimes\win-x64\native\ZXing.dll')">$(MSBuildThisFileDirectory)..\packages\ZXingCpp.0.5.3\runtimes\win-x64\native\ZXing.dll</ZXingRuntimeFile>
+    <ZXingRuntimeFile Condition="'$(ZXingRuntimeFile)'=='' and Exists('C:\dlcv\bin\ZXing.dll')">C:\dlcv\bin\ZXing.dll</ZXingRuntimeFile>
   </PropertyGroup>
   <Target Name="CopyZXingRuntime" AfterTargets="Build" Condition="'$(Platform)'=='x64'">
-    <Error Condition="!Exists('$(ZXingRuntimeFile)')" Text="Missing ZXingCpp 0.5.3: restore DlcvCsharpApi/packages.config into the solution packages directory before building." />
+    <Error Condition="'$(ZXingRuntimeFile)'==''" Text="缺少 ZXing.dll：还原 NuGet 包 ZXingCpp 0.5.3 到仓库 packages 目录，或把 ZXing.dll 放到 C:\dlcv\bin。" />
     <Copy SourceFiles="$(ZXingRuntimeFile)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
   </Target>
 </Project>
