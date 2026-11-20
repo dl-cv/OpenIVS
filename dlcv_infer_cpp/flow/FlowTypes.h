@@ -1,6 +1,7 @@
-﻿#pragma once
+#pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <string>
@@ -181,11 +182,20 @@ struct ModuleImage final {
     /// 滑窗切片元数据（强类型，按需序列化为 JSON）
     SlidingMetaInfo SlidingMeta;
 
-    ModuleImage() = default;
+    /// 包装器实例编号：新建包装器时分配，复制时保持不变。
+    /// 用于合并结果时按“同一包装器”去重，与 C# 侧 ModuleImage 引用相等的语义一致。
+    std::uint64_t InstanceId = 0;
+
+    static std::uint64_t NextInstanceId() {
+        static std::atomic<std::uint64_t> counter{1};
+        return counter.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    ModuleImage() : InstanceId(NextInstanceId()) {}
     ModuleImage(const cv::Mat& imageObject, const cv::Mat& originalImage, const TransformationState& ts, int originalIndex = 0)
-        : ImageObject(imageObject), OriginalImage(originalImage.empty() ? imageObject : originalImage), TransformState(ts), OriginalIndex(originalIndex) {}
+        : ImageObject(imageObject), OriginalImage(originalImage.empty() ? imageObject : originalImage), TransformState(ts), OriginalIndex(originalIndex), InstanceId(NextInstanceId()) {}
     ModuleImage(const cv::Mat& imageObject, const cv::Mat& originalImage, const TransformationState& ts, int originalIndex, const std::string& uniqueId)
-        : ImageObject(imageObject), OriginalImage(originalImage.empty() ? imageObject : originalImage), TransformState(ts), OriginalIndex(originalIndex), UniqueId(uniqueId) {}
+        : ImageObject(imageObject), OriginalImage(originalImage.empty() ? imageObject : originalImage), TransformState(ts), OriginalIndex(originalIndex), UniqueId(uniqueId), InstanceId(NextInstanceId()) {}
 
     const cv::Mat& GetImage() const { return ImageObject; }
 
