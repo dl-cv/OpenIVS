@@ -1425,12 +1425,8 @@ void MainWindow::onInfer() {
                 text += QString("元件提取模型: %1\n").arg(extractPath);
                 text += QString("元件检测模型: %1\n").arg(componentPath);
                 text += QString("IC检测模型: %1\n").arg(icPath);
-                if (noCadModel_) {
-                    text += QString("无CAD检测模型: %1（仅加载，不参与本次推理）\n")
-                                .arg(editNoCadModelPath_->text().trimmed());
-                } else {
-                    text += "无CAD检测模型: 未加载\n";
-                }
+                text += QString("无CAD检测模型: %1\n")
+                            .arg(noCadModel_ ? editNoCadModelPath_->text().trimmed() : QStringLiteral("未加载"));
                 text += QString("滑窗参数: %1 x %2, overlap=(%3, %4)\n")
                             .arg(config.windowWidth)
                             .arg(config.windowHeight)

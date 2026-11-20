@@ -797,9 +797,7 @@ namespace DlcvDemo2
             sb.AppendLine($"元件提取模型: {txtExtractModelPath.Text.Trim()}");
             sb.AppendLine($"元件检测模型: {txtComponentModelPath.Text.Trim()}");
             sb.AppendLine($"IC检测模型: {txtIcModelPath.Text.Trim()}");
-            sb.AppendLine(noCadDetectModel == null
-                ? "无CAD检测模型: 未加载"
-                : $"无CAD检测模型: {txtNoCadModelPath.Text.Trim()}（仅加载，不参与本次推理）");
+            sb.AppendLine($"无CAD检测模型: {(noCadDetectModel != null ? txtNoCadModelPath.Text.Trim() : "未加载")}");
             sb.AppendLine($"滑窗参数: {(int)numWindowWidth.Value} x {(int)numWindowHeight.Value}, overlap=({(int)numOverlapX.Value}, {(int)numOverlapY.Value})");
             sb.AppendLine($"滑窗数量: {runResult.SlidingWindowCount}");
             sb.AppendLine($"元件提取模型合并后目标数: {runResult.MergedExtractCount}");
