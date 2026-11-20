@@ -178,11 +178,13 @@
   </ItemDefinitionGroup>
 
   <ItemGroup>
+    <ClInclude Include="CudaMemoryInfo.h" />
     <ClInclude Include="MainWindow.h" />
     <ClInclude Include="..\dlcv_infer_cpp_qt_demo\ImageViewerWidget.h" />
   </ItemGroup>
 
   <ItemGroup>
+    <ClCompile Include="CudaMemoryInfo.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="MainWindow.cpp" />
     <ClCompile Include="..\dlcv_infer_cpp_qt_demo\ImageViewerWidget.cpp" />

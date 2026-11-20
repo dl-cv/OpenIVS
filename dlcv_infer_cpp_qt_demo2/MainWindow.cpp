@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 
+#include "CudaMemoryInfo.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -1031,7 +1033,8 @@ void MainWindow::onLoadExtractModel() {
     saveUiSettings();
     try {
         if (loadExtractModel()) {
-            outputText_->setPlainText("元件提取模型加载成功:\n" + editExtractModelPath_->text().trimmed());
+            outputText_->setPlainText(cuda_memory::describe(kFixedDeviceId) + "\n元件提取模型加载成功:\n"
+                + editExtractModelPath_->text().trimmed());
         }
     } catch (const std::exception& ex) {
         outputText_->setPlainText(QString("元件提取模型加载失败:\n%1").arg(QString::fromLocal8Bit(ex.what())));
@@ -1045,7 +1048,8 @@ void MainWindow::onLoadComponentModel() {
     saveUiSettings();
     try {
         if (loadComponentModel()) {
-            outputText_->setPlainText("元件检测模型加载成功:\n" + editComponentModelPath_->text().trimmed());
+            outputText_->setPlainText(cuda_memory::describe(kFixedDeviceId) + "\n元件检测模型加载成功:\n"
+                + editComponentModelPath_->text().trimmed());
         }
     } catch (const std::exception& ex) {
         outputText_->setPlainText(QString("元件检测模型加载失败:\n%1").arg(QString::fromLocal8Bit(ex.what())));
@@ -1059,7 +1063,8 @@ void MainWindow::onLoadIcModel() {
     saveUiSettings();
     try {
         if (loadIcModel()) {
-            outputText_->setPlainText("IC检测模型加载成功:\n" + editIcModelPath_->text().trimmed());
+            outputText_->setPlainText(cuda_memory::describe(kFixedDeviceId) + "\nIC检测模型加载成功:\n"
+                + editIcModelPath_->text().trimmed());
         }
     } catch (const std::exception& ex) {
         outputText_->setPlainText(QString("IC检测模型加载失败:\n%1").arg(QString::fromLocal8Bit(ex.what())));
@@ -1134,6 +1139,7 @@ void MainWindow::loadAllModelsSequentially(
     const double componentSeconds = loadOne("元件检测模型", componentPath, componentModel_);
     const double icSeconds = loadOne("IC检测模型", icPath, icModel_);
     report(QString("三个模型加载完成，总耗时 %1 秒").arg(extractSeconds + componentSeconds + icSeconds, 0, 'f', 2));
+    report(cuda_memory::describe(kFixedDeviceId));
 }
 
 void MainWindow::onLoadAllModels() {
@@ -1303,6 +1309,7 @@ void MainWindow::onInfer() {
                 imageViewer_->setImageAndResults(currentBgrImage_, runResult.finalObjects);
 
                 QString text;
+                text += cuda_memory::describe(kFixedDeviceId) + "\n";
                 text += QString("图片: %1\n").arg(imagePath);
                 text += QString("元件提取模型: %1\n").arg(extractPath);
                 text += QString("元件检测模型: %1\n").arg(componentPath);

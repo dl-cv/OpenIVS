@@ -278,6 +278,7 @@ namespace DlcvDemo2
 
             TimeSpan totalElapsed = extractElapsed + componentElapsed + icElapsed;
             progress.Report($"三个模型加载完成，总耗时 {totalElapsed.TotalSeconds:F2} 秒");
+            progress.Report(CudaMemoryInfo.Describe(0));
         }
 
         private static bool TryValidateModelPath(string modelPath, string modelDisplayName)
@@ -708,6 +709,7 @@ namespace DlcvDemo2
         private string BuildInferenceText(PipelineRunResult runResult, double elapsedMs)
         {
             var sb = new StringBuilder();
+            sb.AppendLine(CudaMemoryInfo.Describe(0));
             sb.AppendLine($"图片: {imagePath}");
             sb.AppendLine($"元件提取模型: {txtExtractModelPath.Text.Trim()}");
             sb.AppendLine($"元件检测模型: {txtComponentModelPath.Text.Trim()}");
@@ -792,7 +794,8 @@ namespace DlcvDemo2
             {
                 if (loadAction())
                 {
-                    richTextBox1.Text = string.Format("{0}加载成功:\n{1}", modelDisplayName, targetTextBox.Text.Trim());
+                    richTextBox1.Text = CudaMemoryInfo.Describe(0) + Environment.NewLine
+                        + string.Format("{0}加载成功:\n{1}", modelDisplayName, targetTextBox.Text.Trim());
                 }
             }
             catch (Exception ex)

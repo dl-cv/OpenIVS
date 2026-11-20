@@ -135,6 +135,7 @@
     <Compile Include="Form1.Designer.cs">
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
+    <Compile Include="CudaMemoryInfo.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="ThreeModelLoadTimer.cs" />
     <Compile Include="Utils\DetectionGeometryUtils.cs" />
