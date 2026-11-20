@@ -68,6 +68,21 @@ namespace DlcvDemo2.Properties
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string LastNoCadModelPath
+        {
+            get
+            {
+                return ((string)(this["LastNoCadModelPath"]));
+            }
+            set
+            {
+                this["LastNoCadModelPath"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
         public string LastImagePath
         {
             get

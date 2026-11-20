@@ -14,6 +14,7 @@
 #include <windows.h>
 #endif
 
+#include "CudaMemoryInfo.h"
 #include "MainWindow.h"
 #include "dlcv_infer.h"
 #include "../Test/qt_demo/ModelDialogTest.h"
@@ -97,6 +98,7 @@ int runCommandLine(int argc, char* argv[]) {
         const double totalSeconds = extractSeconds + componentSeconds + icSeconds;
         std::cout << "三个模型加载完成，总耗时 " << std::fixed << std::setprecision(2) << totalSeconds << " 秒"
                   << std::endl;
+        std::cout << cuda_memory::describe(0).toStdString() << std::endl;
         (void)extractModel;
         (void)componentModel;
         (void)icModel;

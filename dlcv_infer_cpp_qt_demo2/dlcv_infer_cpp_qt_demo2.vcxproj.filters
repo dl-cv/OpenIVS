@@ -15,6 +15,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="CudaMemoryInfo.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
     <ClCompile Include="main.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
@@ -26,6 +29,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="CudaMemoryInfo.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
     <ClInclude Include="MainWindow.h">
       <Filter>头文件</Filter>
     </ClInclude>

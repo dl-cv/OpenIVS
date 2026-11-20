@@ -29,6 +29,10 @@
             this.txtIcModelPath = new System.Windows.Forms.TextBox();
             this.btnBrowseIcModel = new System.Windows.Forms.Button();
             this.btnLoadIcModel = new System.Windows.Forms.Button();
+            this.labelNoCadModel = new System.Windows.Forms.Label();
+            this.txtNoCadModelPath = new System.Windows.Forms.TextBox();
+            this.btnBrowseNoCadModel = new System.Windows.Forms.Button();
+            this.btnLoadNoCadModel = new System.Windows.Forms.Button();
             this.labelImage = new System.Windows.Forms.Label();
             this.txtImagePath = new System.Windows.Forms.TextBox();
             this.btnBrowseImage = new System.Windows.Forms.Button();
@@ -43,6 +47,7 @@
             this.numOverlapY = new System.Windows.Forms.NumericUpDown();
             this.btnReleaseModels = new System.Windows.Forms.Button();
             this.btnLoadAllModels = new System.Windows.Forms.Button();
+            this.btnGetModelInfo = new System.Windows.Forms.Button();
             this.progressBarInference = new System.Windows.Forms.ProgressBar();
             this.lblInferenceProgress = new System.Windows.Forms.Label();
             this.richTextBox1 = new System.Windows.Forms.RichTextBox();
@@ -173,31 +178,71 @@
             this.btnLoadIcModel.UseVisualStyleBackColor = true;
             this.btnLoadIcModel.Click += new System.EventHandler(this.btnLoadIcModel_Click);
             // 
+            // labelNoCadModel
+            // 
+            this.labelNoCadModel.AutoSize = true;
+            this.labelNoCadModel.Location = new System.Drawing.Point(12, 131);
+            this.labelNoCadModel.Name = "labelNoCadModel";
+            this.labelNoCadModel.Size = new System.Drawing.Size(118, 24);
+            this.labelNoCadModel.TabIndex = 10;
+            this.labelNoCadModel.Text = "无CAD检测模型";
+            // 
+            // txtNoCadModelPath
+            // 
+            this.txtNoCadModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.txtNoCadModelPath.Location = new System.Drawing.Point(136, 127);
+            this.txtNoCadModelPath.Name = "txtNoCadModelPath";
+            this.txtNoCadModelPath.Size = new System.Drawing.Size(862, 31);
+            this.txtNoCadModelPath.TabIndex = 11;
+            // 
+            // btnBrowseNoCadModel
+            // 
+            this.btnBrowseNoCadModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnBrowseNoCadModel.Location = new System.Drawing.Point(1004, 124);
+            this.btnBrowseNoCadModel.Name = "btnBrowseNoCadModel";
+            this.btnBrowseNoCadModel.Size = new System.Drawing.Size(120, 34);
+            this.btnBrowseNoCadModel.TabIndex = 12;
+            this.btnBrowseNoCadModel.Text = "浏览...";
+            this.btnBrowseNoCadModel.UseVisualStyleBackColor = true;
+            this.btnBrowseNoCadModel.Click += new System.EventHandler(this.btnBrowseNoCadModel_Click);
+            // 
+            // btnLoadNoCadModel
+            // 
+            this.btnLoadNoCadModel.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnLoadNoCadModel.Location = new System.Drawing.Point(1130, 124);
+            this.btnLoadNoCadModel.Name = "btnLoadNoCadModel";
+            this.btnLoadNoCadModel.Size = new System.Drawing.Size(120, 34);
+            this.btnLoadNoCadModel.TabIndex = 13;
+            this.btnLoadNoCadModel.Text = "加载模型";
+            this.btnLoadNoCadModel.UseVisualStyleBackColor = true;
+            this.btnLoadNoCadModel.Click += new System.EventHandler(this.btnLoadNoCadModel_Click);
+            // 
             // labelImage
             // 
             this.labelImage.AutoSize = true;
-            this.labelImage.Location = new System.Drawing.Point(12, 131);
+            this.labelImage.Location = new System.Drawing.Point(12, 169);
             this.labelImage.Name = "labelImage";
             this.labelImage.Size = new System.Drawing.Size(82, 24);
-            this.labelImage.TabIndex = 9;
+            this.labelImage.TabIndex = 14;
             this.labelImage.Text = "图片路径";
             // 
             // txtImagePath
             // 
             this.txtImagePath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.txtImagePath.Location = new System.Drawing.Point(136, 127);
+            this.txtImagePath.Location = new System.Drawing.Point(136, 165);
             this.txtImagePath.Name = "txtImagePath";
             this.txtImagePath.Size = new System.Drawing.Size(862, 31);
-            this.txtImagePath.TabIndex = 10;
+            this.txtImagePath.TabIndex = 15;
             // 
             // btnBrowseImage
             // 
             this.btnBrowseImage.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnBrowseImage.Location = new System.Drawing.Point(1004, 124);
+            this.btnBrowseImage.Location = new System.Drawing.Point(1004, 162);
             this.btnBrowseImage.Name = "btnBrowseImage";
             this.btnBrowseImage.Size = new System.Drawing.Size(120, 34);
-            this.btnBrowseImage.TabIndex = 11;
+            this.btnBrowseImage.TabIndex = 16;
             this.btnBrowseImage.Text = "浏览...";
             this.btnBrowseImage.UseVisualStyleBackColor = true;
             this.btnBrowseImage.Click += new System.EventHandler(this.btnBrowseImage_Click);
@@ -205,10 +250,10 @@
             // btnInfer
             // 
             this.btnInfer.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnInfer.Location = new System.Drawing.Point(1130, 126);
+            this.btnInfer.Location = new System.Drawing.Point(1130, 164);
             this.btnInfer.Name = "btnInfer";
             this.btnInfer.Size = new System.Drawing.Size(120, 34);
-            this.btnInfer.TabIndex = 12;
+            this.btnInfer.TabIndex = 17;
             this.btnInfer.Text = "执行推理";
             this.btnInfer.UseVisualStyleBackColor = true;
             this.btnInfer.Click += new System.EventHandler(this.btnInfer_Click);
@@ -216,7 +261,7 @@
             // labelWindowWidth
             // 
             this.labelWindowWidth.AutoSize = true;
-            this.labelWindowWidth.Location = new System.Drawing.Point(12, 171);
+            this.labelWindowWidth.Location = new System.Drawing.Point(12, 209);
             this.labelWindowWidth.Name = "labelWindowWidth";
             this.labelWindowWidth.Size = new System.Drawing.Size(64, 24);
             this.labelWindowWidth.TabIndex = 13;
@@ -224,7 +269,7 @@
             // 
             // numWindowWidth
             // 
-            this.numWindowWidth.Location = new System.Drawing.Point(82, 167);
+            this.numWindowWidth.Location = new System.Drawing.Point(82, 205);
             this.numWindowWidth.Maximum = new decimal(new int[] {
             30000,
             0,
@@ -247,7 +292,7 @@
             // labelWindowHeight
             // 
             this.labelWindowHeight.AutoSize = true;
-            this.labelWindowHeight.Location = new System.Drawing.Point(183, 171);
+            this.labelWindowHeight.Location = new System.Drawing.Point(183, 209);
             this.labelWindowHeight.Name = "labelWindowHeight";
             this.labelWindowHeight.Size = new System.Drawing.Size(64, 24);
             this.labelWindowHeight.TabIndex = 15;
@@ -255,7 +300,7 @@
             // 
             // numWindowHeight
             // 
-            this.numWindowHeight.Location = new System.Drawing.Point(253, 167);
+            this.numWindowHeight.Location = new System.Drawing.Point(253, 205);
             this.numWindowHeight.Maximum = new decimal(new int[] {
             30000,
             0,
@@ -278,7 +323,7 @@
             // labelOverlapX
             // 
             this.labelOverlapX.AutoSize = true;
-            this.labelOverlapX.Location = new System.Drawing.Point(354, 171);
+            this.labelOverlapX.Location = new System.Drawing.Point(354, 209);
             this.labelOverlapX.Name = "labelOverlapX";
             this.labelOverlapX.Size = new System.Drawing.Size(82, 24);
             this.labelOverlapX.TabIndex = 17;
@@ -286,7 +331,7 @@
             // 
             // numOverlapX
             // 
-            this.numOverlapX.Location = new System.Drawing.Point(442, 167);
+            this.numOverlapX.Location = new System.Drawing.Point(442, 205);
             this.numOverlapX.Maximum = new decimal(new int[] {
             30000,
             0,
@@ -304,7 +349,7 @@
             // labelOverlapY
             // 
             this.labelOverlapY.AutoSize = true;
-            this.labelOverlapY.Location = new System.Drawing.Point(543, 171);
+            this.labelOverlapY.Location = new System.Drawing.Point(543, 209);
             this.labelOverlapY.Name = "labelOverlapY";
             this.labelOverlapY.Size = new System.Drawing.Size(82, 24);
             this.labelOverlapY.TabIndex = 19;
@@ -312,7 +357,7 @@
             // 
             // numOverlapY
             // 
-            this.numOverlapY.Location = new System.Drawing.Point(631, 167);
+            this.numOverlapY.Location = new System.Drawing.Point(631, 205);
             this.numOverlapY.Maximum = new decimal(new int[] {
             30000,
             0,
@@ -329,7 +374,7 @@
             // 
             // btnReleaseModels
             // 
-            this.btnReleaseModels.Location = new System.Drawing.Point(732, 164);
+            this.btnReleaseModels.Location = new System.Drawing.Point(732, 202);
             this.btnReleaseModels.Name = "btnReleaseModels";
             this.btnReleaseModels.Size = new System.Drawing.Size(120, 34);
             this.btnReleaseModels.TabIndex = 23;
@@ -339,19 +384,29 @@
             //
             // btnLoadAllModels
             //
-            this.btnLoadAllModels.Location = new System.Drawing.Point(858, 164);
+            this.btnLoadAllModels.Location = new System.Drawing.Point(858, 202);
             this.btnLoadAllModels.Name = "btnLoadAllModels";
             this.btnLoadAllModels.Size = new System.Drawing.Size(180, 34);
             this.btnLoadAllModels.TabIndex = 24;
-            this.btnLoadAllModels.Text = "一键加载三个模型";
+            this.btnLoadAllModels.Text = "一键加载四个模型";
             this.btnLoadAllModels.UseVisualStyleBackColor = true;
             this.btnLoadAllModels.Click += new System.EventHandler(this.btnLoadAllModels_Click);
+            // 
+            // btnGetModelInfo
+            // 
+            this.btnGetModelInfo.Location = new System.Drawing.Point(1046, 202);
+            this.btnGetModelInfo.Name = "btnGetModelInfo";
+            this.btnGetModelInfo.Size = new System.Drawing.Size(140, 34);
+            this.btnGetModelInfo.TabIndex = 25;
+            this.btnGetModelInfo.Text = "获取模型信息";
+            this.btnGetModelInfo.UseVisualStyleBackColor = true;
+            this.btnGetModelInfo.Click += new System.EventHandler(this.btnGetModelInfo_Click);
             // 
             // progressBarInference
             // 
             this.progressBarInference.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.progressBarInference.Location = new System.Drawing.Point(136, 206);
+            this.progressBarInference.Location = new System.Drawing.Point(136, 244);
             this.progressBarInference.Name = "progressBarInference";
             this.progressBarInference.Size = new System.Drawing.Size(770, 24);
             this.progressBarInference.TabIndex = 24;
@@ -360,7 +415,7 @@
             // 
             this.lblInferenceProgress.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
             this.lblInferenceProgress.AutoSize = true;
-            this.lblInferenceProgress.Location = new System.Drawing.Point(912, 207);
+            this.lblInferenceProgress.Location = new System.Drawing.Point(912, 245);
             this.lblInferenceProgress.Name = "lblInferenceProgress";
             this.lblInferenceProgress.Size = new System.Drawing.Size(78, 24);
             this.lblInferenceProgress.TabIndex = 25;
@@ -370,7 +425,7 @@
             // 
             this.richTextBox1.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left)));
-            this.richTextBox1.Location = new System.Drawing.Point(12, 236);
+            this.richTextBox1.Location = new System.Drawing.Point(12, 274);
             this.richTextBox1.Name = "richTextBox1";
             this.richTextBox1.ReadOnly = true;
             this.richTextBox1.Size = new System.Drawing.Size(432, 674);
@@ -387,7 +442,7 @@
             this.imagePanel1.LabelDisplayMode = DLCV.ImageViewer.LabelTextMode.CategoryAndScore;
             this.imagePanel1.LabelFontScale = 1F;
             this.imagePanel1.LabelFontScaleStep = 1.1F;
-            this.imagePanel1.Location = new System.Drawing.Point(450, 236);
+            this.imagePanel1.Location = new System.Drawing.Point(450, 274);
             this.imagePanel1.MaxLabelFontScale = 5F;
             this.imagePanel1.MaxScale = 100F;
             this.imagePanel1.MinLabelFontScale = 0.3F;
@@ -404,11 +459,12 @@
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(11F, 24F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1396, 922);
+            this.ClientSize = new System.Drawing.Size(1396, 960);
             this.Controls.Add(this.imagePanel1);
             this.Controls.Add(this.richTextBox1);
             this.Controls.Add(this.lblInferenceProgress);
             this.Controls.Add(this.progressBarInference);
+            this.Controls.Add(this.btnGetModelInfo);
             this.Controls.Add(this.btnLoadAllModels);
             this.Controls.Add(this.btnReleaseModels);
             this.Controls.Add(this.numOverlapY);
@@ -423,6 +479,10 @@
             this.Controls.Add(this.btnBrowseImage);
             this.Controls.Add(this.txtImagePath);
             this.Controls.Add(this.labelImage);
+            this.Controls.Add(this.btnLoadNoCadModel);
+            this.Controls.Add(this.btnBrowseNoCadModel);
+            this.Controls.Add(this.txtNoCadModelPath);
+            this.Controls.Add(this.labelNoCadModel);
             this.Controls.Add(this.btnLoadIcModel);
             this.Controls.Add(this.btnBrowseIcModel);
             this.Controls.Add(this.txtIcModelPath);
@@ -436,7 +496,7 @@
             this.Controls.Add(this.txtExtractModelPath);
             this.Controls.Add(this.labelExtractModel);
             this.Font = new System.Drawing.Font("微软雅黑", 9F);
-            this.MinimumSize = new System.Drawing.Size(1200, 900);
+            this.MinimumSize = new System.Drawing.Size(1200, 938);
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "C# 测试程序2";
@@ -465,6 +525,10 @@
         private System.Windows.Forms.TextBox txtIcModelPath;
         private System.Windows.Forms.Button btnBrowseIcModel;
         private System.Windows.Forms.Button btnLoadIcModel;
+        private System.Windows.Forms.Label labelNoCadModel;
+        private System.Windows.Forms.TextBox txtNoCadModelPath;
+        private System.Windows.Forms.Button btnBrowseNoCadModel;
+        private System.Windows.Forms.Button btnLoadNoCadModel;
         private System.Windows.Forms.Label labelImage;
         private System.Windows.Forms.TextBox txtImagePath;
         private System.Windows.Forms.Button btnBrowseImage;
@@ -479,6 +543,7 @@
         private System.Windows.Forms.NumericUpDown numOverlapY;
         private System.Windows.Forms.Button btnReleaseModels;
         private System.Windows.Forms.Button btnLoadAllModels;
+        private System.Windows.Forms.Button btnGetModelInfo;
         private System.Windows.Forms.ProgressBar progressBarInference;
         private System.Windows.Forms.Label lblInferenceProgress;
         private System.Windows.Forms.RichTextBox richTextBox1;

@@ -20,6 +20,7 @@ namespace DlcvDemo2
         private Model extractModel;
         private Model componentDetectModel;
         private Model icDetectModel;
+        private Model noCadDetectModel;
         private string imagePath;
         private bool isInferenceRunning;
         private bool isModelLoading;
@@ -187,6 +188,32 @@ namespace DlcvDemo2
                 LoadIcDetectModel);
         }
 
+        private void btnBrowseNoCadModel_Click(object sender, EventArgs e)
+        {
+            if (!TryEnsureIdle("当前正在执行推理，暂不能切换无CAD检测模型。"))
+            {
+                return;
+            }
+
+            if (BrowseModelPath(txtNoCadModelPath, "选择无CAD检测模型"))
+            {
+                LoadModelWithStatus(
+                    "当前正在执行推理，暂不能加载无CAD检测模型。",
+                    txtNoCadModelPath,
+                    "无CAD检测模型",
+                    LoadNoCadDetectModel);
+            }
+        }
+
+        private void btnLoadNoCadModel_Click(object sender, EventArgs e)
+        {
+            LoadModelWithStatus(
+                "当前正在执行推理，暂不能加载无CAD检测模型。",
+                txtNoCadModelPath,
+                "无CAD检测模型",
+                LoadNoCadDetectModel);
+        }
+
         private async void btnBrowseImage_Click(object sender, EventArgs e)
         {
             var selected = BrowseFile(
@@ -228,10 +255,12 @@ namespace DlcvDemo2
             string extractModelPath = (txtExtractModelPath.Text ?? string.Empty).Trim();
             string componentModelPath = (txtComponentModelPath.Text ?? string.Empty).Trim();
             string icModelPath = (txtIcModelPath.Text ?? string.Empty).Trim();
+            string noCadModelPath = (txtNoCadModelPath.Text ?? string.Empty).Trim();
 
             if (!TryValidateModelPath(extractModelPath, "元件提取模型")
                 || !TryValidateModelPath(componentModelPath, "元件检测模型")
-                || !TryValidateModelPath(icModelPath, "IC检测模型"))
+                || !TryValidateModelPath(icModelPath, "IC检测模型")
+                || !TryValidateModelPath(noCadModelPath, "无CAD检测模型"))
             {
                 return;
             }
@@ -248,11 +277,12 @@ namespace DlcvDemo2
                     extractModelPath,
                     componentModelPath,
                     icModelPath,
+                    noCadModelPath,
                     progress));
             }
             catch (Exception ex)
             {
-                AppendModelLoadLog($"加载失败: {ex.Message}");
+                AppendModelLoadLog($"加载中断: {ex.Message}");
             }
             finally
             {
@@ -261,10 +291,48 @@ namespace DlcvDemo2
             }
         }
 
+        private void btnGetModelInfo_Click(object sender, EventArgs e)
+        {
+            if (!TryEnsureIdle("当前正在执行推理，暂不能获取模型信息。"))
+            {
+                return;
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine(CudaMemoryInfo.Describe(0));
+            AppendModelInfo(sb, "元件提取模型", extractModel);
+            AppendModelInfo(sb, "元件检测模型", componentDetectModel);
+            AppendModelInfo(sb, "IC检测模型", icDetectModel);
+            AppendModelInfo(sb, "无CAD检测模型", noCadDetectModel);
+            richTextBox1.Text = sb.ToString();
+        }
+
+        private static void AppendModelInfo(StringBuilder sb, string modelDisplayName, Model model)
+        {
+            if (model == null)
+            {
+                sb.AppendLine($"{modelDisplayName}: 未加载");
+                return;
+            }
+
+            sb.AppendLine($"{modelDisplayName}信息:");
+            try
+            {
+                JObject info = model.GetModelInfo();
+                sb.AppendLine(info != null ? info.ToString() : "无模型信息");
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"读取模型信息失败: {ex.Message}");
+            }
+            sb.AppendLine();
+        }
+
         private void LoadAllModelsSequentially(
             string extractModelPath,
             string componentModelPath,
             string icModelPath,
+            string noCadModelPath,
             IProgress<string> progress)
         {
             ReleaseModels();
@@ -272,12 +340,28 @@ namespace DlcvDemo2
             TimeSpan extractElapsed;
             TimeSpan componentElapsed;
             TimeSpan icElapsed;
-            extractModel = ThreeModelLoadTimer.Load("元件提取模型", extractModelPath, progress.Report, out extractElapsed);
-            componentDetectModel = ThreeModelLoadTimer.Load("元件检测模型", componentModelPath, progress.Report, out componentElapsed);
-            icDetectModel = ThreeModelLoadTimer.Load("IC检测模型", icModelPath, progress.Report, out icElapsed);
+            TimeSpan noCadElapsed;
+            extractModel = LoadOneTimed("元件提取模型", extractModelPath, progress, out extractElapsed);
+            componentDetectModel = LoadOneTimed("元件检测模型", componentModelPath, progress, out componentElapsed);
+            icDetectModel = LoadOneTimed("IC检测模型", icModelPath, progress, out icElapsed);
+            noCadDetectModel = LoadOneTimed("无CAD检测模型", noCadModelPath, progress, out noCadElapsed);
 
-            TimeSpan totalElapsed = extractElapsed + componentElapsed + icElapsed;
-            progress.Report($"三个模型加载完成，总耗时 {totalElapsed.TotalSeconds:F2} 秒");
+            TimeSpan totalElapsed = extractElapsed + componentElapsed + icElapsed + noCadElapsed;
+            progress.Report($"四个模型加载完成，总耗时 {totalElapsed.TotalSeconds:F2} 秒");
+            progress.Report(CudaMemoryInfo.Describe(0));
+        }
+
+        private static Model LoadOneTimed(string modelDisplayName, string modelPath, IProgress<string> progress, out TimeSpan elapsed)
+        {
+            try
+            {
+                return ThreeModelLoadTimer.Load(modelDisplayName, modelPath, progress.Report, out elapsed);
+            }
+            catch (Exception ex)
+            {
+                progress.Report($"{modelDisplayName}加载失败: {modelPath}{Environment.NewLine}{ex.Message}");
+                throw;
+            }
         }
 
         private static bool TryValidateModelPath(string modelPath, string modelDisplayName)
@@ -708,10 +792,12 @@ namespace DlcvDemo2
         private string BuildInferenceText(PipelineRunResult runResult, double elapsedMs)
         {
             var sb = new StringBuilder();
+            sb.AppendLine(CudaMemoryInfo.Describe(0));
             sb.AppendLine($"图片: {imagePath}");
             sb.AppendLine($"元件提取模型: {txtExtractModelPath.Text.Trim()}");
             sb.AppendLine($"元件检测模型: {txtComponentModelPath.Text.Trim()}");
             sb.AppendLine($"IC检测模型: {txtIcModelPath.Text.Trim()}");
+            sb.AppendLine($"无CAD检测模型: {(noCadDetectModel != null ? txtNoCadModelPath.Text.Trim() : "未加载")}");
             sb.AppendLine($"滑窗参数: {(int)numWindowWidth.Value} x {(int)numWindowHeight.Value}, overlap=({(int)numOverlapX.Value}, {(int)numOverlapY.Value})");
             sb.AppendLine($"滑窗数量: {runResult.SlidingWindowCount}");
             sb.AppendLine($"元件提取模型合并后目标数: {runResult.MergedExtractCount}");
@@ -792,12 +878,13 @@ namespace DlcvDemo2
             {
                 if (loadAction())
                 {
-                    richTextBox1.Text = string.Format("{0}加载成功:\n{1}", modelDisplayName, targetTextBox.Text.Trim());
+                    richTextBox1.Text = CudaMemoryInfo.Describe(0) + Environment.NewLine
+                        + string.Format("{0}加载成功:\n{1}", modelDisplayName, targetTextBox.Text.Trim());
                 }
             }
             catch (Exception ex)
             {
-                richTextBox1.Text = string.Format("{0}加载失败:\n{1}", modelDisplayName, ex.Message);
+                richTextBox1.Text = string.Format("{0}加载失败:\n{1}\n{2}", modelDisplayName, targetTextBox.Text.Trim(), ex.Message);
             }
         }
 
@@ -846,6 +933,21 @@ namespace DlcvDemo2
             return true;
         }
 
+        private bool LoadNoCadDetectModel()
+        {
+            string path = (txtNoCadModelPath.Text ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                MessageBox.Show("请先选择有效的无CAD检测模型文件。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return false;
+            }
+
+            DisposeModel(ref noCadDetectModel);
+            noCadDetectModel = new Model(path, 0, false);
+            SaveUiSettings();
+            return true;
+        }
+
         private SlidingWindowConfig CaptureSlidingWindowConfig()
         {
             return new SlidingWindowConfig
@@ -882,14 +984,18 @@ namespace DlcvDemo2
             btnLoadComponentModel.Enabled = !isBusy;
             btnBrowseIcModel.Enabled = !isBusy;
             btnLoadIcModel.Enabled = !isBusy;
+            btnBrowseNoCadModel.Enabled = !isBusy;
+            btnLoadNoCadModel.Enabled = !isBusy;
             btnBrowseImage.Enabled = !isBusy;
             btnInfer.Enabled = !isBusy;
             btnReleaseModels.Enabled = !isBusy;
             btnLoadAllModels.Enabled = !isBusy;
+            btnGetModelInfo.Enabled = !isBusy;
 
             txtExtractModelPath.Enabled = !isBusy;
             txtComponentModelPath.Enabled = !isBusy;
             txtIcModelPath.Enabled = !isBusy;
+            txtNoCadModelPath.Enabled = !isBusy;
             txtImagePath.Enabled = !isBusy;
             numWindowWidth.Enabled = !isBusy;
             numWindowHeight.Enabled = !isBusy;
@@ -1071,6 +1177,7 @@ namespace DlcvDemo2
             DisposeModel(ref extractModel);
             DisposeModel(ref componentDetectModel);
             DisposeModel(ref icDetectModel);
+            DisposeModel(ref noCadDetectModel);
         }
 
         private void RestoreUiSettings()
@@ -1078,6 +1185,7 @@ namespace DlcvDemo2
             txtExtractModelPath.Text = Properties.Settings.Default.LastExtractModelPath ?? string.Empty;
             txtComponentModelPath.Text = Properties.Settings.Default.LastComponentDetectModelPath ?? string.Empty;
             txtIcModelPath.Text = Properties.Settings.Default.LastIcDetectModelPath ?? string.Empty;
+            txtNoCadModelPath.Text = Properties.Settings.Default.LastNoCadModelPath ?? string.Empty;
             txtImagePath.Text = Properties.Settings.Default.LastImagePath ?? string.Empty;
             imagePath = txtImagePath.Text;
 
@@ -1092,6 +1200,7 @@ namespace DlcvDemo2
             Properties.Settings.Default.LastExtractModelPath = (txtExtractModelPath.Text ?? string.Empty).Trim();
             Properties.Settings.Default.LastComponentDetectModelPath = (txtComponentModelPath.Text ?? string.Empty).Trim();
             Properties.Settings.Default.LastIcDetectModelPath = (txtIcModelPath.Text ?? string.Empty).Trim();
+            Properties.Settings.Default.LastNoCadModelPath = (txtNoCadModelPath.Text ?? string.Empty).Trim();
             Properties.Settings.Default.LastImagePath = (txtImagePath.Text ?? string.Empty).Trim();
             Properties.Settings.Default.SlidingWindowWidth = (int)numWindowWidth.Value;
             Properties.Settings.Default.SlidingWindowHeight = (int)numWindowHeight.Value;

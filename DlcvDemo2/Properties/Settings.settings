@@ -11,6 +11,9 @@
     <Setting Name="LastIcDetectModelPath" Type="System.String" Scope="User">
       <Value Profile="(Default)" />
     </Setting>
+    <Setting Name="LastNoCadModelPath" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
     <Setting Name="LastImagePath" Type="System.String" Scope="User">
       <Value Profile="(Default)" />
     </Setting>

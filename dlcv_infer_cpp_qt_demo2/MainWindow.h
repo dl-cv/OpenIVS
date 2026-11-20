@@ -88,22 +88,27 @@ private:
     void onBrowseExtractModel();
     void onBrowseComponentModel();
     void onBrowseIcModel();
+    void onBrowseNoCadModel();
     void onBrowseImage();
     void onLoadExtractModel();
     void onLoadComponentModel();
     void onLoadIcModel();
+    void onLoadNoCadModel();
     void onLoadAllModels();
     void onInfer();
     void onReleaseModels();
+    void onGetModelInfo();
 
     bool loadExtractModel();
     bool loadComponentModel();
     bool loadIcModel();
+    bool loadNoCadModel();
     void releaseModels();
     void loadAllModelsSequentially(
         const QString& extractPath,
         const QString& componentPath,
         const QString& icPath,
+        const QString& noCadPath,
         const std::function<void(const QString&)>& report);
 
     SlidingWindowConfig captureSlidingWindowConfig() const;
@@ -146,6 +151,7 @@ private:
     std::unique_ptr<dlcv_infer::Model> extractModel_;
     std::unique_ptr<dlcv_infer::Model> componentModel_;
     std::unique_ptr<dlcv_infer::Model> icModel_;
+    std::unique_ptr<dlcv_infer::Model> noCadModel_;
     QSettings settings_{"dlcv", "DlcvDemoQt2"};
 
     QString imagePath_;
@@ -154,18 +160,22 @@ private:
     QLineEdit* editExtractModelPath_ = nullptr;
     QLineEdit* editComponentModelPath_ = nullptr;
     QLineEdit* editIcModelPath_ = nullptr;
+    QLineEdit* editNoCadModelPath_ = nullptr;
     QLineEdit* editImagePath_ = nullptr;
 
     QPushButton* buttonBrowseExtractModel_ = nullptr;
     QPushButton* buttonBrowseComponentModel_ = nullptr;
     QPushButton* buttonBrowseIcModel_ = nullptr;
+    QPushButton* buttonBrowseNoCadModel_ = nullptr;
     QPushButton* buttonBrowseImage_ = nullptr;
     QPushButton* buttonLoadExtractModel_ = nullptr;
     QPushButton* buttonLoadComponentModel_ = nullptr;
     QPushButton* buttonLoadIcModel_ = nullptr;
+    QPushButton* buttonLoadNoCadModel_ = nullptr;
     QPushButton* buttonInfer_ = nullptr;
     QPushButton* buttonReleaseModels_ = nullptr;
     QPushButton* buttonLoadAllModels_ = nullptr;
+    QPushButton* buttonGetModelInfo_ = nullptr;
 
     QLabel* labelStatus_ = nullptr;
     QSpinBox* spinWindowWidth_ = nullptr;

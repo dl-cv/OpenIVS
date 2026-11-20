@@ -65,6 +65,7 @@ namespace DlcvDemo2
 
                 TimeSpan totalElapsed = extractElapsed + componentElapsed + icElapsed;
                 Console.WriteLine($"三个模型加载完成，总耗时 {totalElapsed.TotalSeconds:F2} 秒");
+                Console.WriteLine(CudaMemoryInfo.Describe(0));
                 GC.KeepAlive(extractModel);
                 GC.KeepAlive(componentModel);
                 GC.KeepAlive(icModel);
