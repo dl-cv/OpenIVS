@@ -1,4 +1,4 @@
-﻿#include "flow/BaseModule.h"
+#include "flow/BaseModule.h"
 #include "flow/ModuleRegistry.h"
 #include "flow/utils/MaskRleUtils.h"
 
@@ -329,14 +329,9 @@ private:
         auto& mergedResultsArr = mergedResults.get_ref<Json::array_t&>();
         std::unordered_map<std::string, int> globalIndexBySource;
         const auto sourceKey = [](const ModuleImage& image) {
-            const unsigned char* ptr = image.OriginalImage.data != nullptr
-                ? image.OriginalImage.data
-                : image.ImageObject.data;
-            return std::to_string(reinterpret_cast<std::uintptr_t>(ptr)) + ":" +
-                std::to_string(image.OriginalImage.rows) + "x" +
-                std::to_string(image.OriginalImage.cols) + "x" +
-                std::to_string(image.OriginalImage.type()) + ":" +
-                std::to_string(image.OriginalIndex);
+            // 按包装器实例去重：同一包装器出现在分类、OCR 等分支时复用编号，
+            // 不同包装器即使共用底层原图也保持独立，避免合并后套用其它分支的变换。
+            return std::to_string(image.InstanceId);
         };
 
         size_t estimatedImageCount = 0;
