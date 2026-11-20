@@ -696,7 +696,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 
 void MainWindow::setupUi() {
     setWindowTitle("C++测试程序2");
-    setMinimumSize(1200, 900);
+    setMinimumSize(1200, 950);
 
     QWidget* centralWidget = new QWidget(this);
     auto* rootLayout = new QVBoxLayout(centralWidget);
@@ -706,18 +706,22 @@ void MainWindow::setupUi() {
     editExtractModelPath_ = new QLineEdit(this);
     editComponentModelPath_ = new QLineEdit(this);
     editIcModelPath_ = new QLineEdit(this);
+    editNoCadModelPath_ = new QLineEdit(this);
     editImagePath_ = new QLineEdit(this);
 
     buttonBrowseExtractModel_ = new QPushButton("浏览...", this);
     buttonBrowseComponentModel_ = new QPushButton("浏览...", this);
     buttonBrowseIcModel_ = new QPushButton("浏览...", this);
+    buttonBrowseNoCadModel_ = new QPushButton("浏览...", this);
     buttonBrowseImage_ = new QPushButton("浏览...", this);
     buttonLoadExtractModel_ = new QPushButton("加载模型", this);
     buttonLoadComponentModel_ = new QPushButton("加载模型", this);
     buttonLoadIcModel_ = new QPushButton("加载模型", this);
+    buttonLoadNoCadModel_ = new QPushButton("加载模型", this);
     buttonInfer_ = new QPushButton("执行推理", this);
     buttonReleaseModels_ = new QPushButton("释放模型", this);
-    buttonLoadAllModels_ = new QPushButton("一键加载三个模型", this);
+    buttonLoadAllModels_ = new QPushButton("一键加载四个模型", this);
+    buttonGetModelInfo_ = new QPushButton("获取模型信息", this);
 
     spinWindowWidth_ = new QSpinBox(this);
     spinWindowHeight_ = new QSpinBox(this);
@@ -745,21 +749,26 @@ void MainWindow::setupUi() {
     setupButton(buttonBrowseExtractModel_, 90);
     setupButton(buttonBrowseComponentModel_, 90);
     setupButton(buttonBrowseIcModel_, 90);
+    setupButton(buttonBrowseNoCadModel_, 90);
     setupButton(buttonBrowseImage_, 90);
     setupButton(buttonLoadExtractModel_, 120);
     setupButton(buttonLoadComponentModel_, 120);
     setupButton(buttonLoadIcModel_, 120);
+    setupButton(buttonLoadNoCadModel_, 120);
     setupButton(buttonInfer_, 120);
     setupButton(buttonReleaseModels_, 120);
-    setupButton(buttonLoadAllModels_, 180);
+    setupButton(buttonLoadAllModels_, 190);
+    setupButton(buttonGetModelInfo_, 150);
 
     editExtractModelPath_->setPlaceholderText("请选择元件提取模型路径");
     editComponentModelPath_->setPlaceholderText("请选择元件检测模型路径");
     editIcModelPath_->setPlaceholderText("请选择IC检测模型路径");
+    editNoCadModelPath_->setPlaceholderText("请选择无CAD检测模型路径");
     editImagePath_->setPlaceholderText("请选择图片路径");
     editExtractModelPath_->setMinimumHeight(kControlHeight);
     editComponentModelPath_->setMinimumHeight(kControlHeight);
     editIcModelPath_->setMinimumHeight(kControlHeight);
+    editNoCadModelPath_->setMinimumHeight(kControlHeight);
     editImagePath_->setMinimumHeight(kControlHeight);
     spinWindowWidth_->setMinimumHeight(kControlHeight);
     spinWindowHeight_->setMinimumHeight(kControlHeight);
@@ -789,10 +798,14 @@ void MainWindow::setupUi() {
     pathGrid->addWidget(editIcModelPath_, 2, 1);
     pathGrid->addWidget(buttonBrowseIcModel_, 2, 2);
     pathGrid->addWidget(buttonLoadIcModel_, 2, 3);
-    pathGrid->addWidget(makeRowLabel("图片路径"), 3, 0);
-    pathGrid->addWidget(editImagePath_, 3, 1);
-    pathGrid->addWidget(buttonBrowseImage_, 3, 2);
-    pathGrid->addWidget(buttonInfer_, 3, 3);
+    pathGrid->addWidget(makeRowLabel("无CAD检测模型"), 3, 0);
+    pathGrid->addWidget(editNoCadModelPath_, 3, 1);
+    pathGrid->addWidget(buttonBrowseNoCadModel_, 3, 2);
+    pathGrid->addWidget(buttonLoadNoCadModel_, 3, 3);
+    pathGrid->addWidget(makeRowLabel("图片路径"), 4, 0);
+    pathGrid->addWidget(editImagePath_, 4, 1);
+    pathGrid->addWidget(buttonBrowseImage_, 4, 2);
+    pathGrid->addWidget(buttonInfer_, 4, 3);
 
     auto* row5 = new QHBoxLayout();
     row5->setSpacing(8);
@@ -806,6 +819,7 @@ void MainWindow::setupUi() {
     row5->addWidget(spinOverlapY_);
     row5->addWidget(buttonReleaseModels_);
     row5->addWidget(buttonLoadAllModels_);
+    row5->addWidget(buttonGetModelInfo_);
     row5->addStretch(1);
 
     auto* row6 = new QHBoxLayout();
@@ -858,13 +872,16 @@ void MainWindow::bindSignals() {
     connect(buttonBrowseExtractModel_, &QPushButton::clicked, this, &MainWindow::onBrowseExtractModel);
     connect(buttonBrowseComponentModel_, &QPushButton::clicked, this, &MainWindow::onBrowseComponentModel);
     connect(buttonBrowseIcModel_, &QPushButton::clicked, this, &MainWindow::onBrowseIcModel);
+    connect(buttonBrowseNoCadModel_, &QPushButton::clicked, this, &MainWindow::onBrowseNoCadModel);
     connect(buttonBrowseImage_, &QPushButton::clicked, this, &MainWindow::onBrowseImage);
     connect(buttonLoadExtractModel_, &QPushButton::clicked, this, &MainWindow::onLoadExtractModel);
     connect(buttonLoadComponentModel_, &QPushButton::clicked, this, &MainWindow::onLoadComponentModel);
     connect(buttonLoadIcModel_, &QPushButton::clicked, this, &MainWindow::onLoadIcModel);
+    connect(buttonLoadNoCadModel_, &QPushButton::clicked, this, &MainWindow::onLoadNoCadModel);
     connect(buttonLoadAllModels_, &QPushButton::clicked, this, &MainWindow::onLoadAllModels);
     connect(buttonInfer_, &QPushButton::clicked, this, &MainWindow::onInfer);
     connect(buttonReleaseModels_, &QPushButton::clicked, this, &MainWindow::onReleaseModels);
+    connect(buttonGetModelInfo_, &QPushButton::clicked, this, &MainWindow::onGetModelInfo);
 }
 
 bool MainWindow::tryEnsureIdle(const QString& busyMessage) {
@@ -902,16 +919,20 @@ void MainWindow::setControlsEnabled(bool enabled) {
     buttonBrowseExtractModel_->setEnabled(enabled);
     buttonBrowseComponentModel_->setEnabled(enabled);
     buttonBrowseIcModel_->setEnabled(enabled);
+    buttonBrowseNoCadModel_->setEnabled(enabled);
     buttonBrowseImage_->setEnabled(enabled);
     buttonLoadExtractModel_->setEnabled(enabled);
     buttonLoadComponentModel_->setEnabled(enabled);
     buttonLoadIcModel_->setEnabled(enabled);
+    buttonLoadNoCadModel_->setEnabled(enabled);
     buttonInfer_->setEnabled(enabled);
     buttonReleaseModels_->setEnabled(enabled);
     buttonLoadAllModels_->setEnabled(enabled);
+    buttonGetModelInfo_->setEnabled(enabled);
     editExtractModelPath_->setEnabled(enabled);
     editComponentModelPath_->setEnabled(enabled);
     editIcModelPath_->setEnabled(enabled);
+    editNoCadModelPath_->setEnabled(enabled);
     editImagePath_->setEnabled(enabled);
     spinWindowWidth_->setEnabled(enabled);
     spinWindowHeight_->setEnabled(enabled);
@@ -1012,6 +1033,22 @@ void MainWindow::onBrowseIcModel() {
     onLoadIcModel();
 }
 
+void MainWindow::onBrowseNoCadModel() {
+    if (!tryEnsureIdle("当前正在执行推理，暂不能切换无CAD检测模型。")) {
+        return;
+    }
+    QFileDialog dialog(this, "选择无CAD检测模型");
+    dialog.setNameFilter("AI模型 (*.dvt *.dvo *.dvst *.dvso);;所有文件 (*.*)");
+    dialog.setFileMode(QFileDialog::ExistingFile);
+    applyDialogInitialPath(dialog, editNoCadModelPath_->text().trimmed());
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    editNoCadModelPath_->setText(dialog.selectedFiles().front());
+    saveUiSettings();
+    onLoadNoCadModel();
+}
+
 void MainWindow::onBrowseImage() {
     QFileDialog dialog(this, "选择图片文件");
     dialog.setNameFilter("图片文件 (*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.tif);;所有文件 (*.*)");
@@ -1071,6 +1108,21 @@ void MainWindow::onLoadIcModel() {
     }
 }
 
+void MainWindow::onLoadNoCadModel() {
+    if (!tryEnsureIdle("当前正在执行推理，暂不能加载无CAD检测模型。")) {
+        return;
+    }
+    saveUiSettings();
+    try {
+        if (loadNoCadModel()) {
+            outputText_->setPlainText(cuda_memory::describe(kFixedDeviceId) + "\n无CAD检测模型加载成功:\n"
+                + editNoCadModelPath_->text().trimmed());
+        }
+    } catch (const std::exception& ex) {
+        outputText_->setPlainText(QString("无CAD检测模型加载失败:\n%1").arg(QString::fromLocal8Bit(ex.what())));
+    }
+}
+
 bool MainWindow::loadExtractModel() {
     const QString path = editExtractModelPath_->text().trimmed();
     if (path.isEmpty() || !QFileInfo::exists(path)) {
@@ -1104,10 +1156,22 @@ bool MainWindow::loadIcModel() {
     return true;
 }
 
+bool MainWindow::loadNoCadModel() {
+    const QString path = editNoCadModelPath_->text().trimmed();
+    if (path.isEmpty() || !QFileInfo::exists(path)) {
+        QMessageBox::information(this, "提示", "请先选择有效的无CAD检测模型文件。");
+        return false;
+    }
+    noCadModel_ = std::make_unique<dlcv_infer::Model>(path.toStdWString(), kFixedDeviceId);
+    saveUiSettings();
+    return true;
+}
+
 void MainWindow::releaseModels() {
     extractModel_.reset();
     componentModel_.reset();
     icModel_.reset();
+    noCadModel_.reset();
 }
 
 void MainWindow::onReleaseModels() {
@@ -1118,10 +1182,50 @@ void MainWindow::onReleaseModels() {
     outputText_->setPlainText("模型已释放");
 }
 
+void MainWindow::onGetModelInfo() {
+    if (!tryEnsureIdle("当前正在执行推理，暂不能获取模型信息。")) {
+        return;
+    }
+
+    QString text = cuda_memory::describe(kFixedDeviceId) + "\n";
+    const auto appendModelInfo = [&text](const QString& displayName, dlcv_infer::Model* model) {
+        if (model == nullptr) {
+            return false;
+        }
+        text += QString("%1信息:\n").arg(displayName);
+        try {
+            text += QString::fromStdString(model->GetModelInfo().dump(2)) + "\n";
+        } catch (const std::exception& ex) {
+            text += QString("读取模型信息失败: %1\n").arg(QString::fromLocal8Bit(ex.what()));
+        }
+        text += "\n";
+        return true;
+    };
+
+    bool anyLoaded = false;
+    if (appendModelInfo("元件提取模型", extractModel_.get())) {
+        anyLoaded = true;
+    }
+    if (appendModelInfo("元件检测模型", componentModel_.get())) {
+        anyLoaded = true;
+    }
+    if (appendModelInfo("IC检测模型", icModel_.get())) {
+        anyLoaded = true;
+    }
+    if (appendModelInfo("无CAD检测模型", noCadModel_.get())) {
+        anyLoaded = true;
+    }
+    if (!anyLoaded) {
+        text += "未加载模型\n";
+    }
+    outputText_->setPlainText(text);
+}
+
 void MainWindow::loadAllModelsSequentially(
     const QString& extractPath,
     const QString& componentPath,
     const QString& icPath,
+    const QString& noCadPath,
     const std::function<void(const QString&)>& report) {
     releaseModels();
 
@@ -1138,18 +1242,21 @@ void MainWindow::loadAllModelsSequentially(
     const double extractSeconds = loadOne("元件提取模型", extractPath, extractModel_);
     const double componentSeconds = loadOne("元件检测模型", componentPath, componentModel_);
     const double icSeconds = loadOne("IC检测模型", icPath, icModel_);
-    report(QString("三个模型加载完成，总耗时 %1 秒").arg(extractSeconds + componentSeconds + icSeconds, 0, 'f', 2));
+    const double noCadSeconds = loadOne("无CAD检测模型", noCadPath, noCadModel_);
+    report(QString("四个模型加载完成，总耗时 %1 秒")
+               .arg(extractSeconds + componentSeconds + icSeconds + noCadSeconds, 0, 'f', 2));
     report(cuda_memory::describe(kFixedDeviceId));
 }
 
 void MainWindow::onLoadAllModels() {
-    if (!tryEnsureIdle("当前正在执行推理，暂不能加载三个模型。")) {
+    if (!tryEnsureIdle("当前正在执行推理，暂不能加载四个模型。")) {
         return;
     }
 
     const QString extractPath = editExtractModelPath_->text().trimmed();
     const QString componentPath = editComponentModelPath_->text().trimmed();
     const QString icPath = editIcModelPath_->text().trimmed();
+    const QString noCadPath = editNoCadModelPath_->text().trimmed();
     if (!QFileInfo::exists(extractPath)) {
         QMessageBox::information(this, "提示", "请先选择有效的元件提取模型文件。");
         return;
@@ -1162,6 +1269,10 @@ void MainWindow::onLoadAllModels() {
         QMessageBox::information(this, "提示", "请先选择有效的IC检测模型文件。");
         return;
     }
+    if (!QFileInfo::exists(noCadPath)) {
+        QMessageBox::information(this, "提示", "请先选择有效的无CAD检测模型文件。");
+        return;
+    }
 
     saveUiSettings();
     modelLoading_.store(true);
@@ -1171,10 +1282,10 @@ void MainWindow::onLoadAllModels() {
         loadThread_.join();
     }
 
-    loadThread_ = std::thread([this, extractPath, componentPath, icPath]() {
+    loadThread_ = std::thread([this, extractPath, componentPath, icPath, noCadPath]() {
         QString error;
         try {
-            loadAllModelsSequentially(extractPath, componentPath, icPath, [this](const QString& message) {
+            loadAllModelsSequentially(extractPath, componentPath, icPath, noCadPath, [this](const QString& message) {
                 QMetaObject::invokeMethod(
                     this,
                     [this, message]() { appendLog(message); },
@@ -1210,6 +1321,7 @@ void MainWindow::restoreUiSettings() {
     editExtractModelPath_->setText(settings_.value("LastExtractModelPath").toString());
     editComponentModelPath_->setText(settings_.value("LastComponentDetectModelPath").toString());
     editIcModelPath_->setText(settings_.value("LastIcDetectModelPath").toString());
+    editNoCadModelPath_->setText(settings_.value("LastNoCadModelPath").toString());
     imagePath_ = settings_.value("LastImagePath").toString();
     editImagePath_->setText(imagePath_);
     spinWindowWidth_->setValue(readIntSetting(settings_, "SlidingWindowWidth", kDefaultWindowWidth, 1, 30000));
@@ -1222,6 +1334,7 @@ void MainWindow::saveUiSettings() {
     settings_.setValue("LastExtractModelPath", editExtractModelPath_->text().trimmed());
     settings_.setValue("LastComponentDetectModelPath", editComponentModelPath_->text().trimmed());
     settings_.setValue("LastIcDetectModelPath", editIcModelPath_->text().trimmed());
+    settings_.setValue("LastNoCadModelPath", editNoCadModelPath_->text().trimmed());
     settings_.setValue("LastImagePath", editImagePath_->text().trimmed());
     settings_.setValue("SlidingWindowWidth", spinWindowWidth_->value());
     settings_.setValue("SlidingWindowHeight", spinWindowHeight_->value());
