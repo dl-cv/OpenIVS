@@ -343,19 +343,50 @@ int RunAlgorithmModulesSelfTest() {
         expect(run(true, aliases, Json::array({a, b})), {"OK;距离：5"}, true);
         a.erase("origin_index"); b.erase("origin_index"); b["index"] = nullptr;
         expect(run(true, aliases, Json::array({a, b})), {"OK;距离：5"}, true);
-
-        // 真正 MergeResults：两路 image 引用同一个上游 wrapper，results 各来自不同支路。
+        // 真正 MergeResults：多路 image 引用同一个上游 wrapper 时，只保留一个原图编号。
         auto mergeFactory = ModuleRegistry::Get("post_process/merge_results");
         check(static_cast<bool>(mergeFactory), "merge_results not registered");
         auto merge = mergeFactory(2, "", Json::object(), nullptr);
-        merge->ExtraInputsIn.emplace_back(images, Json::array({local(Json::array({det("B", 13, 14)}))}));
-        auto combined = merge->Process(images, Json::array({local(Json::array({det("A", 10, 10)}))}));
-        check(combined.ImageList.size() == 2 && combined.ImageList[0].OriginalIndex == 0 &&
-            combined.ImageList[1].OriginalIndex == 1 && images[0].OriginalIndex == 7, "MergeResults value-wrapper numbering");
-        expect(run(true, combined.ImageList, combined.ResultList), {"OK;距离：5"}, true);
-        for (auto& entry : combined.ResultList) { entry["image_index"] = entry["index"]; entry.erase("index"); }
-        expect(run(true, combined.ImageList, combined.ResultList), {"OK;距离：5"}, true);
+        merge->ExtraInputsIn.emplace_back(images, Json::array({local(Json::array({det("Polarity", 13, 14)}))}));
+        merge->ExtraInputsIn.emplace_back(images, Json::array({local(Json::array({det("Dot", 20, 20)}))}));
+        auto combined = merge->Process(images, Json::array({local(Json::array({
+            det("Char", 10, 10), det("Char", 20, 10), det("Char", 30, 10)
+        }))}));
+        check(combined.ImageList.size() == 1 && combined.ImageList[0].OriginalIndex == 0 &&
+            images[0].OriginalIndex == 7, "MergeResults shared-source numbering");
+        check(combined.ResultList.size() == 3, "MergeResults shared-source result count");
+        for (const auto& entry : combined.ResultList)
+            check(entry.at("index") == 0 && entry.at("origin_index") == 0,
+                "MergeResults shared-source identity");
 
+        auto countFactory = ModuleRegistry::Get("post_process/category_count_check");
+        check(static_cast<bool>(countFactory), "category_count_check not registered");
+        Json countRules = Json::array({
+            Json::object({{"category", "Char"}, {"operator", "equal"}, {"expect", 3}}),
+            Json::object({{"category", "Polarity"}, {"operator", "equal"}, {"expect", 1}}),
+            Json::object({{"category", "Dot"}, {"operator", "equal"}, {"expect", 1}})
+        });
+        auto count = countFactory(3, "", Json::object({{"rules", std::move(countRules)}}), nullptr);
+        auto counted = count->Process(combined.ImageList, combined.ResultList);
+        check(count->ScalarOutputsByName.at("ok").is_boolean() &&
+            count->ScalarOutputsByName.at("ok").get<bool>(), "shared-source category count must pass");
+        for (const auto& entry : counted.ResultList)
+            check(entry.at("ok").is_boolean() && entry.at("ok").get<bool>(),
+                "shared-source entries must stay OK");
+        // 不同源图仍必须保留独立编号，避免同源复用引入跨图串结果。
+        const cv::Mat otherOriginal = original.clone();
+        const std::vector<ModuleImage> otherImages{ModuleImage(otherOriginal, otherOriginal, identity, 8)};
+        auto distinctMerge = mergeFactory(4, "", Json::object(), nullptr);
+        distinctMerge->ExtraInputsIn.emplace_back(otherImages, Json::array({local(Json::array({det("B", 13, 14)}))}));
+        auto distinctCombined = distinctMerge->Process(images, Json::array({local(Json::array({det("A", 10, 10)}))}));
+        check(distinctCombined.ImageList.size() == 2 &&
+            distinctCombined.ImageList[0].OriginalIndex == 0 &&
+            distinctCombined.ImageList[1].OriginalIndex == 1, "distinct-source numbering");
+        check(distinctCombined.ResultList.at(0).at("index") == 0 &&
+            distinctCombined.ResultList.at(0).at("origin_index") == 0 &&
+            distinctCombined.ResultList.at(1).at("index") == 1 &&
+            distinctCombined.ResultList.at(1).at("origin_index") == 1,
+            "distinct-source result identity");
         for (bool distance : {false, true}) {
             rejects(distance, {}, Json::array({local(Json::array())}), Json::object());
             rejects(distance, separate, Json::array({{{"type", "local"}, {"sample_results", Json::array()}}}), Json::object());

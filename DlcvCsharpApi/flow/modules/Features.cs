@@ -790,7 +790,7 @@ namespace DlcvModules
     /// 说明：
     /// - 不再按 transform 聚合/重建“每图一个 local 条目”。transform 在“整图单位变换”等场景下极易相同，
     ///   会导致跨图串结果/重复结果（典型现象：两个1、两个2）。
-    /// - 不做去重（保持逻辑简单、可预期）。
+    /// - 同一源图对象在多路中出现时复用首次分配的全局编号；不同源图仍分别编号。
     /// </summary>
     public class MergeResults : BaseModule
     {
@@ -819,13 +819,14 @@ namespace DlcvModules
             var mergedImages = new List<ModuleImage>(Math.Max(0, estimatedImageCount));
             var mergedResults = new JArray();
 
-            MergeGroup(imageList, resultList, mergedImages, mergedResults);
+            var globalIndexBySource = new Dictionary<ModuleImage, int>();
+            MergeGroup(imageList, resultList, mergedImages, mergedResults, globalIndexBySource);
             if (ExtraInputsIn != null)
             {
                 foreach (var ch in ExtraInputsIn)
                 {
                     if (ch == null) continue;
-                    MergeGroup(ch.ImageList, ch.ResultList, mergedImages, mergedResults);
+                    MergeGroup(ch.ImageList, ch.ResultList, mergedImages, mergedResults, globalIndexBySource);
                 }
             }
 
@@ -836,11 +837,9 @@ namespace DlcvModules
             List<ModuleImage> imageList,
             JArray resultList,
             List<ModuleImage> mergedImages,
-            JArray mergedResults)
+            JArray mergedResults,
+            Dictionary<ModuleImage, int> globalIndexBySource)
         {
-            int baseIndex = mergedImages.Count;
-            int added = 0;
-
             int[] localToGlobal = null;
             if (imageList != null && imageList.Count > 0)
             {
@@ -852,15 +851,19 @@ namespace DlcvModules
                     var im = imageList[i];
                     if (im == null) continue;
 
-                    int globalIdx = baseIndex + added;
-                    localToGlobal[i] = globalIdx;
-                    added++;
+                    int globalIdx;
+                    if (!globalIndexBySource.TryGetValue(im, out globalIdx))
+                    {
+                        globalIdx = mergedImages.Count;
+                        globalIndexBySource[im] = globalIdx;
 
-                    // 关键：一定要重包，确保 OriginalIndex 与全局顺序一致（Base.cs 中 OriginalIndex 为 private set，无法原地修改）
-                    // 若这里退回透传，将导致多个图像的 OriginalIndex 仍为 0，进而在下游/前端按 origin_index 聚合时只保留一个。
-                    var newWrap = new ModuleImage(im.ImageObject, im.OriginalImage, im.TransformState, globalIdx);
-                    newWrap.UniqueId = im.UniqueId;
-                    mergedImages.Add(newWrap);
+                        // 同一源图可能在分类、OCR 等分支中重复出现。这里只追加一次并复用编号，
+                        // 避免下游按 origin_index 聚合时把同一原图拆成多张逻辑原图。
+                        var newWrap = new ModuleImage(im.ImageObject, im.OriginalImage, im.TransformState, globalIdx);
+                        newWrap.UniqueId = im.UniqueId;
+                        mergedImages.Add(newWrap);
+                    }
+                    localToGlobal[i] = globalIdx;
                 }
             }
 
@@ -871,7 +874,6 @@ namespace DlcvModules
                 var token = resultList[i];
                 if (!(token is JObject r))
                 {
-                    // 非对象结构直接跳过（避免异常）
                     continue;
                 }
 
@@ -885,22 +887,22 @@ namespace DlcvModules
                 int idx = r["index"]?.Value<int?>() ?? -1;
                 int oidx = r["origin_index"]?.Value<int?>() ?? idx;
 
-                // 若本组只有 1 张图：强制把所有 local 结果都绑定到这张图（典型的 build_results 场景）
-                if (added == 1)
+                // 若本组只有 1 张图，所有 local 结果都属于该图；索引异常时也使用这张图的全局编号。
+                if (imageList != null && imageList.Count == 1 && localToGlobal != null &&
+                    localToGlobal.Length == 1 && localToGlobal[0] >= 0)
                 {
-                    r["index"] = baseIndex;
-                    r["origin_index"] = baseIndex;
+                    r["index"] = localToGlobal[0];
+                    r["origin_index"] = localToGlobal[0];
                 }
                 else
                 {
-                    // 否则按 idx/oidx 尝试映射到全局索引
                     if (TryMapLocalIndex(localToGlobal, idx, out int gidx))
                         r["index"] = gidx;
 
                     if (TryMapLocalIndex(localToGlobal, oidx, out int goidx))
                         r["origin_index"] = goidx;
 
-                    // 兜底：若 origin_index 仍缺失，则用 index 补齐
+                    // 兜底：若 origin_index 仍缺失，则用 index 补齐。
                     if ((r["origin_index"] == null || r["origin_index"].Type == JTokenType.Null) && r["index"] != null)
                     {
                         try { r["origin_index"] = r["index"].Value<int>(); } catch { }
