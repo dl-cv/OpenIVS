@@ -15,7 +15,7 @@ namespace DlcvDemo2
             stopwatch.Stop();
             elapsed = stopwatch.Elapsed;
 
-            ReportSafely(report, $"{modelDisplayName}加载完成，耗时 {elapsed.TotalSeconds:F2} 秒");
+            ReportSafely(report, $"{modelDisplayName}加载完成: {modelPath}，耗时 {elapsed.TotalSeconds:F2} 秒");
             return model;
         }
 

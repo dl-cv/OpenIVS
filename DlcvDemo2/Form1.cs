@@ -282,7 +282,7 @@ namespace DlcvDemo2
             }
             catch (Exception ex)
             {
-                AppendModelLoadLog($"加载失败: {ex.Message}");
+                AppendModelLoadLog($"加载中断: {ex.Message}");
             }
             finally
             {
@@ -300,23 +300,19 @@ namespace DlcvDemo2
 
             var sb = new StringBuilder();
             sb.AppendLine(CudaMemoryInfo.Describe(0));
-            int loadedCount = 0;
-            loadedCount += AppendModelInfo(sb, "元件提取模型", extractModel) ? 1 : 0;
-            loadedCount += AppendModelInfo(sb, "元件检测模型", componentDetectModel) ? 1 : 0;
-            loadedCount += AppendModelInfo(sb, "IC检测模型", icDetectModel) ? 1 : 0;
-            loadedCount += AppendModelInfo(sb, "无CAD检测模型", noCadDetectModel) ? 1 : 0;
-            if (loadedCount == 0)
-            {
-                sb.AppendLine("未加载模型");
-            }
+            AppendModelInfo(sb, "元件提取模型", extractModel);
+            AppendModelInfo(sb, "元件检测模型", componentDetectModel);
+            AppendModelInfo(sb, "IC检测模型", icDetectModel);
+            AppendModelInfo(sb, "无CAD检测模型", noCadDetectModel);
             richTextBox1.Text = sb.ToString();
         }
 
-        private static bool AppendModelInfo(StringBuilder sb, string modelDisplayName, Model model)
+        private static void AppendModelInfo(StringBuilder sb, string modelDisplayName, Model model)
         {
             if (model == null)
             {
-                return false;
+                sb.AppendLine($"{modelDisplayName}: 未加载");
+                return;
             }
 
             sb.AppendLine($"{modelDisplayName}信息:");
@@ -330,7 +326,6 @@ namespace DlcvDemo2
                 sb.AppendLine($"读取模型信息失败: {ex.Message}");
             }
             sb.AppendLine();
-            return true;
         }
 
         private void LoadAllModelsSequentially(
@@ -346,14 +341,27 @@ namespace DlcvDemo2
             TimeSpan componentElapsed;
             TimeSpan icElapsed;
             TimeSpan noCadElapsed;
-            extractModel = ThreeModelLoadTimer.Load("元件提取模型", extractModelPath, progress.Report, out extractElapsed);
-            componentDetectModel = ThreeModelLoadTimer.Load("元件检测模型", componentModelPath, progress.Report, out componentElapsed);
-            icDetectModel = ThreeModelLoadTimer.Load("IC检测模型", icModelPath, progress.Report, out icElapsed);
-            noCadDetectModel = ThreeModelLoadTimer.Load("无CAD检测模型", noCadModelPath, progress.Report, out noCadElapsed);
+            extractModel = LoadOneTimed("元件提取模型", extractModelPath, progress, out extractElapsed);
+            componentDetectModel = LoadOneTimed("元件检测模型", componentModelPath, progress, out componentElapsed);
+            icDetectModel = LoadOneTimed("IC检测模型", icModelPath, progress, out icElapsed);
+            noCadDetectModel = LoadOneTimed("无CAD检测模型", noCadModelPath, progress, out noCadElapsed);
 
             TimeSpan totalElapsed = extractElapsed + componentElapsed + icElapsed + noCadElapsed;
             progress.Report($"四个模型加载完成，总耗时 {totalElapsed.TotalSeconds:F2} 秒");
             progress.Report(CudaMemoryInfo.Describe(0));
+        }
+
+        private static Model LoadOneTimed(string modelDisplayName, string modelPath, IProgress<string> progress, out TimeSpan elapsed)
+        {
+            try
+            {
+                return ThreeModelLoadTimer.Load(modelDisplayName, modelPath, progress.Report, out elapsed);
+            }
+            catch (Exception ex)
+            {
+                progress.Report($"{modelDisplayName}加载失败: {modelPath}{Environment.NewLine}{ex.Message}");
+                throw;
+            }
         }
 
         private static bool TryValidateModelPath(string modelPath, string modelDisplayName)
@@ -789,6 +797,9 @@ namespace DlcvDemo2
             sb.AppendLine($"元件提取模型: {txtExtractModelPath.Text.Trim()}");
             sb.AppendLine($"元件检测模型: {txtComponentModelPath.Text.Trim()}");
             sb.AppendLine($"IC检测模型: {txtIcModelPath.Text.Trim()}");
+            sb.AppendLine(noCadDetectModel == null
+                ? "无CAD检测模型: 未加载"
+                : $"无CAD检测模型: {txtNoCadModelPath.Text.Trim()}（仅加载，不参与本次推理）");
             sb.AppendLine($"滑窗参数: {(int)numWindowWidth.Value} x {(int)numWindowHeight.Value}, overlap=({(int)numOverlapX.Value}, {(int)numOverlapY.Value})");
             sb.AppendLine($"滑窗数量: {runResult.SlidingWindowCount}");
             sb.AppendLine($"元件提取模型合并后目标数: {runResult.MergedExtractCount}");
@@ -875,7 +886,7 @@ namespace DlcvDemo2
             }
             catch (Exception ex)
             {
-                richTextBox1.Text = string.Format("{0}加载失败:\n{1}", modelDisplayName, ex.Message);
+                richTextBox1.Text = string.Format("{0}加载失败:\n{1}\n{2}", modelDisplayName, targetTextBox.Text.Trim(), ex.Message);
             }
         }
 

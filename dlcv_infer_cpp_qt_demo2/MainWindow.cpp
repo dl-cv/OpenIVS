@@ -1074,7 +1074,8 @@ void MainWindow::onLoadExtractModel() {
                 + editExtractModelPath_->text().trimmed());
         }
     } catch (const std::exception& ex) {
-        outputText_->setPlainText(QString("元件提取模型加载失败:\n%1").arg(QString::fromLocal8Bit(ex.what())));
+        outputText_->setPlainText(QString("元件提取模型加载失败:\n%1\n%2")
+                                      .arg(editExtractModelPath_->text().trimmed(), QString::fromLocal8Bit(ex.what())));
     }
 }
 
@@ -1089,7 +1090,8 @@ void MainWindow::onLoadComponentModel() {
                 + editComponentModelPath_->text().trimmed());
         }
     } catch (const std::exception& ex) {
-        outputText_->setPlainText(QString("元件检测模型加载失败:\n%1").arg(QString::fromLocal8Bit(ex.what())));
+        outputText_->setPlainText(QString("元件检测模型加载失败:\n%1\n%2")
+                                      .arg(editComponentModelPath_->text().trimmed(), QString::fromLocal8Bit(ex.what())));
     }
 }
 
@@ -1104,7 +1106,8 @@ void MainWindow::onLoadIcModel() {
                 + editIcModelPath_->text().trimmed());
         }
     } catch (const std::exception& ex) {
-        outputText_->setPlainText(QString("IC检测模型加载失败:\n%1").arg(QString::fromLocal8Bit(ex.what())));
+        outputText_->setPlainText(QString("IC检测模型加载失败:\n%1\n%2")
+                                      .arg(editIcModelPath_->text().trimmed(), QString::fromLocal8Bit(ex.what())));
     }
 }
 
@@ -1119,7 +1122,8 @@ void MainWindow::onLoadNoCadModel() {
                 + editNoCadModelPath_->text().trimmed());
         }
     } catch (const std::exception& ex) {
-        outputText_->setPlainText(QString("无CAD检测模型加载失败:\n%1").arg(QString::fromLocal8Bit(ex.what())));
+        outputText_->setPlainText(QString("无CAD检测模型加载失败:\n%1\n%2")
+                                      .arg(editNoCadModelPath_->text().trimmed(), QString::fromLocal8Bit(ex.what())));
     }
 }
 
@@ -1190,7 +1194,8 @@ void MainWindow::onGetModelInfo() {
     QString text = cuda_memory::describe(kFixedDeviceId) + "\n";
     const auto appendModelInfo = [&text](const QString& displayName, dlcv_infer::Model* model) {
         if (model == nullptr) {
-            return false;
+            text += QString("%1: 未加载\n").arg(displayName);
+            return;
         }
         text += QString("%1信息:\n").arg(displayName);
         try {
@@ -1199,25 +1204,12 @@ void MainWindow::onGetModelInfo() {
             text += QString("读取模型信息失败: %1\n").arg(QString::fromLocal8Bit(ex.what()));
         }
         text += "\n";
-        return true;
     };
 
-    bool anyLoaded = false;
-    if (appendModelInfo("元件提取模型", extractModel_.get())) {
-        anyLoaded = true;
-    }
-    if (appendModelInfo("元件检测模型", componentModel_.get())) {
-        anyLoaded = true;
-    }
-    if (appendModelInfo("IC检测模型", icModel_.get())) {
-        anyLoaded = true;
-    }
-    if (appendModelInfo("无CAD检测模型", noCadModel_.get())) {
-        anyLoaded = true;
-    }
-    if (!anyLoaded) {
-        text += "未加载模型\n";
-    }
+    appendModelInfo("元件提取模型", extractModel_.get());
+    appendModelInfo("元件检测模型", componentModel_.get());
+    appendModelInfo("IC检测模型", icModel_.get());
+    appendModelInfo("无CAD检测模型", noCadModel_.get());
     outputText_->setPlainText(text);
 }
 
@@ -1230,12 +1222,18 @@ void MainWindow::loadAllModelsSequentially(
     releaseModels();
 
     const auto loadOne = [&](const char* displayName, const QString& path, std::unique_ptr<dlcv_infer::Model>& model) {
-        report(QString("开始加载%1: %2").arg(QString::fromUtf8(displayName), path));
+        const QString name = QString::fromUtf8(displayName);
+        report(QString("开始加载%1: %2").arg(name, path));
         const auto start = std::chrono::steady_clock::now();
-        model = std::make_unique<dlcv_infer::Model>(path.toStdWString(), kFixedDeviceId);
+        try {
+            model = std::make_unique<dlcv_infer::Model>(path.toStdWString(), kFixedDeviceId);
+        } catch (const std::exception& ex) {
+            report(QString("%1加载失败: %2\n%3").arg(name, path, QString::fromLocal8Bit(ex.what())));
+            throw;
+        }
         const auto end = std::chrono::steady_clock::now();
         const double seconds = std::chrono::duration<double>(end - start).count();
-        report(QString("%1加载完成，耗时 %2 秒").arg(QString::fromUtf8(displayName)).arg(seconds, 0, 'f', 2));
+        report(QString("%1加载完成: %2，耗时 %3 秒").arg(name, path).arg(seconds, 0, 'f', 2));
         return seconds;
     };
 
@@ -1292,7 +1290,7 @@ void MainWindow::onLoadAllModels() {
                     Qt::QueuedConnection);
             });
         } catch (const std::exception& ex) {
-            error = QString("加载失败: %1").arg(QString::fromLocal8Bit(ex.what()));
+            error = QString("加载中断: %1").arg(QString::fromLocal8Bit(ex.what()));
         }
 
         QMetaObject::invokeMethod(
@@ -1427,6 +1425,12 @@ void MainWindow::onInfer() {
                 text += QString("元件提取模型: %1\n").arg(extractPath);
                 text += QString("元件检测模型: %1\n").arg(componentPath);
                 text += QString("IC检测模型: %1\n").arg(icPath);
+                if (noCadModel_) {
+                    text += QString("无CAD检测模型: %1（仅加载，不参与本次推理）\n")
+                                .arg(editNoCadModelPath_->text().trimmed());
+                } else {
+                    text += "无CAD检测模型: 未加载\n";
+                }
                 text += QString("滑窗参数: %1 x %2, overlap=(%3, %4)\n")
                             .arg(config.windowWidth)
                             .arg(config.windowHeight)
