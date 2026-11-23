@@ -59,5 +59,6 @@
     <ClInclude Include="flow\modules\ModelModules.h"><Filter>头文件\flow\modules</Filter></ClInclude>
     <ClInclude Include="flow\utils\FlowPlatformUtils.h"><Filter>头文件\flow\utils</Filter></ClInclude>
     <ClInclude Include="flow\utils\MaskRleUtils.h"><Filter>头文件\flow\utils</Filter></ClInclude>
+    <ClInclude Include="flow\utils\ResultPolygon.h"><Filter>头文件\flow\utils</Filter></ClInclude>
   </ItemGroup>
 </Project>

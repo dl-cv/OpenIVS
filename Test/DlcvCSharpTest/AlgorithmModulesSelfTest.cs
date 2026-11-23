@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -28,7 +29,9 @@ namespace DlcvCSharpTest
             check("参考图像坐标排序、空输入与仅首张", TestReferenceImage);
             check("两个节点注册", () => { Require(ModuleRegistry.Get(SequenceType) != null, SequenceType + " 未注册"); Require(ModuleRegistry.Get(Offset) != null, Offset + " 未注册"); });
             check("圆形区域绘制默认值、参数和非法半径", TestCircularRegion);
-            check("圆形区域局部 mask 写入最终输出", TestCircularRegionMaskOutput);
+            check("圆形区域轮廓写入最终输出", TestCircularRegionPolygonOutput);
+            if (Environment.GetEnvironmentVariable("DLCV_CIRCULAR_REGION_BENCHMARK") == "1")
+                check("圆形区域绘制与过滤耗时", BenchmarkCircularRegion);
             check("旧流程类型兼容且输出新主标识与原因", TestLegacySequence);
             check("顺序水平竖直、重复及完整列表", TestSequence);
             check("中心排序、稳定同坐标与旋转框", TestCenters);
@@ -113,11 +116,22 @@ namespace DlcvCSharpTest
                 var bbox = (JArray)det["bbox"];
                 Require(bbox.Count == 4 && (int)bbox[0] == 10 && (int)bbox[1] == 5 &&
                     (int)bbox[2] == 11 && (int)bbox[3] == 11, "圆形区域默认 bbox 错误");
-                var mask = (JArray)det["mask_array"];
-                Require(mask.Count == 11 && ((JArray)mask[0]).Count == 11, "圆形区域 mask 尺寸错误");
-                Require((int)mask[5][5] == 255 && (int)mask[0][0] == 0, "圆形区域中心或边缘像素错误");
-                int foreground = mask.Sum(row => ((JArray)row).Sum(value => (int)value));
-                Require((double)det["area"] == foreground / 255.0, "圆形区域面积错误");
+                VerifyCirclePolygon(det, image.Size(), 5);
+                det["polygon"][0][0] = -1;
+                var cached = Execute(CircularRegionType, input, new JArray(), new JObject());
+                VerifyCirclePolygon((JObject)cached.ResultList[0]["sample_results"][0], image.Size(), 5);
+                foreach (var sample in new[] { (Size: new Size(320, 320), Radius: 105),
+                    (Size: new Size(10, 12), Radius: 6), (Size: new Size(1, 20), Radius: 5),
+                    (Size: new Size(1, 1), Radius: int.MaxValue) })
+                {
+                    using (var small = new Mat(sample.Size, MatType.CV_8UC3, Scalar.Black))
+                    {
+                        var smallImages = new List<ModuleImage> { new ModuleImage(small, small,
+                            new TransformationState(small.Width, small.Height), 0) };
+                        var result = Execute(CircularRegionType, smallImages, new JArray(), new JObject { ["radius"] = sample.Radius });
+                        VerifyCirclePolygon((JObject)result.ResultList[0]["sample_results"][0], sample.Size, sample.Radius);
+                    }
+                }
 
                 var custom = Execute(CircularRegionType, input, new JArray(),
                     new JObject { ["categoryname"] = "  自定义圆  ", ["radius"] = 3 });
@@ -158,7 +172,7 @@ namespace DlcvCSharpTest
                 }
             }
         }
-        private static void TestCircularRegionMaskOutput()
+        private static void TestCircularRegionPolygonOutput()
         {
             using (var image = new Mat(480, 640, MatType.CV_8UC3, Scalar.All(0)))
             {
@@ -181,18 +195,114 @@ namespace DlcvCSharpTest
                 var result = (JObject)results[0];
                 Require(result.Value<string>("category_name") == "圆形区域", "最终输出类别错误");
                 Require(Math.Abs(result.Value<double>("area") - 7845.0) < 1e-9, "最终输出面积错误");
-                var maskRle = result["mask_rle"] as JObject;
-                Require(maskRle != null, "最终输出缺少 mask_rle");
-                Require(maskRle.Value<int>("width") == 101 && maskRle.Value<int>("height") == 101, "最终输出 mask 尺寸错误");
-                using (var mask = MaskRleUtils.MaskInfoToMat(maskRle))
+                var poly = (JArray)result["poly"];
+                Require(poly != null && poly.Count == 1 && ((JArray)poly[0]).Count >= 3, "最终输出缺少圆形轮廓");
+                var detection = new JObject { ["polygon"] = poly[0].DeepClone(), ["area"] = result["area"].DeepClone() };
+                VerifyCirclePolygon(detection, image.Size(), 50);
+                Require(result["mask_rle"] == null && result["mask_array"] == null, "最终输出写入了圆形掩膜");
+                context.Set("infer_params", new JObject { ["with_mask"] = false });
+                new GraphExecutor(nodes.ToObject<List<Dictionary<string, object>>>(), context).Run();
+                payload = context.Get<Dictionary<string, object>>("frontend_json");
+                result = (JObject)JObject.FromObject(payload["last"])["by_image"][0]["results"][0];
+                Require(result["poly"] == null, "with_mask=false 时不应写入圆形轮廓");
+
+                var wrapState = new TransformationState(image.Width, image.Height, new[] { 10, 0, image.Width, image.Height },
+                    new double[] { 1, 0, -10, 0, 1, 0 });
+                var images = new List<ModuleImage> { new ModuleImage(image, image, wrapState, 0) };
+                var entry = JObject.Parse(@"{'type':'local','index':0,'origin_index':0,'transform':null,
+                    'sample_results':[{'bbox':[12,12,3,3],'polygon':[[12,12],[14,12],[12,14]]}]}");
+                foreach (bool hasTransform in new[] { true, false })
+                foreach (bool aligned in new[] { true, false })
                 {
-                    Require(mask.Width == 101 && mask.Height == 101, "mask_rle 解码尺寸错误");
-                    Require(Cv2.CountNonZero(mask) == 7845, "mask_rle 解码面积错误");
-                    Require(mask.At<byte>(50, 50) == 255 && mask.At<byte>(0, 0) == 0, "mask_rle 像素错误");
+                    var resultEntry = (JObject)entry.DeepClone();
+                    if (!hasTransform) resultEntry.Remove("transform");
+                    var input = new JArray(resultEntry);
+                    if (!aligned) input.Add(new JObject { ["type"] = "global" });
+                    var outputContext = new DlcvModules.ExecutionContext();
+                    var module = new ReturnJson(3, context: outputContext);
+                    module.Process(images, input);
+                    var outputJson = outputContext.Get<Dictionary<string, object>>("frontend_json");
+                    var global = JObject.FromObject(outputJson["last"])["by_image"][0]["results"][0];
+                    int expectedX = hasTransform ? 12 : 22;
+                    Require(global["poly"][0][0][0].Value<int>() == expectedX && global["bbox"][0].Value<int>() == expectedX,
+                        "最终输出轮廓或包围框的坐标错误");
                 }
-                Require(result["mask_array"] == null, "mask_array 不应写入最终输出");
             }
         }
+        private static void VerifyCirclePolygon(JObject detection, Size size, int radius)
+        {
+            Require(detection["mask_array"] == null && detection["mask_rle"] == null, "圆形区域应仅输出轮廓");
+            var ring = detection["polygon"] as JArray;
+            Require(ring != null && ring.Count >= 3, "圆形区域轮廓错误");
+            var points = ring.Select(point => new Point((int)point[0], (int)point[1])).ToArray();
+            using (var expected = new Mat(size, MatType.CV_8UC1, Scalar.Black))
+            using (var actual = new Mat(size, MatType.CV_8UC1, Scalar.Black))
+            {
+                if (radius == int.MaxValue) expected.SetTo(Scalar.All(255));
+                else Cv2.Circle(expected, new Point(size.Width / 2, size.Height / 2), radius, Scalar.All(255), -1);
+                Cv2.FillPoly(actual, new[] { points }, Scalar.All(255));
+                Cv2.Absdiff(expected, actual, actual);
+                Require(Cv2.CountNonZero(actual) == 0, "圆形区域轮廓与原像素不一致");
+                Require((double)detection["area"] == Cv2.CountNonZero(expected), "圆形区域面积错误");
+                if (radius == 105)
+                {
+                    Require(JToken.DeepEquals(detection["bbox"], new JArray(55, 55, 211, 211)), "半径 105 的 bbox 错误");
+                    Console.WriteLine("圆形 320×320，半径 105：轮廓点数 {0}，面积 {1}，还原像素一致", points.Length, detection["area"]);
+                }
+            }
+        }
+
+        private static void BenchmarkCircularRegion()
+        {
+            const int size = 320, radius = 105, diameter = 211, offset = 55, warmup = 30, iterations = 100;
+            using (var image = new Mat(size, size, MatType.CV_8UC3, Scalar.Black))
+            {
+                var images = new List<ModuleImage> { new ModuleImage(image, image, new TransformationState(size, size), 0) };
+                JArray Entries(JObject det) => new JArray(new JObject { ["type"] = "local", ["index"] = 0, ["origin_index"] = 0,
+                    ["sample_results"] = new JArray(det) });
+                JArray DrawMask()
+                {
+                    using (var mask = new Mat(diameter, diameter, MatType.CV_8UC1, Scalar.Black))
+                    {
+                        Cv2.Circle(mask, new Point(radius, radius), radius, Scalar.All(255), -1);
+                        var rows = new JArray();
+                        for (int y = 0; y < diameter; y++)
+                        {
+                            var row = new JArray();
+                            for (int x = 0; x < diameter; x++) row.Add((int)mask.At<byte>(y, x));
+                            rows.Add(row);
+                        }
+                        return Entries(new JObject { ["bbox"] = new JArray(offset, offset, diameter, diameter),
+                            ["area"] = Cv2.CountNonZero(mask), ["mask_array"] = rows });
+                    }
+                }
+                var circleModule = new CircularRegion(1, properties: new Dictionary<string, object> { ["radius"] = radius });
+                JArray DrawPolygon() => circleModule.Process(images).ResultList;
+                var filterModule = new ResultFilterRegion(2, properties: new Dictionary<string, object> { ["filter_mode"] = "mask" });
+                var target = Entries(new JObject { ["bbox"] = new JArray(150, 150, 20, 20) });
+                void Filter()
+                {
+                    filterModule.ExtraOutputs.Clear();
+                    Require(filterModule.Process(images, target).ResultList.Count == 1, "性能测试结果应保留中心目标");
+                }
+                double Milliseconds(Action action)
+                {
+                    for (int i = 0; i < warmup; i++) action();
+                    var sw = Stopwatch.StartNew();
+                    for (int i = 0; i < iterations; i++) action();
+                    return sw.Elapsed.TotalMilliseconds / iterations;
+                }
+                var oldRegion = DrawMask();
+                var newRegion = DrawPolygon();
+                filterModule.ExtraInputsIn.Add(new ModuleChannel(null, oldRegion));
+                double maskFilterMs = Milliseconds(Filter);
+                filterModule.ExtraInputsIn[0] = new ModuleChannel(null, newRegion);
+                double polygonFilterMs = Milliseconds(Filter);
+                Console.WriteLine("320×320、半径 105、每次 1 个目标、预热 {0} 次、测量 {1} 次，平均毫秒：绘制（旧掩膜／缓存轮廓）{2:F3}／{3:F3}，同一过滤器（掩膜／多边形输入）{4:F3}／{5:F3}",
+                    warmup, iterations, Milliseconds(() => DrawMask()), Milliseconds(() => DrawPolygon()), maskFilterMs, polygonFilterMs);
+            }
+        }
+
         private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
         private static void Reject(Action action)
         {
