@@ -364,6 +364,40 @@ static Json MapExtraInfoToGlobal(const Json& detection, const std::vector<double
     return extraInfo;
 }
 
+// 局部掩膜数组（mask_array，与 bbox 同尺寸）缺少 RLE 时转成 RLE，
+// 让只有 mask_array 的节点在最终输出也携带掩码，供界面按 bbox 还原显示。
+static Json MaskArrayToMaskInfo(const Json& maskArray) {
+    if (!maskArray.is_array() || maskArray.empty()) return Json();
+    const size_t height = maskArray.size();
+    size_t width = 0;
+    for (size_t y = 0; y < height; ++y) {
+        if (!maskArray.at(y).is_array()) return Json();
+        if (y == 0) {
+            width = maskArray.at(y).size();
+        } else if (maskArray.at(y).size() != width) {
+            return Json();
+        }
+    }
+    if (width == 0) return Json();
+
+    cv::Mat mask(static_cast<int>(height), static_cast<int>(width), CV_8UC1, cv::Scalar(0));
+    for (size_t y = 0; y < height; ++y) {
+        const Json& row = maskArray.at(y);
+        for (size_t x = 0; x < width; ++x) {
+            int value = 0;
+            try {
+                value = row.at(x).get<int>();
+            } catch (...) {
+                return Json();
+            }
+            if (value < 0) value = 0;
+            else if (value > 255) value = 255;
+            mask.at<unsigned char>(static_cast<int>(y), static_cast<int>(x)) = static_cast<unsigned char>(value);
+        }
+    }
+    return MatToMaskInfo(mask);
+}
+
 static void AppendOutResultItemTyped(
     const Json& d,
     const std::vector<double>& T_c2o,
@@ -399,6 +433,9 @@ static void AppendOutResultItemTyped(
 
     if (d.contains("mask_rle") && d.at("mask_rle").is_object()) {
         item.MaskRle = d.at("mask_rle");
+    } else if (d.contains("mask_array")) {
+        const Json maskInfo = MaskArrayToMaskInfo(d.at("mask_array"));
+        if (maskInfo.is_object() && !maskInfo.empty()) item.MaskRle = maskInfo;
     }
 
     if (d.contains("area")) {

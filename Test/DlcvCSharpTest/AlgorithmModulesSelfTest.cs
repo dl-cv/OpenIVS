@@ -28,6 +28,7 @@ namespace DlcvCSharpTest
             check("参考图像坐标排序、空输入与仅首张", TestReferenceImage);
             check("两个节点注册", () => { Require(ModuleRegistry.Get(SequenceType) != null, SequenceType + " 未注册"); Require(ModuleRegistry.Get(Offset) != null, Offset + " 未注册"); });
             check("圆形区域绘制默认值、参数和非法半径", TestCircularRegion);
+            check("圆形区域局部 mask 写入最终输出", TestCircularRegionMaskOutput);
             check("旧流程类型兼容且输出新主标识与原因", TestLegacySequence);
             check("顺序水平竖直、重复及完整列表", TestSequence);
             check("中心排序、稳定同坐标与旋转框", TestCenters);
@@ -155,6 +156,41 @@ namespace DlcvCSharpTest
                         File.WriteAllText(artifactPath, artifact.ToString());
                     }
                 }
+            }
+        }
+        private static void TestCircularRegionMaskOutput()
+        {
+            using (var image = new Mat(480, 640, MatType.CV_8UC3, Scalar.All(0)))
+            {
+                var context = new DlcvModules.ExecutionContext();
+                context.Set("frontend_image_mat", image);
+                var nodes = JArray.Parse(@"[
+                    {'id':1,'order':1,'type':'input/frontend_image','outputs':[{'type':'image_chan','links':[1]}]},
+                    {'id':2,'order':2,'type':'pre_process/circular_region','properties':{'categoryname':'圆形区域','radius':50},
+                     'inputs':[{'type':'image_chan','link':1}],
+                     'outputs':[{'type':'image_chan','links':[2]},{'type':'result_chan','links':[3]}]},
+                    {'id':3,'order':3,'type':'output/return_json','inputs':[{'type':'image_chan','link':2},{'type':'result_chan','link':3}]}
+                ]");
+                new GraphExecutor(nodes.ToObject<List<Dictionary<string, object>>>(), context).Run();
+                var payload = context.Get<Dictionary<string, object>>("frontend_json");
+                Require(payload != null, "return_json 未输出结果");
+                var byImage = (JArray)JObject.FromObject(payload["last"])["by_image"];
+                Require(byImage.Count == 1, "最终输出图片数量错误");
+                var results = (JArray)byImage[0]["results"];
+                Require(results.Count == 1, "最终输出目标数量错误");
+                var result = (JObject)results[0];
+                Require(result.Value<string>("category_name") == "圆形区域", "最终输出类别错误");
+                Require(Math.Abs(result.Value<double>("area") - 7845.0) < 1e-9, "最终输出面积错误");
+                var maskRle = result["mask_rle"] as JObject;
+                Require(maskRle != null, "最终输出缺少 mask_rle");
+                Require(maskRle.Value<int>("width") == 101 && maskRle.Value<int>("height") == 101, "最终输出 mask 尺寸错误");
+                using (var mask = MaskRleUtils.MaskInfoToMat(maskRle))
+                {
+                    Require(mask.Width == 101 && mask.Height == 101, "mask_rle 解码尺寸错误");
+                    Require(Cv2.CountNonZero(mask) == 7845, "mask_rle 解码面积错误");
+                    Require(mask.At<byte>(50, 50) == 255 && mask.At<byte>(0, 0) == 0, "mask_rle 像素错误");
+                }
+                Require(result["mask_array"] == null, "mask_array 不应写入最终输出");
             }
         }
         private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }

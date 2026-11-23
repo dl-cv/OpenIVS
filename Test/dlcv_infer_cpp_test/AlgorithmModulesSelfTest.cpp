@@ -117,6 +117,30 @@ int RunAlgorithmModulesSelfTest() {
         try { circular(1, "", Json{{"radius", 0}}, nullptr)->Process(images, Json::array()); }
         catch (const std::invalid_argument&) { invalidCircularRejected = true; }
         check(invalidCircularRejected, "invalid circular radius");
+        {
+            const cv::Mat maskImage(480, 640, CV_8UC3, cv::Scalar::all(0));
+            const std::vector<ModuleImage> maskImages{ModuleImage(maskImage, maskImage,
+                TransformationState(640, 480), 0)};
+            auto maskOutput = circular(1, "", Json{{"categoryname", "圆形区域"}, {"radius", 50}}, nullptr)
+                ->Process(maskImages, Json::array());
+            const auto& maskDetection = maskOutput.ResultList.at(0).at("sample_results").at(0);
+            ExecutionContext maskContext;
+            auto returnJson = ModuleRegistry::Get("output/return_json");
+            check(static_cast<bool>(returnJson), "return_json not registered");
+            returnJson(2, "", Json::object(), &maskContext)->Process(maskOutput.ImageList, maskOutput.ResultList);
+            const auto maskPayloads = maskContext.Get<std::vector<FlowFrontendByNodePayload>>("frontend_payloads_by_node", {});
+            check(maskPayloads.size() == 1 && maskPayloads[0].Payload.ByImage.size() == 1,
+                "circular return_json image count");
+            const auto& maskResults = maskPayloads[0].Payload.ByImage[0].Results;
+            check(maskResults.size() == 1, "circular return_json result count");
+            const auto& maskItem = maskResults.at(0);
+            check(maskItem.MaskRle.is_object() && !maskItem.MaskRle.empty(), "circular return_json mask_rle");
+            check(maskItem.MaskRle.value("width", 0) == 101 && maskItem.MaskRle.value("height", 0) == 101,
+                "circular return_json mask size");
+            check(std::abs(CalculateMaskArea(maskItem.MaskRle) - maskDetection.at("area").get<double>()) < 1e-12,
+                "circular return_json mask area");
+            check(!maskItem.ToJson().contains("mask_array"), "mask_array must not leak to final output");
+        }
         char* artifactPathRaw = nullptr;
         size_t artifactPathLength = 0;
         _dupenv_s(&artifactPathRaw, &artifactPathLength, "DLCV_CIRCULAR_REGION_CPP_ARTIFACT");

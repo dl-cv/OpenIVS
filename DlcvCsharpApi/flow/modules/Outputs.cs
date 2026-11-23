@@ -568,6 +568,10 @@ namespace DlcvModules
             }
 
             var maskInfo = detObj["mask_rle"];
+            if (includeMask && (maskInfo == null || maskInfo.Type == JTokenType.Null))
+            {
+                maskInfo = MaskArrayToMaskInfo(detObj["mask_array"]);
+            }
             if (includeMask && maskInfo != null && maskInfo.Type != JTokenType.Null)
             {
                 item["mask_rle"] = !isRot && item.TryGetValue("bbox", out object globalBox)
@@ -599,6 +603,40 @@ namespace DlcvModules
             }
 
             outResults.Add(item);
+        }
+
+        // 局部掩膜数组（mask_array，与 bbox 同尺寸）缺少 RLE 时转成 RLE，
+        // 让只有 mask_array 的节点在最终输出也携带掩码，供界面按 bbox 还原显示。
+        private static JToken MaskArrayToMaskInfo(JToken maskArray)
+        {
+            if (!(maskArray is JArray rows) || rows.Count == 0) return null;
+            int height = rows.Count;
+            int width = -1;
+            for (int y = 0; y < height; y++)
+            {
+                if (!(rows[y] is JArray row)) return null;
+                if (width < 0) width = row.Count;
+                else if (row.Count != width) return null;
+            }
+            if (width <= 0) return null;
+
+            using (var mask = new Mat(height, width, MatType.CV_8UC1, Scalar.Black))
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    var row = (JArray)rows[y];
+                    for (int x = 0; x < width; x++)
+                    {
+                        int value;
+                        try { value = row[x].Value<int>(); }
+                        catch { return null; }
+                        if (value < 0) value = 0;
+                        else if (value > 255) value = 255;
+                        mask.At<byte>(y, x) = (byte)value;
+                    }
+                }
+                return MaskRleUtils.MatToMaskInfo(mask);
+            }
         }
 
         // Mask remains bbox-relative; only its axes must follow the original image.
