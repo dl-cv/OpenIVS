@@ -299,7 +299,7 @@ namespace DLCV
                         }
                     }
                     averageNodeTimings = nodeStats.Values
-                        .Where(x => x.AverageMs >= 1.0)
+                        .Where(x => x.AverageMs >= 1.0 || !x.NodeType.StartsWith("graph/", StringComparison.Ordinal))
                         .OrderByDescending(x => x.AverageMs)
                         .ToList();
                 }
@@ -328,7 +328,7 @@ namespace DLCV
                 {
                     string title = string.IsNullOrWhiteSpace(item.NodeTitle) ? "-" : item.NodeTitle;
                     double share = averageTotalInferLatency > 0 ? item.AverageMs * 100.0 / averageTotalInferLatency : 0.0;
-                    sb.AppendLine(string.Format(L("#{0} [{1}] {2}: {3:F2}ms ({4:F1}%)"), item.NodeId, item.NodeType, title, item.AverageMs, share));
+                    sb.AppendLine(string.Format(L("#{0} [{1}] {2}: {3:F4}ms ({4:F1}%)"), item.NodeId, item.NodeType, title, item.AverageMs, share));
                 }
             }
 
