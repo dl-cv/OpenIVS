@@ -25,8 +25,9 @@ static int RunRegionMaskSelfTest() {
         int count = 0;
         std::string regionMode = "any_bbox";
         bool global = false;
+        std::string filterMode = "mask";
         auto check = [&](const std::string& name, Json target, Json regions, bool expected, const std::string& metric, double threshold) {
-            Json props{{"filter_mode", "mask"}, {"overlap_threshold", threshold}, {"result_region_mode", regionMode}};
+            Json props{{"filter_mode", filterMode}, {"overlap_threshold", threshold}, {"result_region_mode", regionMode}};
             if (!metric.empty()) props["metric"] = metric;
             auto module = (global ? ModuleRegistry::Get("post_process/result_filter_region_global") : factory)(1, "", props, nullptr);
             module->ExtraInputsIn.emplace_back(std::vector<ModuleImage>{}, regions);
@@ -38,8 +39,9 @@ static int RunRegionMaskSelfTest() {
             if (module->ScalarOutputsByName.at("has_positive").get<bool>() != expected)
                 throw std::runtime_error(name + ": wrong scalar");
             auto result = expected ? output.ResultList : module->ExtraOutputs.at(0).ResultList;
-            if (input != before || result.at(0).at("sample_results").at(0) != target)
-                throw std::runtime_error(name + ": geometry changed");
+            auto actual = result.at(0).at("sample_results").at(0);
+            if (filterMode == "legacy") actual.erase("metadata");
+            if (input != before || actual != target) throw std::runtime_error(name + ": geometry changed");
             std::cout << "PASS " << name << std::endl;
             ++count;
         };
@@ -49,6 +51,78 @@ static int RunRegionMaskSelfTest() {
         check("inclusive-threshold",det(8,9,10,10),entries(det(13,9,10,10)),true,"IOS",0.5);
         check("above-threshold",det(8,9,10,10),entries(det(13,9,10,10)),false,"ios",0.51);
         check("zero-needs-intersection",det(8,9,10,10),entries(det(18,9,10,10)),false,"ios",0);
+        const Json triangle = {{"bbox", {8, 9, 10, 10}}, {"polygon", {{8, 9}, {17, 9}, {8, 18}}}, {"score", 0.9}};
+        const auto center = det(9,10,2,2), corner = det(16,17,2,2);
+        auto emptyPolygonMask = triangle;
+        emptyPolygonMask["mask_array"] = Json::array();
+        for (const std::string mode : {"mask", "legacy"}) {
+            filterMode = mode;
+            check(mode + "-polygon-region-corner",corner,entries(triangle),false,"",0.5);
+            check(mode + "-polygon-target-corner",triangle,entries(corner),false,"",0.5);
+            check(mode + "-polygon-region-center",center,entries(triangle),true,"",0.5);
+            check(mode + "-polygon-target-center",triangle,entries(center),true,"",0.5);
+            check(mode + "-empty-mask-priority",center,entries(emptyPolygonMask),false,"",0.5);
+            for (int value : {1, 127, 128}) {
+                auto pixel = det(9,10,1,1);
+                pixel["mask_array"][0][0] = value;
+                check(mode + "-polygon-mask-" + std::to_string(value),pixel,entries(triangle),value > 127,"",0.5);
+            }
+        }
+        filterMode = "mask";
+        check("polygon-threshold-ios",triangle,entries(center),true,"ios",1);
+        check("polygon-threshold-iou",triangle,entries(center),false,"iou",0.5);
+        auto malformed = triangle;
+        malformed["polygon"][0][0] = 1e9 + 1;
+        for (const std::string mode : {"mask", "legacy"}) {
+            auto module = factory(1, "", Json{{"filter_mode", mode}}, nullptr);
+            module->ExtraInputsIn.emplace_back(std::vector<ModuleImage>{}, entries(triangle));
+            try { module->Process(images, entries(malformed)); throw std::runtime_error(mode + " invalid polygon accepted"); }
+            catch (const std::invalid_argument&) {}
+        }
+        {
+            TransformationState stateA(32,32), stateB(32,32);
+            stateA.AffineMatrix2x3 = {1,0,-3,0,1,0};
+            stateB.AffineMatrix2x3 = {1,0,-1,0,1,0};
+            stateA.OutputSize = stateB.OutputSize = {32,32};
+            auto entry = [&](const Json& item, int index, int origin, const Json& transform) {
+                auto result = entries(item);
+                result[0]["index"] = index;
+                result[0]["origin_index"] = origin;
+                result[0]["transform"] = transform;
+                return result;
+            };
+            std::vector<ModuleImage> crops{ModuleImage(image,image,stateA,0), ModuleImage(image,image,stateB,0)};
+            Json target{{"bbox", {1,1,3,3}}};
+            const Json region{{"bbox", {3,1,3,3}}, {"polygon", {{3,1},{5,1},{5,3},{3,3}}}};
+            auto module = factory(1, "", Json::object(), nullptr);
+            module->ExtraInputsIn.emplace_back(std::vector<ModuleImage>{}, entry(region, 1, 0, stateB.ToJson()));
+            auto output = module->Process(crops, entry(target, 0, 0, stateA.ToJson()));
+            if (output.ImageList.size() != 1 || output.ImageList[0].TransformState.AffineMatrix2x3 != stateA.AffineMatrix2x3)
+                throw std::runtime_error("legacy polygon should match across crops of the same image");
+            crops[1] = ModuleImage(image,image,stateA,1);
+            target["bbox"] = region.at("bbox");
+            module = factory(1, "", Json::object(), nullptr);
+            module->ExtraInputsIn.emplace_back(std::vector<ModuleImage>{}, entry(region, 1, 1, stateA.ToJson()));
+            output = module->Process(crops, entry(target, 0, 0, stateA.ToJson()));
+            if (!output.ImageList.empty() || module->ExtraOutputs.at(0).ImageList.at(0).OriginalIndex != 0)
+                throw std::runtime_error("legacy polygon should not match another image with the same transform");
+            auto regions = entry(target, 0, 0, stateA.ToJson());
+            const Json farRegion{{"bbox", {22,22,3,3}}, {"polygon", {{22,22},{24,22},{24,24},{22,24}}}};
+            regions.push_back(entry(farRegion, 1, 1, stateA.ToJson()).at(0));
+            module = factory(1, "", Json::object(), nullptr);
+            module->ExtraInputsIn.emplace_back(std::vector<ModuleImage>{}, regions);
+            output = module->Process(crops, entry(target, 1, 1, stateA.ToJson()));
+            if (!output.ImageList.empty() || module->ExtraOutputs.at(0).ImageList.at(0).OriginalIndex != 1)
+                throw std::runtime_error("legacy region rectangles must stay with their original image when polygons are present");
+            module = factory(1, "", Json::object(), nullptr);
+            output = module->Process(crops, entry(region, 0, 0, nullptr));
+            const auto& original = output.ResultList.at(0).at("sample_results").at(0);
+            if (original.at("polygon") != region.at("polygon") || original.at("bbox") != region.at("bbox"))
+                throw std::runtime_error("legacy original polygon should not be converted twice");
+            std::cout << "PASS legacy-polygon-transforms" << std::endl;
+        }
+        auto polygonOnly = triangle; polygonOnly.erase("bbox");
+        check("polygon-without-bbox",center,entries(polygonOnly),true,"ios",1);
         auto missing = det(8,9,10,10); missing.erase("mask_array");
         check("missing-target-mask",missing,entries(det(8,9,10,10)),true,"",0.5);
         check("missing-region-mask",det(8,9,10,10),entries(missing),true,"",0.5);

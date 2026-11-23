@@ -1,3 +1,3 @@
 #pragma once
 
-int RunAlgorithmModulesSelfTest();
+int RunAlgorithmModulesSelfTest(bool circularOnly = false);

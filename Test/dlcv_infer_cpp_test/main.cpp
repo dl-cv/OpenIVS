@@ -5530,6 +5530,10 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunAlgorithmModulesSelfTest();
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"circular-region-selftest") {
+        return RunAlgorithmModulesSelfTest(true);
+    }
+
     if (argc >= 2 && std::wstring(argv[1]) == L"category-count-check-selftest") {
         return RunCategoryCountCheckSelfTest();
     }

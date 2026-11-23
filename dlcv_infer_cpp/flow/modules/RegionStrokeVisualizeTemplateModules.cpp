@@ -2,6 +2,7 @@
 #include "flow/ModuleRegistry.h"
 #include "flow/utils/FlowPlatformUtils.h"
 #include "flow/utils/MaskRleUtils.h"
+#include "flow/utils/ResultPolygon.h"
 
 #include <algorithm>
 #include <array>
@@ -118,9 +119,9 @@ protected:
         }
 
         const bool maskMode = ToLowerCopy(ReadString("filter_mode", "legacy")) == "mask";
-        const auto pickWrapIndexForEntry = [&](const Json& entry) -> int {
+        const auto pickWrapIndexForEntry = [&](const Json& entry, bool shapeAware = false) -> int {
             if (!entry.is_object()) return -1;
-            if (maskMode) {
+            if (maskMode || shapeAware || EntryHasPolygon(entry)) {
                 // Limit by original image before transform/index; branch indices may have been reassigned.
                 const bool hasOrigin = entry.contains("origin_index") && !entry.at("origin_index").is_null();
                 const int origin = hasOrigin ? entry.at("origin_index").get<int>() : -1;
@@ -138,7 +139,8 @@ protected:
                 if (matching.size() == 1) return matching[0];
                 if (std::find(candidates.begin(), candidates.end(), indexed) != candidates.end()) return indexed;
                 if (hasOrigin) return candidates[0];
-                throw std::invalid_argument("Mask mode requires origin_index or a valid image index");
+                if (maskMode) throw std::invalid_argument("Mask mode requires origin_index or a valid image index");
+                return -1;
             }
 
             try {
@@ -161,7 +163,7 @@ protected:
         };
 
         if (maskMode) {
-            return ProcessMask(images, results, pickWrapIndexForEntry);
+            return ProcessMask(images, results, [&](const Json& entry) { return pickWrapIndexForEntry(entry); });
         }
 
         bool forceOriginal = false;
@@ -189,7 +191,7 @@ protected:
             for (const auto& detToken : entry.at("sample_results")) {
                 if (!detToken.is_object()) continue;
                 double bx1 = 0.0, by1 = 0.0, bx2 = 0.0, by2 = 0.0;
-                if (!TryExtractBboxAabbCurrent(detToken, bx1, by1, bx2, by2)) continue;
+                if (!TryExtractLegacyBounds(detToken, bx1, by1, bx2, by2)) continue;
                 const Box bboxCur = ClampXYXY(bx1, by1, bx2, by2, Wc, Hc);
                 (void)bboxCur;
 
@@ -237,22 +239,34 @@ protected:
         const bool resultRegionConnected = rrInput.first;
         const Json resultRegionResults = rrInput.second;
 
-        std::unordered_map<int, std::vector<Box>> regionBoxesByWrapIndex;
+        struct LegacyRegion {
+            Box BBox{};
+            double Score = -std::numeric_limits<double>::infinity();
+            const Json* Detection;
+            const Json* Entry;
+            bool HasPolygon;
+            int ShapeWrapIndex;
+            bool Prepared = false;
+            RegionMask Shape;
+        };
+        std::unordered_map<int, std::vector<LegacyRegion>> regionsByWrapIndex, regionsByOrigin;
+        const bool anyPolygonRegion = std::any_of(resultRegionResults.begin(), resultRegionResults.end(), EntryHasPolygon) ||
+            std::any_of(results.begin(), results.end(), EntryHasPolygon);
+        const auto addRegion = [&](std::vector<LegacyRegion>& candidates, const LegacyRegion& region) {
+            if (resultRegionMode == "top1_bbox" && !candidates.empty()) {
+                if (region.Score <= candidates.front().Score) return;
+                candidates.clear();
+            }
+            candidates.push_back(region);
+        };
         if (resultRegionConnected) {
-            struct BoxCandidate {
-                Box BBox{};
-                bool HasScore = false;
-                double Score = 0.0;
-            };
-            std::unordered_map<int, std::vector<BoxCandidate>> candidatesByWrapIndex;
-
             for (const auto& token : resultRegionResults) {
                 if (!token.is_object()) continue;
                 const Json& regionEntry = token;
                 if (!CaseEquals(regionEntry.value("type", ""), "local")) continue;
                 if (!regionEntry.contains("sample_results") || !regionEntry.at("sample_results").is_array()) continue;
 
-                const int wrapIndex = pickWrapIndexForEntry(regionEntry);
+                const int wrapIndex = pickWrapIndexForEntry(regionEntry, anyPolygonRegion);
                 if (wrapIndex < 0 || wrapIndex >= static_cast<int>(images.size())) continue;
                 const ModuleImage& wrap = images[static_cast<size_t>(wrapIndex)];
                 const int Wc = std::max(1, wrap.ImageObject.empty() ? 1 : wrap.ImageObject.cols);
@@ -265,7 +279,7 @@ protected:
                 for (const auto& detToken : regionEntry.at("sample_results")) {
                     if (!detToken.is_object()) continue;
                     double bx1 = 0.0, by1 = 0.0, bx2 = 0.0, by2 = 0.0;
-                    if (!TryExtractBboxAabbCurrent(detToken, bx1, by1, bx2, by2)) continue;
+                    if (!TryExtractLegacyBounds(detToken, bx1, by1, bx2, by2)) continue;
 
                     const Box bboxCur = ClampXYXY(bx1, by1, bx2, by2, Wc, Hc);
                     Box bboxUse = bboxCur;
@@ -293,39 +307,11 @@ protected:
                         }
                     }
 
-                    double score = 0.0;
-                    const bool hasScore = TryExtractScore(detToken, score);
-                    candidatesByWrapIndex[wrapIndex].push_back(BoxCandidate{ bboxUse, hasScore, score });
-                }
-            }
-
-            for (const auto& kv : candidatesByWrapIndex) {
-                const int wrapIndex = kv.first;
-                const std::vector<BoxCandidate>& cands = kv.second;
-                if (cands.empty()) continue;
-
-                if (resultRegionMode == "top1_bbox") {
-                    bool foundScored = false;
-                    double bestScore = -1e100;
-                    Box bestBox{};
-                    for (const auto& cand : cands) {
-                        if (!cand.HasScore || std::isnan(cand.Score) || std::isinf(cand.Score)) continue;
-                        if (!foundScored || cand.Score > bestScore) {
-                            foundScored = true;
-                            bestScore = cand.Score;
-                            bestBox = cand.BBox;
-                        }
-                    }
-                    if (foundScored) {
-                        regionBoxesByWrapIndex[wrapIndex] = { bestBox };
-                    } else {
-                        regionBoxesByWrapIndex[wrapIndex] = { cands.front().BBox };
-                    }
-                } else {
-                    std::vector<Box> boxes;
-                    boxes.reserve(cands.size());
-                    for (const auto& cand : cands) boxes.push_back(cand.BBox);
-                    if (!boxes.empty()) regionBoxesByWrapIndex[wrapIndex] = std::move(boxes);
+                    double score;
+                    if (!TryExtractScore(detToken, score)) score = -std::numeric_limits<double>::infinity();
+                    const LegacyRegion region{bboxUse, score, &detToken, &regionEntry, HasResultPolygon(detToken), wrapIndex};
+                    addRegion(regionsByWrapIndex[wrapIndex], region);
+                    if (anyPolygonRegion) addRegion(regionsByOrigin[wrap.OriginalIndex], region);
                 }
             }
         }
@@ -358,7 +344,10 @@ protected:
                 continue;
             }
 
-            const int wrapIndex = pickWrapIndexForEntry(entry);
+            const int wrapIndex = pickWrapIndexForEntry(entry, anyPolygonRegion);
+            auto shapeRegions = anyPolygonRegion && wrapIndex >= 0 ? regionsByOrigin.find(images[static_cast<size_t>(wrapIndex)].OriginalIndex) : regionsByOrigin.end();
+            const bool hasPolygonRegion = shapeRegions != regionsByOrigin.end() &&
+                std::any_of(shapeRegions->second.begin(), shapeRegions->second.end(), [](const LegacyRegion& region) { return region.HasPolygon; });
             if (wrapIndex < 0 || wrapIndex >= static_cast<int>(images.size())) {
                 others.push_back(entry);
                 continue;
@@ -378,16 +367,12 @@ protected:
                 : ClampXYXY(static_cast<double>(x), static_cast<double>(y), static_cast<double>(x + w), static_cast<double>(y + h), Wc, Hc);
 
             std::vector<Box> activeRois;
-            bool forceOutsideByEmptyRegion = false;
-            if (resultRegionConnected) {
-                auto itRoi = regionBoxesByWrapIndex.find(wrapIndex);
-                if (itRoi != regionBoxesByWrapIndex.end() && !itRoi->second.empty()) {
-                    activeRois = itRoi->second;
-                } else {
-                    forceOutsideByEmptyRegion = true;
-                }
-            } else {
-                activeRois.push_back(fallbackRoi);
+            auto foundRegions = regionsByWrapIndex.find(wrapIndex);
+            const bool forceOutsideByEmptyRegion = resultRegionConnected && foundRegions == regionsByWrapIndex.end();
+            if (!resultRegionConnected) activeRois.push_back(fallbackRoi);
+            else if (!forceOutsideByEmptyRegion) {
+                for (const auto& region : foundRegions->second)
+                    if (!region.HasPolygon) activeRois.push_back(region.BBox);
             }
 
             const int spaceW = useOriginal ? W0 : Wc;
@@ -403,14 +388,16 @@ protected:
                 const Json& det = detToken;
 
                 double bx1 = 0.0, by1 = 0.0, bx2 = 0.0, by2 = 0.0;
-                if (!TryExtractBboxAabbCurrent(det, bx1, by1, bx2, by2)) {
+                if (!TryExtractLegacyBounds(det, bx1, by1, bx2, by2)) {
                     outArr.push_back(det);
                     continue;
                 }
 
                 const Box bboxCur = ClampXYXY(bx1, by1, bx2, by2, Wc, Hc);
-                Box bboxUse = bboxCur;
-                if (useOriginal) {
+                const bool originalPolygon = HasResultPolygon(det) && !HasResultMask(det) &&
+                    (!entry.contains("transform") || entry.at("transform").is_null());
+                Box bboxUse = originalPolygon && useOriginal ? ClampXYXY(bx1, by1, bx2, by2, W0, H0) : bboxCur;
+                if (useOriginal && !originalPolygon) {
                     Box bboxMetaOri{};
                     bool hasMetaOri = false;
                     try {
@@ -439,6 +426,31 @@ protected:
                 if (forceOutsideByEmptyRegion) {
                     decided = true;
                     isIn = false;
+                }
+
+                const bool hasPolygon = HasResultPolygon(det);
+                if (hasPolygon || hasPolygonRegion) {
+                    const auto shape = PrepareRegionMask(det, entry, wrap, resultRegionConnected || useOriginal, true);
+                    if (shape.Area) {
+                        if (!resultRegionConnected) {
+                            const cv::Rect box(fallbackRoi[0], fallbackRoi[1], fallbackRoi[2] - fallbackRoi[0], fallbackRoi[3] - fallbackRoi[1]);
+                            const cv::Rect overlap = shape.Bounds & box;
+                            isIn = !overlap.empty() && cv::countNonZero(shape.Pixels(cv::Rect(overlap.tl() - shape.Bounds.tl(), overlap.size()))) > 0;
+                        } else if (shapeRegions != regionsByOrigin.end()) {
+                            for (auto& region : shapeRegions->second) {
+                                if (!hasPolygon && !region.HasPolygon) continue;
+                                if (!region.Prepared) {
+                                    region.Shape = PrepareRegionMask(*region.Detection, *region.Entry, images[static_cast<size_t>(region.ShapeWrapIndex)], true, true);
+                                    region.Prepared = true;
+                                }
+                                if (region.Shape.Area && RegionMasksMatch(shape, region.Shape, "ios", 0)) {
+                                    isIn = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    decided = isIn || hasPolygon || activeRois.empty();
                 }
 
                 if (!decided && det.contains("mask_rle") && det.at("mask_rle").is_object()) {
@@ -489,7 +501,7 @@ protected:
 
                 Json detOut = det;
                 if (convertOutputToOriginal && useOriginal) {
-                    detOut = ConvertDetToOriginal(det, bboxUse);
+                    detOut = ConvertDetToOriginal(det, bboxUse, entry);
                 }
 
                 if (isIn) {
@@ -1034,7 +1046,7 @@ private:
         return false;
     }
 
-    static Json ConvertDetToOriginal(const Json& det, const Box& bboxOriXYXY) {
+    static Json ConvertDetToOriginal(const Json& det, const Box& bboxOriXYXY, const Json& entry) {
         if (!det.is_object()) return det;
         Json d2 = det;
         const int ox1 = bboxOriXYXY[0];
@@ -1044,6 +1056,9 @@ private:
         const int ow = std::max(1, ox2 - ox1);
         const int oh = std::max(1, oy2 - oy1);
         d2["bbox"] = Json::array({ ox1, oy1, ow, oh });
+        if (entry.contains("transform") && !entry.at("transform").is_null() && HasResultPolygon(det) && !HasResultMask(det)) {
+            d2["polygon"] = MapResultPolygon(ReadResultPolygon(det), PolygonToOriginalTransform(entry.at("transform")));
+        }
         try {
             Json meta = Json::object();
             if (d2.contains("metadata") && d2.at("metadata").is_object()) {
@@ -1145,10 +1160,40 @@ private:
         return std::move(outputs[0]);
     }
 
-    static RegionMask PrepareRegionMask(const Json& det, const Json& entry, const ModuleImage& wrap) {
+    static bool EntryHasPolygon(const Json& entry) {
+        if (entry.contains("sample_results") && entry.at("sample_results").is_array())
+            for (const auto& det : entry.at("sample_results")) if (HasResultPolygon(det)) return true;
+        return false;
+    }
+
+    static double RoundPolygonCoordinate(double value) { return std::nearbyint(value); }
+
+    static void PolygonBounds(const std::vector<cv::Point2d>& points, double& x1, double& y1, double& x2, double& y2) {
+        x1 = x2 = points.front().x;
+        y1 = y2 = points.front().y;
+        for (const auto& point : points) {
+            x1 = std::min(x1, point.x); y1 = std::min(y1, point.y);
+            x2 = std::max(x2, point.x); y2 = std::max(y2, point.y);
+        }
+    }
+
+    static bool TryExtractLegacyBounds(const Json& det, double& x1, double& y1, double& x2, double& y2) {
+        if (TryExtractBboxAabbCurrent(det, x1, y1, x2, y2)) return true;
+        if (HasResultMask(det)) return false;
+        const auto points = ReadResultPolygon(det);
+        if (points.empty()) return false;
+        PolygonBounds(points, x1, y1, x2, y2);
+        x1 = RoundPolygonCoordinate(x1); y1 = RoundPolygonCoordinate(y1);
+        x2 = RoundPolygonCoordinate(x2) + 1; y2 = RoundPolygonCoordinate(y2) + 1;
+        return true;
+    }
+
+    static RegionMask PrepareRegionMask(const Json& det, const Json& entry, const ModuleImage& wrap, bool original = true, bool legacy = false) {
         cv::Mat mask;
+        std::vector<cv::Point2d> polygon;
         bool useBbox = false;
-        if (det.contains("mask_array") && !det.at("mask_array").is_null()) {
+        const bool hasRle = det.contains("mask_rle") && !det.at("mask_rle").is_null();
+        if (det.contains("mask_array") && !det.at("mask_array").is_null() && !(legacy && hasRle)) {
             const auto& rows = det.at("mask_array");
             if (!rows.is_array()) throw std::invalid_argument("Mask array must be two-dimensional uint8");
             if (rows.empty()) return {};
@@ -1165,13 +1210,16 @@ private:
                     mask.at<unsigned char>(y,x) = value > 127 ? 255 : 0;
                 }
             }
-        } else if (det.contains("mask_rle") && !det.at("mask_rle").is_null()) {
+        } else if (hasRle) {
             mask = MaskInfoToMat(det.at("mask_rle"));
             if (mask.empty()) return {};
             cv::threshold(mask, mask, 127, 255, cv::THRESH_BINARY);
+        } else if (HasResultPolygon(det)) {
+            polygon = ReadResultPolygon(det);
+            if (polygon.empty()) return {};
         } else useBbox = true;
-        if (!useBbox && !cv::countNonZero(mask)) return {};
-        const int W = wrap.TransformState.OriginalWidth, H = wrap.TransformState.OriginalHeight;
+        if (!useBbox && polygon.empty() && !cv::countNonZero(mask)) return {};
+        int W = wrap.TransformState.OriginalWidth, H = wrap.TransformState.OriginalHeight;
         int sourceW = W, sourceH = H;
         cv::Matx23d inverse(1,0,0,0,1,0);
         if (entry.contains("transform") && !entry.at("transform").is_null()) {
@@ -1204,9 +1252,29 @@ private:
             cv::invertAffineTransform(a, inverse);
             for (double v : inverse.val) if (!std::isfinite(v)) throw std::invalid_argument("Invalid inverse mask transform");
         }
+        if (!original) {
+            W = sourceW;
+            H = sourceH;
+            inverse = cv::Matx23d(1,0,0,0,1,0);
+        }
         if (std::min({W,H,sourceW,sourceH}) <= 0) throw std::invalid_argument("Invalid mask image size");
         int x1 = 0, y1 = 0, x2 = sourceW, y2 = sourceH;
-        if (useBbox) {
+        if (!polygon.empty()) {
+            double bx1, by1, bx2, by2;
+            PolygonBounds(polygon, bx1, by1, bx2, by2);
+            const auto bound = [](double v, int size) { return static_cast<int>(std::max(0.0, std::min(v, static_cast<double>(size)))); };
+            x1 = bound(RoundPolygonCoordinate(bx1), sourceW); y1 = bound(RoundPolygonCoordinate(by1), sourceH);
+            x2 = bound(RoundPolygonCoordinate(bx2) + 1, sourceW); y2 = bound(RoundPolygonCoordinate(by2) + 1, sourceH);
+            if (x2 <= x1 || y2 <= y1) return {};
+            const auto coord = [](double value, int offset) {
+                return static_cast<int>(RoundPolygonCoordinate(value) - offset);
+            };
+            std::vector<cv::Point> points;
+            points.reserve(polygon.size());
+            for (const auto& point : polygon) points.emplace_back(coord(point.x, x1), coord(point.y, y1));
+            mask = cv::Mat(y2 - y1, x2 - x1, CV_8UC1, cv::Scalar(0));
+            cv::fillPoly(mask, std::vector<std::vector<cv::Point>>{std::move(points)}, cv::Scalar(255));
+        } else if (useBbox) {
             if (!det.contains("bbox") || !det.at("bbox").is_array() || det.at("bbox").size() < 4) return {};
             const auto& bbox = det.at("bbox");
             for (int i = 0; i < 4; ++i)
@@ -1237,6 +1305,8 @@ private:
         const int sx = std::max(0,x1), sy = std::max(0,y1), ex = std::min(sourceW,x2), ey = std::min(sourceH,y2);
         if (ex <= sx || ey <= sy) return {};
         const cv::Mat clipped = mask(cv::Rect(sx-x1,sy-y1,ex-sx,ey-sy));
+        if (inverse(0,0) == 1 && inverse(0,1) == 0 && inverse(1,0) == 0 && inverse(1,1) == 1 && inverse(0,2) == 0 && inverse(1,2) == 0)
+            return {cv::Rect(sx, sy, ex - sx, ey - sy), clipped, cv::countNonZero(clipped)};
         inverse(0,2) += inverse(0,0)*sx + inverse(0,1)*sy;
         inverse(1,2) += inverse(1,0)*sx + inverse(1,1)*sy;
         double minX = std::numeric_limits<double>::infinity(), minY = minX, maxX = -minX, maxY = -minX;
@@ -1258,9 +1328,18 @@ private:
     static bool RegionMasksMatch(const RegionMask& a, const RegionMask& b, const std::string& metric, double threshold) {
         const cv::Rect overlap = a.Bounds & b.Bounds;
         if (overlap.empty()) return false;
+        const cv::Mat ar = a.Pixels(cv::Rect(overlap.tl() - a.Bounds.tl(), overlap.size()));
+        const cv::Mat br = b.Pixels(cv::Rect(overlap.tl() - b.Bounds.tl(), overlap.size()));
+        if (threshold == 0) {
+            for (int y = 0; y < ar.rows; ++y) {
+                const auto* ap = ar.ptr<unsigned char>(y);
+                const auto* bp = br.ptr<unsigned char>(y);
+                for (int x = 0; x < ar.cols; ++x) if (ap[x] & bp[x]) return true;
+            }
+            return false;
+        }
         cv::Mat intersectionMask;
-        cv::bitwise_and(a.Pixels(cv::Rect(overlap.tl()-a.Bounds.tl(),overlap.size())),
-                        b.Pixels(cv::Rect(overlap.tl()-b.Bounds.tl(),overlap.size())), intersectionMask);
+        cv::bitwise_and(ar, br, intersectionMask);
         const int intersection = cv::countNonZero(intersectionMask);
         const double denominator = metric == "ios" ? std::min(a.Area,b.Area) : static_cast<double>(a.Area)+b.Area-intersection;
         return intersection > 0 && intersection/denominator >= threshold;

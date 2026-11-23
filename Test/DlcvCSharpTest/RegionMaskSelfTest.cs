@@ -26,6 +26,52 @@ namespace DlcvCSharpTest
                 ["transform"] = null, ["sample_results"] = new JArray(dets) });
         }
 
+        private static void CheckLegacyPolygonTransforms(Mat image)
+        {
+            JArray Entry(JObject det, int index, int origin, TransformationState state)
+            {
+                var entries = Entries(det);
+                entries[0]["index"] = index;
+                entries[0]["origin_index"] = origin;
+                entries[0]["transform"] = state == null ? (JToken)JValue.CreateNull() : JObject.FromObject(state.ToDict());
+                return entries;
+            }
+            var stateA = new TransformationState(32, 32, affine2x3: new double[] { 1, 0, -3, 0, 1, 0 }, outputSize: new[] { 32, 32 });
+            var stateB = new TransformationState(32, 32, affine2x3: new double[] { 1, 0, -1, 0, 1, 0 }, outputSize: new[] { 32, 32 });
+            var target = JObject.Parse(@"{'bbox':[1,1,3,3]}");
+            var region = JObject.Parse(@"{'bbox':[3,1,3,3],'polygon':[[3,1],[5,1],[5,3],[3,3]]}");
+            var images = new List<ModuleImage> { new ModuleImage(image, image, stateA, 0), new ModuleImage(image, image, stateB, 0) };
+            var module = new ResultFilterRegion(1);
+            module.ExtraInputsIn.Add(new ModuleChannel(null, Entry(region, 1, 0, stateB)));
+            var output = module.Process(images, Entry(target, 0, 0, stateA));
+            if (output.ImageList.Count != 1 || !ReferenceEquals(output.ImageList[0], images[0]))
+                throw new Exception("legacy polygon should match across crops of the same image");
+
+            images[1] = new ModuleImage(image, image, stateA, 1);
+            module = new ResultFilterRegion(1);
+            module.ExtraInputsIn.Add(new ModuleChannel(null, Entry(region, 1, 1, stateA)));
+            target["bbox"] = region["bbox"].DeepClone();
+            output = module.Process(images, Entry(target, 0, 0, stateA));
+            if (output.ImageList.Count != 0 || !ReferenceEquals(module.ExtraOutputs[0].ImageList[0], images[0]))
+                throw new Exception("legacy polygon should not match another image with the same transform");
+
+            var regions = Entry(target, 0, 0, stateA);
+            var farRegion = JObject.Parse(@"{'bbox':[22,22,3,3],'polygon':[[22,22],[24,22],[24,24],[22,24]]}");
+            regions.Add(Entry(farRegion, 1, 1, stateA)[0]);
+            module = new ResultFilterRegion(1);
+            module.ExtraInputsIn.Add(new ModuleChannel(null, regions));
+            output = module.Process(images, Entry(target, 1, 1, stateA));
+            if (output.ImageList.Count != 0 || !ReferenceEquals(module.ExtraOutputs[0].ImageList[0], images[1]))
+                throw new Exception("legacy region rectangles must stay with their original image when polygons are present");
+
+            module = new ResultFilterRegion(1);
+            output = module.Process(images, Entry(region, 0, 0, null));
+            var original = output.ResultList[0]["sample_results"][0];
+            if (!JToken.DeepEquals(original["polygon"], region["polygon"]) || !JToken.DeepEquals(original["bbox"], region["bbox"]))
+                throw new Exception("legacy original polygon should not be converted twice");
+            Console.WriteLine("PASS legacy-polygon-transforms");
+        }
+
         public static int Run()
         {
             try
@@ -36,9 +82,10 @@ namespace DlcvCSharpTest
                     int count = 0;
                     string regionMode = "any_bbox";
                     bool global = false;
+                    string filterMode = "mask";
                     Action<string, JObject, JArray, bool, string, double> check = (name, target, regions, expected, metric, threshold) =>
                     {
-                        var props = new Dictionary<string, object> { ["filter_mode"] = "mask", ["overlap_threshold"] = threshold, ["result_region_mode"] = regionMode };
+                        var props = new Dictionary<string, object> { ["filter_mode"] = filterMode, ["overlap_threshold"] = threshold, ["result_region_mode"] = regionMode };
                         if (metric != null) props["metric"] = metric;
                         ResultFilterRegion module = global ? new ResultFilterRegionGlobal(1, properties: props) : new ResultFilterRegion(1, properties: props);
                         module.ExtraInputsIn.Add(new ModuleChannel(null, regions));
@@ -51,7 +98,11 @@ namespace DlcvCSharpTest
                             throw new Exception(name + ": wrong scalar");
                         if (!JToken.DeepEquals(before, input)) throw new Exception(name + ": input changed");
                         var entry = (expected ? output.ResultList : module.ExtraOutputs[0].ResultList)[0];
-                        if (!JToken.DeepEquals(entry["sample_results"][0], target)) throw new Exception(name + ": bbox/mask changed");
+                        var actual = entry["sample_results"][0];
+                        if (filterMode == "mask" ? !JToken.DeepEquals(actual, target) :
+                            !JToken.DeepEquals(actual["bbox"], target["bbox"]) || !JToken.DeepEquals(actual["mask_array"], target["mask_array"]) ||
+                            !JToken.DeepEquals(actual["polygon"], target["polygon"]))
+                            throw new Exception(name + ": bbox/mask/polygon changed");
                         Console.WriteLine("PASS " + name);
                         count++;
                     };
@@ -61,6 +112,41 @@ namespace DlcvCSharpTest
                     check("inclusive-threshold", Det(8, 9, 10, 10), Entries(Det(13, 9, 10, 10)), true, "IOS", 0.5);
                     check("above-threshold", Det(8, 9, 10, 10), Entries(Det(13, 9, 10, 10)), false, "ios", 0.51);
                     check("zero-needs-intersection", Det(8, 9, 10, 10), Entries(Det(18, 9, 10, 10)), false, "ios", 0);
+                    var triangle = JObject.Parse(@"{'bbox':[8,9,10,10],'polygon':[[8,9],[17,9],[8,18]],'score':0.9}");
+                    var corner = Det(16, 17, 2, 2);
+                    var center = Det(9, 10, 2, 2);
+                    var emptyPolygonMask = (JObject)triangle.DeepClone();
+                    emptyPolygonMask["mask_array"] = new JArray();
+                    foreach (string mode in new[] { "mask", "legacy" })
+                    {
+                        filterMode = mode;
+                        check(mode + "-polygon-region-corner", corner, Entries(triangle), false, null, 0.5);
+                        check(mode + "-polygon-target-corner", triangle, Entries(corner), false, null, 0.5);
+                        check(mode + "-polygon-region-center", center, Entries(triangle), true, null, 0.5);
+                        check(mode + "-polygon-target-center", triangle, Entries(center), true, null, 0.5);
+                        check(mode + "-empty-mask-priority", center, Entries(emptyPolygonMask), false, null, 0.5);
+                        foreach (int value in new[] { 1, 127, 128 })
+                        {
+                            var pixel = Det(9, 10, 1, 1);
+                            pixel["mask_array"][0][0] = value;
+                            check(mode + "-polygon-mask-" + value, pixel, Entries(triangle), value > 127, null, 0.5);
+                        }
+                    }
+                    filterMode = "mask";
+                    check("polygon-threshold-ios", triangle, Entries(center), true, "ios", 1);
+                    check("polygon-threshold-iou", triangle, Entries(center), false, "iou", 0.5);
+                    var malformed = (JObject)triangle.DeepClone();
+                    malformed["polygon"][0][0] = 1e9 + 1;
+                    foreach (string mode in new[] { "mask", "legacy" })
+                    {
+                        var module = new ResultFilterRegion(1, properties: new Dictionary<string, object> { ["filter_mode"] = mode });
+                        module.ExtraInputsIn.Add(new ModuleChannel(null, Entries(triangle)));
+                        try { module.Process(images, Entries(malformed)); throw new Exception(mode + " invalid polygon accepted"); }
+                        catch (ArgumentException) { }
+                    }
+                    CheckLegacyPolygonTransforms(image);
+                    var polygonOnly = (JObject)triangle.DeepClone(); polygonOnly.Remove("bbox");
+                    check("polygon-without-bbox", center, Entries(polygonOnly), true, "ios", 1);
                     var missing = Det(8, 9, 10, 10); missing.Remove("mask_array");
                     check("missing-target-mask", missing, Entries(Det(8, 9, 10, 10)), true, null, 0.5);
                     check("missing-region-mask", Det(8, 9, 10, 10), Entries(missing), true, null, 0.5);
