@@ -546,12 +546,20 @@ namespace DlcvModules
                 item["area"] = detObj["area"];
             }
 
+            var polygon = ResultFilterRegion.HasPolygon(detObj) && !ResultFilterRegion.HasMask(detObj)
+                ? ResultFilterRegion.ReadPolygon(detObj["polygon"]) : null;
+            var geometryTransform = tC2O;
+            if (polygon != null && detObj.Parent?.Parent?.Parent is JObject entry && entry.Property("transform") != null)
+            {
+                geometryTransform = ResultFilterRegion.PolygonToOriginalTransform(entry["transform"]);
+                isAxisAlignedTransform = IsAxisAlignedTransform(geometryTransform);
+            }
             var bboxLocal = detObj["bbox"] as JArray;
             bool isRot = bboxLocal != null && bboxLocal.Count == 5;
 
             if (isRot)
             {
-                var rboxG = RBoxLocalToGlobal(bboxLocal, tC2O);
+                var rboxG = RBoxLocalToGlobal(bboxLocal, geometryTransform);
                 if (rboxG != null)
                 {
                     item["bbox"] = rboxG;
@@ -560,7 +568,7 @@ namespace DlcvModules
             }
             else if (bboxLocal != null && bboxLocal.Count >= 4)
             {
-                if (TryMapLocalBboxToAabb(bboxLocal, tC2O, isAxisAlignedTransform, out List<int> aabb))
+                if (TryMapLocalBboxToAabb(bboxLocal, geometryTransform, isAxisAlignedTransform, out List<int> aabb))
                 {
                     item["bbox"] = aabb;
                     item["metadata"] = new Dictionary<string, object> { { "is_rotated", false } };
@@ -581,6 +589,11 @@ namespace DlcvModules
                 {
                     item["poly"] = poly;
                 }
+            }
+
+            else if (includeMask && polygon != null)
+            {
+                item["poly"] = new JArray { ResultFilterRegion.MapPolygon(polygon, geometryTransform) };
             }
 
             var extraInfoSource = detObj["extra_info"] as JObject;

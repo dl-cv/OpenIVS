@@ -2,6 +2,7 @@
 #include "flow/ModuleRegistry.h"
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cctype>
 #include <cmath>
@@ -9,6 +10,7 @@
 #include <limits>
 #include <locale>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -351,30 +353,20 @@ public:
         for (size_t i = 0; i < images.size(); ++i) {
             const cv::Mat& image = images[i].GetImage();
             if (image.empty()) throw std::invalid_argument("圆形区域绘制需要非空图像");
-            const int width = image.cols;
-            const int height = image.rows;
-            const int centerX = width / 2;
-            const int centerY = height / 2;
-            const int x1 = std::max(0, centerX - radius);
-            const int y1 = std::max(0, centerY - radius);
-            const int x2 = static_cast<int>(std::min<long long>(width, static_cast<long long>(centerX) + radius + 1));
-            const int y2 = static_cast<int>(std::min<long long>(height, static_cast<long long>(centerY) + radius + 1));
-            cv::Mat mask(y2 - y1, x2 - x1, CV_8UC1, cv::Scalar(0));
-            cv::circle(mask, cv::Point(centerX - x1, centerY - y1), radius, cv::Scalar(255), cv::FILLED);
-
-            Json maskRows = Json::array();
-            for (int y = 0; y < mask.rows; ++y) {
-                Json row = Json::array();
-                for (int x = 0; x < mask.cols; ++x) row.push_back(static_cast<int>(mask.at<unsigned char>(y, x)));
-                maskRows.push_back(std::move(row));
+            static std::shared_ptr<const CircleOutline> lastOutline;
+            auto outline = std::atomic_load(&lastOutline);
+            if (!outline || outline->Size != image.size() || outline->Radius != radius) {
+                outline = std::make_shared<const CircleOutline>(BuildOutline(image.size(), radius));
+                std::atomic_store(&lastOutline, outline);
             }
+
             Json detection = {
                 {"category_id", 0},
                 {"category_name", categoryName},
                 {"score", 1.0},
-                {"bbox", Json::array({x1, y1, x2 - x1, y2 - y1})},
-                {"area", static_cast<double>(cv::countNonZero(mask))},
-                {"mask_array", std::move(maskRows)},
+                {"bbox", outline->Bbox},
+                {"area", static_cast<double>(outline->Area)},
+                {"polygon", outline->Polygon},
                 {"with_bbox", true},
                 {"with_mask", true},
                 {"with_angle", false},
@@ -391,6 +383,42 @@ public:
     }
 
 private:
+    struct CircleOutline {
+        cv::Size Size;
+        int Radius = 0;
+        int Area = 0;
+        Json Bbox, Polygon;
+    };
+
+    static CircleOutline BuildOutline(cv::Size size, int radius) {
+        const int cx = size.width / 2, cy = size.height / 2;
+        const int x = std::max(0, cx - radius), y = std::max(0, cy - radius);
+        const int w = static_cast<int>(std::min<long long>(size.width, static_cast<long long>(cx) + radius + 1)) - x;
+        const int h = static_cast<int>(std::min<long long>(size.height, static_cast<long long>(cy) + radius + 1)) - y;
+        const long long dx = std::max(cx, size.width - 1 - cx), dy = std::max(cy, size.height - 1 - cy);
+        Json polygon = Json::array();
+        int area;
+        if (static_cast<long long>(radius) * radius >= dx * dx + dy * dy) {
+            area = w * h;
+        } else {
+            cv::Mat mask(h, w, CV_8UC1, cv::Scalar(0));
+            cv::circle(mask, cv::Point(cx - x, cy - y), radius, cv::Scalar(255), cv::FILLED);
+            area = cv::countNonZero(mask);
+            std::vector<std::vector<cv::Point>> contours;
+            cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE, cv::Point(x, y));
+            for (const auto& point : contours.front()) polygon.push_back(Json::array({point.x, point.y}));
+            while (polygon.size() < 3) {
+                const Json point = polygon.back();
+                polygon.push_back(point);
+            }
+        }
+        if (polygon.empty()) {
+            const int right = x + w - 1, bottom = y + h - 1;
+            polygon = Json::array({{x, y}, {right, y}, {right, bottom}, {x, bottom}});
+        }
+        return {size, radius, area, Json::array({x, y, w, h}), std::move(polygon)};
+    }
+
     static std::string Trim(const std::string& text) {
         size_t first = 0;
         while (first < text.size() && std::isspace(static_cast<unsigned char>(text[first]))) ++first;

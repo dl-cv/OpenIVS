@@ -8,12 +8,12 @@ namespace DlcvModules
 {
     /// <summary>
     /// 模块名称：结果过滤（区域）- 本地
-    /// 按指定矩形区域将结果与图像拆分为两路输出（区域内 / 区域外）。
+    /// 按指定区域将结果与图像拆分为两路输出（区域内 / 区域外）。
     ///
     /// 规则（对齐 Python: post_process/result_filter_region）：
     /// - “完全不在区域内”的结果将被分流到第二路（ExtraOutputs[0]）。
     /// - 若存在 mask_rle / mask_array：优先用 mask 与区域的像素级重叠判断（任意像素重叠即视为区域内）。
-    /// - 若不存在 mask：使用 bbox 与区域的相交判断。
+    /// - 支持 polygon；有掩膜时优先用掩膜，没有形状时使用 bbox。
     /// - result_region 支持 any_bbox / top1_bbox 两种模式（由 result_region_mode 控制）。
     /// - 当 result_region 已连接但当前图像无有效 bbox 时，按“空区域”处理（全部判到区域外，不回退 x/y/w/h）。
     /// - 区域属性 x/y/w/h 默认认为处于“原图坐标”；若结果处于当前图坐标，会自动做一定的容错匹配。
@@ -101,12 +101,12 @@ namespace DlcvModules
             }
 
             bool maskMode = string.Equals(ReadString("filter_mode", "legacy"), "mask", StringComparison.OrdinalIgnoreCase);
-            ModuleImage PickWrapForEntry(JObject entry)
+            ModuleImage PickWrapForEntry(JObject entry, bool shapeAware = false)
             {
                 if (entry == null) return null;
                 int originIndex = entry["origin_index"]?.Value<int?>() ?? -1;
                 int idx = entry["index"]?.Value<int?>() ?? -1;
-                if (maskMode)
+                if (maskMode || shapeAware || EntryHasPolygon(entry))
                 {
                     // Mask 分支先限制原图，再按 transform/index 定位，避免分流重排或相同 transform 串图。
                     bool hasOrigin = entry["origin_index"] != null && entry["origin_index"].Type != JTokenType.Null;
@@ -119,7 +119,8 @@ namespace DlcvModules
                     if (matching.Count == 1) return matching[0];
                     if (candidates.Contains(indexed)) return indexed;
                     if (hasOrigin) return candidates[0];
-                    throw new ArgumentException("Mask mode requires origin_index or a valid image index");
+                    if (maskMode) throw new ArgumentException("Mask mode requires origin_index or a valid image index");
+                    return null;
                 }
 
                 try
@@ -140,7 +141,7 @@ namespace DlcvModules
 
             if (maskMode)
             {
-                return ProcessMask(images, results, PickWrapForEntry);
+                return ProcessMask(images, results, entry => PickWrapForEntry(entry));
             }
 
             // Python 对齐：不聚合为“每图一个 entry”，而是保留 entry 结构，仅拆分 sample_results。
@@ -197,7 +198,7 @@ namespace DlcvModules
                 foreach (var dTok in dets)
                 {
                     if (!(dTok is JObject d)) continue;
-                    if (!TryExtractBboxAabbCurrent(d, out double bx1, out double by1, out double bx2, out double by2)) continue;
+                    if (!TryExtractLegacyBounds(d, out double bx1, out double by1, out double bx2, out double by2)) continue;
 
                     var bboxCur = ClampXYXY(bx1, by1, bx2, by2, Wc, Hc);
 
@@ -271,10 +272,27 @@ namespace DlcvModules
             var rrInput = ReadResultRegionInput();
             bool resultRegionConnected = rrInput.Item1;
             var resultRegionResults = rrInput.Item2 ?? new JArray();
-            var regionBoxesByWrapIndex = new Dictionary<int, List<int[]>>();
+            var regionsByWrapIndex = new Dictionary<int, List<LegacyRegion>>();
+            var regionsByOrigin = new Dictionary<int, List<LegacyRegion>>();
+            bool anyPolygonRegion = false;
+            foreach (var token in resultRegionResults)
+                if (token is JObject candidate && EntryHasPolygon(candidate)) { anyPolygonRegion = true; break; }
+            if (!anyPolygonRegion)
+                foreach (var token in results)
+                    if (token is JObject target && EntryHasPolygon(target)) { anyPolygonRegion = true; break; }
+            bool top1Region = resultRegionMode.Equals("top1_bbox", StringComparison.OrdinalIgnoreCase);
+            void AddRegion(Dictionary<int, List<LegacyRegion>> byId, int id, LegacyRegion region)
+            {
+                if (!byId.TryGetValue(id, out var regions)) byId[id] = regions = new List<LegacyRegion>();
+                if (top1Region && regions.Count > 0)
+                {
+                    if (region.Score.GetValueOrDefault(double.NegativeInfinity) <= regions[0].Score.GetValueOrDefault(double.NegativeInfinity)) return;
+                    regions.Clear();
+                }
+                regions.Add(region);
+            }
             if (resultRegionConnected)
             {
-                var regionCandidatesByWrapIndex = new Dictionary<int, List<Tuple<int[], double?>>>();
                 foreach (var token in resultRegionResults)
                 {
                     if (!(token is JObject regionEntry) ||
@@ -286,7 +304,7 @@ namespace DlcvModules
                     var regionDets = regionEntry["sample_results"] as JArray;
                     if (regionDets == null || regionDets.Count == 0) continue;
 
-                    var regionWrap = PickWrapForEntry(regionEntry);
+                    var regionWrap = PickWrapForEntry(regionEntry, shapeAware: anyPolygonRegion);
                     if (regionWrap == null) continue;
 
                     int regionWrapId = RuntimeHelpers.GetHashCode(regionWrap);
@@ -303,7 +321,7 @@ namespace DlcvModules
                     foreach (var dTok in regionDets)
                     {
                         if (!(dTok is JObject d)) continue;
-                        if (!TryExtractBboxAabbCurrent(d, out double rbx1, out double rby1, out double rbx2, out double rby2)) continue;
+                        if (!TryExtractLegacyBounds(d, out double rbx1, out double rby1, out double rbx2, out double rby2)) continue;
 
                         var bboxCur = ClampXYXY(rbx1, rby1, rbx2, rby2, regionWc, regionHc);
                         int[] bboxUse = bboxCur;
@@ -340,67 +358,18 @@ namespace DlcvModules
                             }
                         }
 
-                        if (!regionCandidatesByWrapIndex.TryGetValue(regionWrapIdx, out var cands))
+                        var region = new LegacyRegion
                         {
-                            cands = new List<Tuple<int[], double?>>();
-                            regionCandidatesByWrapIndex[regionWrapIdx] = cands;
-                        }
-                        cands.Add(Tuple.Create(bboxUse, TryExtractScore(d)));
-                    }
-                }
-
-                foreach (var kv in regionCandidatesByWrapIndex)
-                {
-                    var cands = kv.Value;
-                    if (cands == null || cands.Count == 0) continue;
-
-                    if (string.Equals(resultRegionMode, "top1_bbox", StringComparison.OrdinalIgnoreCase))
-                    {
-                        Tuple<int[], double?> best = null;
-                        foreach (var cand in cands)
-                        {
-                            if (cand == null || cand.Item1 == null) continue;
-                            if (!cand.Item2.HasValue) continue;
-                            double s = cand.Item2.Value;
-                            if (double.IsNaN(s) || double.IsInfinity(s)) continue;
-                            if (best == null || s > best.Item2.GetValueOrDefault(double.MinValue))
-                            {
-                                best = cand;
-                            }
-                        }
-
-                        if (best != null)
-                        {
-                            regionBoxesByWrapIndex[kv.Key] = new List<int[]> { best.Item1 };
-                        }
-                        else
-                        {
-                            foreach (var cand in cands)
-                            {
-                                if (cand != null && cand.Item1 != null)
-                                {
-                                    regionBoxesByWrapIndex[kv.Key] = new List<int[]> { cand.Item1 };
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        var boxes = new List<int[]>();
-                        foreach (var cand in cands)
-                        {
-                            if (cand != null && cand.Item1 != null) boxes.Add(cand.Item1);
-                        }
-                        if (boxes.Count > 0)
-                        {
-                            regionBoxesByWrapIndex[kv.Key] = boxes;
-                        }
+                            Box = bboxUse, HasPolygon = HasPolygon(d), Score = TryExtractScore(d),
+                            Shape = new Lazy<RegionMask>(() => PrepareRegionMask(d, regionEntry, regionWrap, legacy: true))
+                        };
+                        AddRegion(regionsByWrapIndex, regionWrapIdx, region);
+                        if (anyPolygonRegion) AddRegion(regionsByOrigin, regionWrap.OriginalIndex, region);
                     }
                 }
             }
 
-            JObject ConvertDetToOriginal(JObject det, int[] bboxOriXYXY)
+            JObject ConvertDetToOriginal(JObject det, int[] bboxOriXYXY, JToken transform)
             {
                 if (det == null || bboxOriXYXY == null || bboxOriXYXY.Length < 4) return det;
                 var d2 = det.DeepClone() as JObject;
@@ -415,6 +384,8 @@ namespace DlcvModules
 
                 // C# bbox 约定：默认 xywh（轴对齐）；旋转框也允许但这里输出 AABB xywh，与 Python 一致（过滤模块允许损失旋转语义）
                 d2["bbox"] = new JArray { ox1, oy1, ow, oh };
+                if (Present(transform) && HasPolygon(det) && !HasMask(det))
+                    d2["polygon"] = MapPolygon(ReadPolygon(det["polygon"]), PolygonToOriginalTransform(transform));
 
                 // 同步 metadata.global_bbox（对齐 Python：优先写 xyxy；同时兼容 xywh 解析）
                 try
@@ -452,7 +423,10 @@ namespace DlcvModules
                     continue;
                 }
 
-                var wrap = PickWrapForEntry(entry);
+                var wrap = PickWrapForEntry(entry, shapeAware: anyPolygonRegion);
+                List<LegacyRegion> shapeRegions = null;
+                bool hasPolygonRegion = anyPolygonRegion && wrap != null && regionsByOrigin.TryGetValue(wrap.OriginalIndex, out shapeRegions) &&
+                    shapeRegions.Exists(region => region.HasPolygon);
                 if (wrap == null)
                 {
                     others.Add(entry);
@@ -491,27 +465,13 @@ namespace DlcvModules
                 // useOriginal：仅用于“判定”使用的坐标系
                 bool useOriginal = forceOriginal;
                 var fallbackRoi = GetRoi(wrap, useOriginal, Wc, Hc, W0, H0);
-                List<int[]> activeRois = null;
-                bool forceOutsideByEmptyRegion = false;
-                if (resultRegionConnected)
-                {
-                    if (oldIdx >= 0 &&
-                        regionBoxesByWrapIndex.TryGetValue(oldIdx, out var regionRois) &&
-                        regionRois != null &&
-                        regionRois.Count > 0)
-                    {
-                        activeRois = regionRois;
-                    }
-                    else
-                    {
-                        // 已连接 result_region 且当前图无有效 bbox：按“空区域”语义处理
-                        forceOutsideByEmptyRegion = true;
-                    }
-                }
-                else
-                {
-                    activeRois = new List<int[]> { fallbackRoi };
-                }
+                List<LegacyRegion> activeRegions = null;
+                var activeRois = new List<int[]>();
+                if (!resultRegionConnected) activeRois.Add(fallbackRoi);
+                else if (regionsByWrapIndex.TryGetValue(oldIdx, out activeRegions))
+                    foreach (var region in activeRegions)
+                        if (!region.HasPolygon) activeRois.Add(region.Box);
+                bool forceOutsideByEmptyRegion = resultRegionConnected && activeRegions == null;
                 int spaceW = useOriginal ? W0 : Wc;
                 int spaceH = useOriginal ? H0 : Hc;
 
@@ -526,7 +486,7 @@ namespace DlcvModules
                     }
 
                     // 提取 bbox（当前坐标系下的 AABB）
-                    if (!TryExtractBboxAabbCurrent(d, out double bx1, out double by1, out double bx2, out double by2))
+                    if (!TryExtractLegacyBounds(d, out double bx1, out double by1, out double bx2, out double by2))
                     {
                         // 异常项：按区域外处理
                         outArr.Add(d);
@@ -534,9 +494,10 @@ namespace DlcvModules
                     }
 
                     var bboxCur = ClampXYXY(bx1, by1, bx2, by2, Wc, Hc);
-                    int[] bboxUse = bboxCur;
+                    bool originalPolygon = HasPolygon(d) && !HasMask(d) && !Present(entry["transform"]);
+                    int[] bboxUse = originalPolygon && useOriginal ? ClampXYXY(bx1, by1, bx2, by2, W0, H0) : bboxCur;
                     int[] bboxOri = null;
-                    if (useOriginal)
+                    if (useOriginal && !originalPolygon)
                     {
                         // 原图模式：优先使用 metadata.global_bbox（若存在），否则从 bboxCur 反算到原图坐标
                         int[] bboxMetaOri = null;
@@ -572,6 +533,26 @@ namespace DlcvModules
                         // 空区域语义：不回退 fallback ROI，直接判外
                         decided = true;
                         isIn = false;
+                    }
+
+                    bool hasPolygon = HasPolygon(d);
+                    if (hasPolygon || hasPolygonRegion)
+                    {
+                        var shape = PrepareRegionMask(d, entry, wrap, resultRegionConnected || useOriginal, legacy: true);
+                        if (shape != null)
+                        {
+                            if (!resultRegionConnected)
+                                isIn = RegionMaskOverlapsBox(shape, fallbackRoi);
+                            else if (shapeRegions != null)
+                                foreach (var region in shapeRegions)
+                                    if ((hasPolygon || region.HasPolygon) && region.Shape.Value is RegionMask regionShape &&
+                                        RegionMasksMatch(shape, regionShape, "ios", 0))
+                                    {
+                                        isIn = true;
+                                        break;
+                                    }
+                        }
+                        decided = isIn || hasPolygon || activeRois.Count == 0;
                     }
 
                     // mask_rle
@@ -656,12 +637,12 @@ namespace DlcvModules
                         // 关键修复（对齐 Python 最新）：
                         // - 判定可以按原图坐标（useOriginal=true）
                         // - 但只有在 convertOutputToOriginal=true 时才允许改写输出 det/bbox/transform
-                        inArr.Add((convertOutputToOriginal && useOriginal) ? ConvertDetToOriginal(d, bboxUse) : d);
+                        inArr.Add((convertOutputToOriginal && useOriginal) ? ConvertDetToOriginal(d, bboxUse, entry["transform"]) : d);
                         hasAnyInside = true;
                     }
                     else
                     {
-                        outArr.Add((convertOutputToOriginal && useOriginal) ? ConvertDetToOriginal(d, bboxUse) : d);
+                        outArr.Add((convertOutputToOriginal && useOriginal) ? ConvertDetToOriginal(d, bboxUse, entry["transform"]) : d);
                     }
                 }
 
@@ -864,11 +845,12 @@ namespace DlcvModules
 
         private static bool IsFinite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
 
-        private static RegionMask PrepareRegionMask(JObject det, JObject entry, ModuleImage wrap)
+        private static RegionMask PrepareRegionMask(JObject det, JObject entry, ModuleImage wrap, bool original = true, bool legacy = false)
         {
             // SDK RLE 解码为 0/255；JSON mask_array 严格沿用 Python 的 >127 前景阈值。
-            var raw = det["mask_array"];
+            var raw = legacy && Present(det["mask_rle"]) ? null : det["mask_array"];
             bool useBbox = false;
+            Point2d[] polygon = null;
             using (var mask = new Mat())
             {
                 if (raw != null && raw.Type != JTokenType.Null)
@@ -889,7 +871,7 @@ namespace DlcvModules
                         }
                     }
                 }
-                else if (det["mask_rle"] != null && det["mask_rle"].Type != JTokenType.Null)
+                else if (Present(det["mask_rle"]))
                 {
                     using (var decoded = MaskRleUtils.MaskInfoToMat(det["mask_rle"]))
                     {
@@ -897,8 +879,12 @@ namespace DlcvModules
                         Cv2.Threshold(decoded, mask, 127, 255, ThresholdTypes.Binary);
                     }
                 }
+                else if (HasPolygon(det))
+                {
+                    polygon = ReadPolygon(det["polygon"]);
+                }
                 else useBbox = true;
-                if (!useBbox && Cv2.CountNonZero(mask) == 0) return null;
+                if (!useBbox && polygon == null && Cv2.CountNonZero(mask) == 0) return null;
                 int W = wrap.TransformState.OriginalWidth, H = wrap.TransformState.OriginalHeight;
                 int sourceW = W, sourceH = H;
                 double[] inv = { 1, 0, 0, 0, 1, 0 };
@@ -934,9 +920,28 @@ namespace DlcvModules
                         -a[3] / determinant, a[0] / determinant, (a[3] * a[2] - a[0] * a[5]) / determinant };
                     if (Array.Exists(inv, v => !IsFinite(v))) throw new ArgumentException("Invalid inverse mask transform");
                 }
+                if (!original)
+                {
+                    W = sourceW;
+                    H = sourceH;
+                    inv = new double[] { 1, 0, 0, 0, 1, 0 };
+                }
                 if (Math.Min(Math.Min(W, H), Math.Min(sourceW, sourceH)) <= 0) throw new ArgumentException("Invalid mask image size");
                 int x1 = 0, y1 = 0, x2 = sourceW, y2 = sourceH;
-                if (useBbox)
+                if (polygon != null)
+                {
+                    PolygonBounds(polygon, out double bx1, out double by1, out double bx2, out double by2);
+                    x1 = (int)Math.Max(0, Math.Min(sourceW, Math.Round(bx1)));
+                    y1 = (int)Math.Max(0, Math.Min(sourceH, Math.Round(by1)));
+                    x2 = (int)Math.Max(0, Math.Min(sourceW, Math.Round(bx2) + 1));
+                    y2 = (int)Math.Max(0, Math.Min(sourceH, Math.Round(by2) + 1));
+                    if (x2 <= x1 || y2 <= y1) return null;
+                    var points = Array.ConvertAll(polygon, point => new Point(RasterCoordinate(point.X, x1), RasterCoordinate(point.Y, y1)));
+                    mask.Create(y2 - y1, x2 - x1, MatType.CV_8UC1);
+                    mask.SetTo(Scalar.Black);
+                    Cv2.FillPoly(mask, new[] { points }, Scalar.All(255));
+                }
+                else if (useBbox)
                 {
                     if (!(det["bbox"] is JArray bbox) || bbox.Count < 4) return null;
                     for (int i = 0; i < 4; i++)
@@ -968,6 +973,9 @@ namespace DlcvModules
                 int sx = Math.Max(0, x1), sy = Math.Max(0, y1);
                 int ex = Math.Min(sourceW, x2), ey = Math.Min(sourceH, y2);
                 if (ex <= sx || ey <= sy) return null;
+                if (inv[0] == 1 && inv[1] == 0 && inv[3] == 0 && inv[4] == 1 && inv[2] == 0 && inv[5] == 0 &&
+                    sx == x1 && sy == y1 && ex == x2 && ey == y2)
+                    return CopyRegionMask(mask, x1, y1);
                 using (var clipped = new Mat(mask, new Rect(sx - x1, sy - y1, ex - sx, ey - sy)))
                 using (var aligned = new Mat())
                 using (var mapping = new Mat(2, 3, MatType.CV_64FC1))
@@ -986,23 +994,136 @@ namespace DlcvModules
                     inv[2] -= ox1; inv[5] -= oy1;
                     for (int i = 0; i < 6; i++) mapping.Set(i / 3, i % 3, inv[i]);
                     Cv2.WarpAffine(clipped, aligned, mapping, new Size(ox2 - ox1, oy2 - oy1), InterpolationFlags.Nearest, BorderTypes.Constant, Scalar.Black);
-                    int area = Cv2.CountNonZero(aligned);
-                    if (area == 0) return null;
-                    var pixels = new byte[aligned.Rows * aligned.Cols];
-                    System.Runtime.InteropServices.Marshal.Copy(aligned.Data, pixels, 0, pixels.Length);
-                    return new RegionMask { X = ox1, Y = oy1, Width = aligned.Cols, Height = aligned.Rows, Area = area, Pixels = pixels };
+                    return CopyRegionMask(aligned, ox1, oy1);
                 }
             }
+        }
+
+        private static RegionMask CopyRegionMask(Mat mask, int x, int y)
+        {
+            int area = Cv2.CountNonZero(mask);
+            if (area == 0) return null;
+            var pixels = new byte[mask.Rows * mask.Cols];
+            System.Runtime.InteropServices.Marshal.Copy(mask.Data, pixels, 0, pixels.Length);
+            return new RegionMask { X = x, Y = y, Width = mask.Cols, Height = mask.Rows, Area = area, Pixels = pixels };
+        }
+
+        private static int RasterCoordinate(double value, int offset) => (int)Math.Round(value) - offset;
+        private static bool Present(JToken token) => token != null && token.Type != JTokenType.Null;
+        internal static bool HasMask(JObject detection) => Present(detection["mask_array"]) || Present(detection["mask_rle"]);
+        internal static bool HasPolygon(JObject detection) => Present(detection["polygon"]);
+        private static bool EntryHasPolygon(JObject entry)
+        {
+            if (entry["sample_results"] is JArray detections)
+                foreach (var det in detections)
+                    if (det is JObject detection && HasPolygon(detection)) return true;
+            return false;
+        }
+
+        internal static Point2d[] ReadPolygon(JToken token)
+        {
+            if (!Present(token)) return null;
+            if (!(token is JArray ring) || ring.Count < 3) throw new ArgumentException("polygon 至少需要三个点");
+            var points = new Point2d[ring.Count];
+            for (int i = 0; i < ring.Count; i++)
+            {
+                if (!(ring[i] is JArray point) || point.Count != 2 ||
+                    (point[0].Type != JTokenType.Integer && point[0].Type != JTokenType.Float) ||
+                    (point[1].Type != JTokenType.Integer && point[1].Type != JTokenType.Float))
+                    throw new ArgumentException("polygon 的每个点须包含两个坐标");
+                double x = point[0].Value<double>(), y = point[1].Value<double>();
+                if (!IsFinite(x) || !IsFinite(y) || Math.Abs(x) > 1e9 || Math.Abs(y) > 1e9)
+                    throw new ArgumentException("polygon 坐标须在 -1000000000 至 1000000000 之间");
+                points[i] = new Point2d(x, y);
+            }
+            return points;
+        }
+
+        internal static double[] PolygonToOriginalTransform(JToken token)
+        {
+            if (!Present(token)) return new double[] { 1, 0, 0, 0, 1, 0 };
+            if (!(token is JObject transform)) throw new ArgumentException("无效的多边形坐标变换");
+            double[] affine;
+            if (Present(transform["affine_matrix"]))
+            {
+                var rows = (JArray)transform["affine_matrix"];
+                affine = new[] { rows[0][0].Value<double>(), rows[0][1].Value<double>(), rows[0][2].Value<double>(),
+                    rows[1][0].Value<double>(), rows[1][1].Value<double>(), rows[1][2].Value<double>() };
+                double x = transform["crop_box"][0].Value<double>(), y = transform["crop_box"][1].Value<double>();
+                affine[2] -= affine[0] * x + affine[1] * y;
+                affine[5] -= affine[3] * x + affine[4] * y;
+            }
+            else if (transform["affine_2x3"] is JArray flat) affine = flat.ToObject<double[]>();
+            else return new double[] { 1, 0, 0, 0, 1, 0 };
+            if (affine.Length != 6 || Array.Exists(affine, value => !IsFinite(value)))
+                throw new ArgumentException("无效的多边形坐标变换");
+            double determinant = affine[0] * affine[4] - affine[1] * affine[3];
+            if (!IsFinite(determinant) || Math.Abs(determinant) < 1e-12)
+                throw new ArgumentException("无效的多边形坐标变换");
+            return TransformationState.Inverse2x3(affine);
+        }
+
+        internal static JArray MapPolygon(Point2d[] points, double[] t)
+        {
+            var result = new JArray();
+            foreach (var point in points)
+                result.Add(new JArray(t[0] * point.X + t[1] * point.Y + t[2], t[3] * point.X + t[4] * point.Y + t[5]));
+            return result;
+        }
+
+        private static void PolygonBounds(Point2d[] points, out double x1, out double y1, out double x2, out double y2)
+        {
+            x1 = x2 = points[0].X;
+            y1 = y2 = points[0].Y;
+            foreach (var point in points)
+            {
+                x1 = Math.Min(x1, point.X); y1 = Math.Min(y1, point.Y);
+                x2 = Math.Max(x2, point.X); y2 = Math.Max(y2, point.Y);
+            }
+        }
+
+        private static bool TryExtractLegacyBounds(JObject det, out double x1, out double y1, out double x2, out double y2)
+        {
+            if (TryExtractBboxAabbCurrent(det, out x1, out y1, out x2, out y2)) return true;
+            var points = HasMask(det) ? null : ReadPolygon(det["polygon"]);
+            if (points == null) return false;
+            PolygonBounds(points, out x1, out y1, out x2, out y2);
+            x1 = Math.Round(x1); y1 = Math.Round(y1);
+            x2 = Math.Round(x2) + 1; y2 = Math.Round(y2) + 1;
+            return true;
+        }
+
+        private sealed class LegacyRegion
+        {
+            public int[] Box;
+            public bool HasPolygon;
+            public double? Score;
+            public Lazy<RegionMask> Shape;
+        }
+
+        private static bool RegionMaskOverlapsBox(RegionMask mask, int[] box)
+        {
+            int x1 = Math.Max(mask.X, box[0]), y1 = Math.Max(mask.Y, box[1]);
+            int x2 = Math.Min(mask.X + mask.Width, box[2]), y2 = Math.Min(mask.Y + mask.Height, box[3]);
+            for (int y = y1; y < y2; y++)
+                for (int x = x1; x < x2; x++)
+                    if (mask.Pixels[(y - mask.Y) * mask.Width + x - mask.X] != 0) return true;
+            return false;
         }
 
         private static bool RegionMasksMatch(RegionMask a, RegionMask b, string metric, double threshold)
         {
             int x1 = Math.Max(a.X, b.X), y1 = Math.Max(a.Y, b.Y);
             int x2 = Math.Min(a.X + a.Width, b.X + b.Width), y2 = Math.Min(a.Y + a.Height, b.Y + b.Height);
+            if (x1 >= x2 || y1 >= y2) return false;
             long intersection = 0;
             for (int y = y1; y < y2; y++)
                 for (int x = x1; x < x2; x++)
-                    if ((a.Pixels[(y - a.Y) * a.Width + x - a.X] & b.Pixels[(y - b.Y) * b.Width + x - b.X]) != 0) intersection++;
+                    if ((a.Pixels[(y - a.Y) * a.Width + x - a.X] & b.Pixels[(y - b.Y) * b.Width + x - b.X]) != 0)
+                    {
+                        if (threshold == 0) return true;
+                        intersection++;
+                    }
             double denominator = metric == "ios" ? Math.Min(a.Area, b.Area) : (double)a.Area + b.Area - intersection;
             return intersection > 0 && intersection / denominator >= threshold;
         }

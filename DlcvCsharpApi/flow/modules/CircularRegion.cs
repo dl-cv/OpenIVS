@@ -9,6 +9,52 @@ namespace DlcvModules
     /// <summary>在图像中心生成圆形实例分割结果，图像保持不变。</summary>
     public class CircularRegion : BaseModule
     {
+        private sealed class CircleOutline
+        {
+            public readonly int Width, Height, Radius, Area;
+            public readonly JArray Bbox, Polygon;
+
+            public CircleOutline(int width, int height, int radius)
+            {
+                Width = width;
+                Height = height;
+                Radius = radius;
+                int cx = width / 2, cy = height / 2;
+                int x = Math.Max(0, cx - radius), y = Math.Max(0, cy - radius);
+                int w = (int)Math.Min(width, (long)cx + radius + 1) - x;
+                int h = (int)Math.Min(height, (long)cy + radius + 1) - y;
+                Bbox = new JArray(x, y, w, h);
+                Polygon = new JArray();
+                long dx = Math.Max(cx, width - 1 - cx), dy = Math.Max(cy, height - 1 - cy);
+                if ((long)radius * radius >= dx * dx + dy * dy)
+                {
+                    Area = w * h;
+                    AddRectangle(x, y, w, h);
+                    return;
+                }
+                using (var mask = new Mat(h, w, MatType.CV_8UC1, Scalar.Black))
+                {
+                    Cv2.Circle(mask, new Point(cx - x, cy - y), radius, Scalar.All(255), -1);
+                    Area = Cv2.CountNonZero(mask);
+                    Cv2.FindContours(mask, out Point[][] contours, out HierarchyIndex[] _, RetrievalModes.External,
+                        ContourApproximationModes.ApproxSimple, new Point(x, y));
+                    foreach (var point in contours[0]) Polygon.Add(new JArray(point.X, point.Y));
+                    while (Polygon.Count < 3) Polygon.Add(Polygon.Last.DeepClone());
+                }
+            }
+
+            private void AddRectangle(int x, int y, int width, int height)
+            {
+                int right = x + width - 1, bottom = y + height - 1;
+                Polygon.Add(new JArray(x, y));
+                Polygon.Add(new JArray(right, y));
+                Polygon.Add(new JArray(right, bottom));
+                Polygon.Add(new JArray(x, bottom));
+            }
+        }
+
+        private static volatile CircleOutline lastOutline;
+
         static CircularRegion()
         {
             ModuleRegistry.Register("pre_process/circular_region", typeof(CircularRegion));
@@ -28,33 +74,29 @@ namespace DlcvModules
             {
                 if (images[i] == null) throw new ArgumentException("输入图像不能为空");
                 Mat image = images[i].GetImage();
-                using (Mat mask = BuildCircleMask(image, radius))
+                if (image == null || image.Empty()) throw new ArgumentException("输入图像不能为空");
+                var outline = lastOutline;
+                if (outline == null || outline.Width != image.Width || outline.Height != image.Height || outline.Radius != radius)
+                    lastOutline = outline = new CircleOutline(image.Width, image.Height, radius);
+                var detection = new JObject
                 {
-                    if (image == null || image.Empty()) throw new ArgumentException("输入图像不能为空");
-                    int x1 = Math.Max(0, image.Width / 2 - radius);
-                    int y1 = Math.Max(0, image.Height / 2 - radius);
-                    int x2 = (int)Math.Min((long)image.Width, (long)image.Width / 2 + radius + 1);
-                    int y2 = (int)Math.Min((long)image.Height, (long)image.Height / 2 + radius + 1);
-                    var detection = new JObject
-                    {
-                        ["category_id"] = 0,
-                        ["category_name"] = categoryName,
-                        ["score"] = 1.0,
-                        ["bbox"] = new JArray(x1, y1, x2 - x1, y2 - y1),
-                        ["area"] = (double)Cv2.CountNonZero(mask),
-                        ["mask_array"] = MaskToJArray(mask),
-                        ["with_bbox"] = true,
-                        ["with_mask"] = true,
-                        ["with_angle"] = false,
-                        ["angle"] = -100.0
-                    };
-                    var entry = JObject.FromObject(images[i].ToMeta());
-                    entry["type"] = "local";
-                    entry["originating_module"] = "pre_process/circular_region";
-                    entry["index"] = i;
-                    entry["sample_results"] = new JArray(detection);
-                    results.Add(entry);
-                }
+                    ["category_id"] = 0,
+                    ["category_name"] = categoryName,
+                    ["score"] = 1.0,
+                    ["bbox"] = outline.Bbox.DeepClone(),
+                    ["area"] = (double)outline.Area,
+                    ["polygon"] = outline.Polygon.DeepClone(),
+                    ["with_bbox"] = true,
+                    ["with_mask"] = true,
+                    ["with_angle"] = false,
+                    ["angle"] = -100.0
+                };
+                var entry = JObject.FromObject(images[i].ToMeta());
+                entry["type"] = "local";
+                entry["originating_module"] = "pre_process/circular_region";
+                entry["index"] = i;
+                entry["sample_results"] = new JArray(detection);
+                results.Add(entry);
             }
             return new ModuleIO(images, results);
         }
@@ -89,32 +131,6 @@ namespace DlcvModules
             if (double.IsNaN(number) || double.IsInfinity(number) || number <= 0 || number > int.MaxValue)
                 throw new ArgumentException("radius 必须为正整数");
             return (int)number;
-        }
-
-        private static Mat BuildCircleMask(Mat image, int radius)
-        {
-            if (image == null || image.Empty()) throw new ArgumentException("输入图像不能为空");
-            int centerX = image.Width / 2;
-            int centerY = image.Height / 2;
-            int x1 = Math.Max(0, centerX - radius);
-            int y1 = Math.Max(0, centerY - radius);
-            int x2 = (int)Math.Min((long)image.Width, (long)centerX + radius + 1);
-            int y2 = (int)Math.Min((long)image.Height, (long)centerY + radius + 1);
-            var mask = new Mat(y2 - y1, x2 - x1, MatType.CV_8UC1, Scalar.All(0));
-            Cv2.Circle(mask, new Point(centerX - x1, centerY - y1), radius, Scalar.All(255), -1);
-            return mask;
-        }
-
-        private static JArray MaskToJArray(Mat mask)
-        {
-            var rows = new JArray();
-            for (int y = 0; y < mask.Rows; y++)
-            {
-                var row = new JArray();
-                for (int x = 0; x < mask.Cols; x++) row.Add((int)mask.At<byte>(y, x));
-                rows.Add(row);
-            }
-            return rows;
         }
     }
 }
