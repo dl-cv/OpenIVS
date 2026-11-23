@@ -1,6 +1,7 @@
 #include "AlgorithmModulesSelfTest.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -86,6 +87,62 @@ int RunAlgorithmModulesSelfTest() {
         const cv::Mat original(200, 300, CV_8UC3, cv::Scalar::all(17));
         const TransformationState identity(300, 200);
         const std::vector<ModuleImage> images{ModuleImage(original, original, identity, 7)};
+        auto circular = ModuleRegistry::Get("pre_process/circular_region");
+        check(static_cast<bool>(circular), "circular_region not registered");
+        auto circularOutput = circular(1, "", Json{{"categoryname", "圆形区域"}, {"radius", 5}}, nullptr)
+            ->Process(images, Json::array());
+        check(circularOutput.ImageList.size() == 1 && circularOutput.ResultList.size() == 1, "circular output count");
+        const auto& circularEntry = circularOutput.ResultList.at(0);
+        check(circularEntry.at("type") == "local" && circularEntry.at("index") == 0 &&
+            circularEntry.at("origin_index") == 7 && circularEntry.at("transform") == identity.ToJson(),
+            "circular result metadata");
+        check(circularEntry.at("originating_module") == "pre_process/circular_region", "circular module type");
+        const auto& circularDetection = circularEntry.at("sample_results").at(0);
+        check(circularDetection.at("category_name") == "圆形区域" && circularDetection.at("category_id") == 0 &&
+            std::abs(circularDetection.at("score").get<double>() - 1.0) < 1e-12, "circular category");
+        check(circularDetection.at("bbox") == Json::array({145, 95, 11, 11}), "circular bbox");
+        const auto& circularMask = circularDetection.at("mask_array");
+        check(circularMask.size() == 11 && circularMask[0].size() == 11, "circular mask size");
+        check(circularMask[5][5] == 255 && circularMask[0][0] == 0, "circular mask pixels");
+        double circularArea = 0;
+        for (const auto& row : circularMask) for (const auto& value : row) circularArea += value.get<int>() / 255.0;
+        check(std::abs(circularDetection.at("area").get<double>() - circularArea) < 1e-12, "circular area");
+
+        auto circularCustom = circular(1, "", Json{{"categoryname", "  自定义圆  "}, {"radius", 3}}, nullptr)
+            ->Process(images, Json::array());
+        const auto& customDetection = circularCustom.ResultList.at(0).at("sample_results").at(0);
+        check(customDetection.at("category_name") == "自定义圆" &&
+            customDetection.at("bbox") == Json::array({147, 97, 7, 7}), "circular custom properties");
+        bool invalidCircularRejected = false;
+        try { circular(1, "", Json{{"radius", 0}}, nullptr)->Process(images, Json::array()); }
+        catch (const std::invalid_argument&) { invalidCircularRejected = true; }
+        check(invalidCircularRejected, "invalid circular radius");
+        char* artifactPathRaw = nullptr;
+        size_t artifactPathLength = 0;
+        _dupenv_s(&artifactPathRaw, &artifactPathLength, "DLCV_CIRCULAR_REGION_CPP_ARTIFACT");
+        std::string artifactPath;
+        if (artifactPathRaw != nullptr) {
+            artifactPath.assign(artifactPathRaw);
+            std::free(artifactPathRaw);
+        }
+        if (!artifactPath.empty()) {
+            const cv::Mat visualImage(480, 640, CV_8UC3, cv::Scalar::all(0));
+            const std::vector<ModuleImage> visualImages{ModuleImage(visualImage, visualImage,
+                TransformationState(visualImage.cols, visualImage.rows), 0)};
+            auto visualOutput = circular(1, "", Json{{"categoryname", "圆形区域"}, {"radius", 50}}, nullptr)
+                ->Process(visualImages, Json::array());
+            const Json artifact = {
+                {"language", "C++"},
+                {"image_width", visualImage.cols},
+                {"image_height", visualImage.rows},
+                {"detection", visualOutput.ResultList.at(0).at("sample_results").at(0)}
+            };
+            const std::filesystem::path output(artifactPath);
+            if (output.has_parent_path()) std::filesystem::create_directories(output.parent_path());
+            std::ofstream stream(output, std::ios::binary);
+            if (!stream) throw std::runtime_error("cannot write circular region artifact");
+            stream << artifact.dump(2) << "\n";
+        }
         auto det = [](const std::string& name, double x, double y = 10, double score = 0.9) {
             return Json{{"category_name", name}, {"score", score}, {"bbox", {x - 1, y - 1, 2, 2}}};
         };
