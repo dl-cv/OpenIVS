@@ -1,6 +1,7 @@
 #include "flow/BaseModule.h"
 #include "flow/ModuleRegistry.h"
 #include "flow/utils/MaskRleUtils.h"
+#include "flow/utils/CategoryBlockText.h"
 
 #include <array>
 #include <algorithm>
@@ -26,6 +27,45 @@ namespace dlcv_infer {
 namespace flow {
 
 static constexpr double kPi = 3.14159265358979323846;
+
+class CategoryBlockModule final : public BaseModule {
+public:
+    using BaseModule::BaseModule;
+
+    ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        std::unordered_set<std::string> categories;
+        const auto values = Properties.find("categories");
+        if (values != Properties.end() && values->is_array()) {
+            for (const auto& value : *values) {
+                if (!value.is_string() && !value.is_number() && !value.is_boolean()) continue;
+                auto name = category_block::Normalize(category_block::PythonString(value));
+                if (!name.empty()) categories.insert(std::move(name));
+            }
+        }
+        const Json results = resultList.is_array() ? resultList : Json::array();
+        if (categories.empty()) return ModuleIO(imageList, results);
+        Json output = Json::array();
+        for (const auto& entry : results) {
+            if (!entry.is_object() || !entry.contains("type") || entry.at("type") != "local" ||
+                !entry.contains("sample_results") || !entry.at("sample_results").is_array()) {
+                output.push_back(entry);
+                continue;
+            }
+            Json filtered = Json::array();
+            for (const auto& detection : entry.at("sample_results")) {
+                if (!detection.is_object() || !categories.count(category_block::Normalize(
+                    category_block::PythonString(detection.contains("category_name") ? detection.at("category_name") : Json("")))))
+                    filtered.push_back(detection);
+            }
+            Json copy = entry;
+            copy["sample_results"] = std::move(filtered);
+            output.push_back(std::move(copy));
+        }
+        return ModuleIO(imageList, std::move(output));
+    }
+};
+
+DLCV_FLOW_REGISTER_MODULE("post_process/category_block", CategoryBlockModule);
 
 static std::string FormatAffineKey(const std::vector<double>& a) {
     if (a.size() < 6) return std::string();
