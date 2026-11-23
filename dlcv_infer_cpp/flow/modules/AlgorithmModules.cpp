@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -13,6 +14,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "opencv2/imgproc.hpp"
 
 namespace dlcv_infer {
 namespace flow {
@@ -338,12 +340,100 @@ private:
     }
 };
 
+class CircularRegionModule final : public BaseModule {
+public:
+    using BaseModule::BaseModule;
+
+    ModuleIO Process(const std::vector<ModuleImage>& images, const Json& resultList) override {
+        const std::string categoryName = ReadCategoryName();
+        const int radius = ReadRadius();
+        Json results = resultList.is_array() ? resultList : Json::array();
+        for (size_t i = 0; i < images.size(); ++i) {
+            const cv::Mat& image = images[i].GetImage();
+            if (image.empty()) throw std::invalid_argument("圆形区域绘制需要非空图像");
+            const int width = image.cols;
+            const int height = image.rows;
+            const int centerX = width / 2;
+            const int centerY = height / 2;
+            const int x1 = std::max(0, centerX - radius);
+            const int y1 = std::max(0, centerY - radius);
+            const int x2 = static_cast<int>(std::min<long long>(width, static_cast<long long>(centerX) + radius + 1));
+            const int y2 = static_cast<int>(std::min<long long>(height, static_cast<long long>(centerY) + radius + 1));
+            cv::Mat mask(y2 - y1, x2 - x1, CV_8UC1, cv::Scalar(0));
+            cv::circle(mask, cv::Point(centerX - x1, centerY - y1), radius, cv::Scalar(255), cv::FILLED);
+
+            Json maskRows = Json::array();
+            for (int y = 0; y < mask.rows; ++y) {
+                Json row = Json::array();
+                for (int x = 0; x < mask.cols; ++x) row.push_back(static_cast<int>(mask.at<unsigned char>(y, x)));
+                maskRows.push_back(std::move(row));
+            }
+            Json detection = {
+                {"category_id", 0},
+                {"category_name", categoryName},
+                {"score", 1.0},
+                {"bbox", Json::array({x1, y1, x2 - x1, y2 - y1})},
+                {"area", static_cast<double>(cv::countNonZero(mask))},
+                {"mask_array", std::move(maskRows)},
+                {"with_bbox", true},
+                {"with_mask", true},
+                {"with_angle", false},
+                {"angle", -100.0}
+            };
+            Json entry = images[i].ToMeta();
+            entry["type"] = "local";
+            entry["originating_module"] = "pre_process/circular_region";
+            entry["index"] = i;
+            entry["sample_results"] = Json::array({std::move(detection)});
+            results.push_back(std::move(entry));
+        }
+        return ModuleIO(images, std::move(results));
+    }
+
+private:
+    static std::string Trim(const std::string& text) {
+        size_t first = 0;
+        while (first < text.size() && std::isspace(static_cast<unsigned char>(text[first]))) ++first;
+        size_t last = text.size();
+        while (last > first && std::isspace(static_cast<unsigned char>(text[last - 1]))) --last;
+        return text.substr(first, last - first);
+    }
+
+    std::string ReadCategoryName() const {
+        if (!Properties.contains("categoryname") || Properties.at("categoryname").is_null()) return "圆形区域";
+        const auto& value = Properties.at("categoryname");
+        std::string text = value.is_string() ? value.get<std::string>() : value.dump();
+        text = Trim(text);
+        return text.empty() ? "圆形区域" : text;
+    }
+
+    int ReadRadius() const {
+        if (!Properties.contains("radius")) return 5;
+        const auto& value = Properties.at("radius");
+        double number = 0.0;
+        if (value.is_number()) {
+            number = value.get<double>();
+        } else if (value.is_string()) {
+            const std::string text = Trim(value.get<std::string>());
+            size_t used = 0;
+            try { number = std::stod(text, &used); }
+            catch (...) { throw std::invalid_argument("radius 必须为正整数"); }
+            if (used != text.size()) throw std::invalid_argument("radius 必须为正整数");
+        } else {
+            throw std::invalid_argument("radius 必须为正整数");
+        }
+        if (!std::isfinite(number) || number <= 0 || number > static_cast<double>((std::numeric_limits<int>::max)()))
+            throw std::invalid_argument("radius 必须为正整数");
+        return static_cast<int>(number);
+    }
+};
 } // namespace
 
 DLCV_FLOW_REGISTER_MODULE("post_process/sequence_check", SequenceCheckModule)
 // 仅兼容旧流程类型；判定输出统一使用新主标识。
 DLCV_FLOW_REGISTER_MODULE("post_process/wire_sequence_check", SequenceCheckModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/offset_distance", OffsetDistanceModule)
+DLCV_FLOW_REGISTER_MODULE("pre_process/circular_region", CircularRegionModule)
 
 } // namespace flow
 } // namespace dlcv_infer

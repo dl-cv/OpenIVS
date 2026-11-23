@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using DlcvModules;
 using Newtonsoft.Json.Linq;
@@ -13,6 +14,7 @@ namespace DlcvCSharpTest
         private const string SequenceType = "post_process/sequence_check";
         private const string LegacySequenceType = "post_process/wire_sequence_check";
         private const string Offset = "post_process/offset_distance";
+        private const string CircularRegionType = "pre_process/circular_region";
 
         public static int Run()
         {
@@ -25,6 +27,7 @@ namespace DlcvCSharpTest
             };
             check("参考图像坐标排序、空输入与仅首张", TestReferenceImage);
             check("两个节点注册", () => { Require(ModuleRegistry.Get(SequenceType) != null, SequenceType + " 未注册"); Require(ModuleRegistry.Get(Offset) != null, Offset + " 未注册"); });
+            check("圆形区域绘制默认值、参数和非法半径", TestCircularRegion);
             check("旧流程类型兼容且输出新主标识与原因", TestLegacySequence);
             check("顺序水平竖直、重复及完整列表", TestSequence);
             check("中心排序、稳定同坐标与旋转框", TestCenters);
@@ -87,6 +90,73 @@ namespace DlcvCSharpTest
             return (entry.Value<bool>("ok") ? "OK;" : "NG;") + entry.Value<string>("reason");
         }
         private static JObject Rule(string op, double value) { return new JObject { ["operator"] = op, ["value"] = value }; }
+        private static void TestCircularRegion()
+        {
+            using (var image = new Mat(20, 30, MatType.CV_8UC3, Scalar.All(0)))
+            {
+                var state = new TransformationState(image.Width, image.Height);
+                var input = new List<ModuleImage>
+                {
+                    new ModuleImage(image, image, state, 7)
+                };
+                var output = Execute(CircularRegionType, input, new JArray(), new JObject());
+                Require(output.ImageList.Count == 1 && output.ResultList.Count == 1, "圆形区域输出数量错误");
+                var entry = (JObject)output.ResultList[0];
+                Require((string)entry["type"] == "local" && (int)entry["index"] == 0 &&
+                    (int)entry["origin_index"] == 7, "圆形区域结果来源错误");
+                Require((string)entry["originating_module"] == CircularRegionType, "圆形区域模块标识错误");
+                var det = (JObject)((JArray)entry["sample_results"])[0];
+                Require((string)det["category_name"] == "圆形区域", "圆形区域默认类别错误");
+                Require((long)det["category_id"] == 0 && Math.Abs((double)det["score"] - 1.0) < 1e-12,
+                    "圆形区域类别或分数错误");
+                var bbox = (JArray)det["bbox"];
+                Require(bbox.Count == 4 && (int)bbox[0] == 10 && (int)bbox[1] == 5 &&
+                    (int)bbox[2] == 11 && (int)bbox[3] == 11, "圆形区域默认 bbox 错误");
+                var mask = (JArray)det["mask_array"];
+                Require(mask.Count == 11 && ((JArray)mask[0]).Count == 11, "圆形区域 mask 尺寸错误");
+                Require((int)mask[5][5] == 255 && (int)mask[0][0] == 0, "圆形区域中心或边缘像素错误");
+                int foreground = mask.Sum(row => ((JArray)row).Sum(value => (int)value));
+                Require((double)det["area"] == foreground / 255.0, "圆形区域面积错误");
+
+                var custom = Execute(CircularRegionType, input, new JArray(),
+                    new JObject { ["categoryname"] = "  自定义圆  ", ["radius"] = 3 });
+                var customDet = (JObject)((JArray)((JObject)custom.ResultList[0])["sample_results"])[0];
+                var customBbox = (JArray)customDet["bbox"];
+                Require((string)customDet["category_name"] == "自定义圆", "圆形区域自定义类别错误");
+                Require((int)customBbox[0] == 12 && (int)customBbox[1] == 7 &&
+                    (int)customBbox[2] == 7 && (int)customBbox[3] == 7, "圆形区域自定义半径错误");
+
+                bool rejected = false;
+                try { Execute(CircularRegionType, input, new JArray(), new JObject { ["radius"] = 0 }); }
+                catch (ArgumentException) { rejected = true; }
+                Require(rejected, "圆形区域非法半径未拒绝");
+                string artifactPath = Environment.GetEnvironmentVariable("DLCV_CIRCULAR_REGION_CSHARP_ARTIFACT");
+                if (!string.IsNullOrWhiteSpace(artifactPath))
+                {
+                    using (var visualImage = new Mat(480, 640, MatType.CV_8UC3, Scalar.All(0)))
+                    {
+                        var visualState = new TransformationState(visualImage.Width, visualImage.Height);
+                        var visualInput = new List<ModuleImage>
+                        {
+                            new ModuleImage(visualImage, visualImage, visualState, 0)
+                        };
+                        var visualOutput = Execute(CircularRegionType, visualInput, new JArray(),
+                            new JObject { ["categoryname"] = "圆形区域", ["radius"] = 50 });
+                        var visualDet = (JObject)((JArray)((JObject)visualOutput.ResultList[0])["sample_results"])[0];
+                        var artifact = new JObject
+                        {
+                            ["language"] = "C#",
+                            ["image_width"] = visualImage.Width,
+                            ["image_height"] = visualImage.Height,
+                            ["detection"] = visualDet.DeepClone()
+                        };
+                        string directory = Path.GetDirectoryName(Path.GetFullPath(artifactPath));
+                        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+                        File.WriteAllText(artifactPath, artifact.ToString());
+                    }
+                }
+            }
+        }
         private static void Require(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
         private static void Reject(Action action)
         {
