@@ -41,7 +41,9 @@ public:
         const QString& icModelPath,
         const QString& noCadModelPath,
         int localThreads,
-        const QString& outputTextPath);
+        const QString& outputTextPath,
+        int repeatCount = 1,
+        int flowThreads = 1);
 
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override = default;
@@ -145,7 +147,8 @@ private:
         const SlidingWindowConfig& config,
         const std::function<void(const PipelineProgressInfo&)>& progressCallback,
         int localThreads,
-        PipelineTimings* timings = nullptr);
+        PipelineTimings* timings = nullptr,
+        int flowThreads = 1);
 
     static std::vector<ExtractDetection> inferExtractModelOnWindows(
         const cv::Mat& fullImageRgb,
@@ -153,7 +156,8 @@ private:
         const std::vector<cv::Rect>& windows,
         const std::function<void(const PipelineProgressInfo&)>& progressCallback,
         int localThreads,
-        PipelineTimings& timings);
+        PipelineTimings& timings,
+        int flowThreads);
 
     static RoiProcessResult cropAndRotateRoi(
         const cv::Mat& fullImageRgb,
@@ -165,7 +169,8 @@ private:
         const dlcv_infer::ObjectResult& extractFallback,
         bool useIcDetectModel,
         dlcv_infer::Model& componentModel,
-        dlcv_infer::Model& icModel);
+        dlcv_infer::Model& icModel,
+        int flowThreads);
 
 private:
     static constexpr int kDefaultWindowWidth = 2560;

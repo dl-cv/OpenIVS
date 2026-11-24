@@ -49,6 +49,7 @@
 #include "MaskAreaSelfTest.h"
 #include "SlidingMergeSelfTest.h"
 #include "AlgorithmModulesSelfTest.h"
+#include "ModelParallelSelfTest.h"
 #include "../common/NativeSharedIndexTestHelper.h"
 
 namespace {
@@ -5530,6 +5531,10 @@ int wmain(int argc, wchar_t* argv[]) {
         return RunAlgorithmModulesSelfTest();
     }
 
+    if (argc >= 2 && std::wstring(argv[1]) == L"model-parallel-selftest") {
+        return RunModelParallelSelfTest();
+    }
+
     if (argc >= 2 && std::wstring(argv[1]) == L"circular-region-selftest") {
         return RunAlgorithmModulesSelfTest(true);
     }
@@ -5663,6 +5668,7 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  count-results-selftest\n";
     std::cout << "  category-count-check-selftest\n";
     std::cout << "  algorithm-modules-selftest\n";
+    std::cout << "  model-parallel-selftest\n";
     std::cout << "  image-generation-expand-selftest\n";
     std::cout << "  cross-model-label-merge-selftest\n";
     std::cout << "  load-three-models <extractModelPath> <componentModelPath> <icModelPath>\n";

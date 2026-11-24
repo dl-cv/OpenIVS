@@ -34,7 +34,7 @@ void printUsage() {
     std::cout << "用法:\n";
     std::cout << "  C++测试程序2.exe --load-three-models <元件提取模型> <元件检测模型> <IC检测模型>\n";
     std::cout << "  C++测试程序2.exe --infer <图片> <元件提取模型> <元件检测模型> <IC检测模型> --output <结果文本>\n"
-                 "                   [--no-cad <无CAD检测模型>] [--local-threads <1-32>]\n\n";
+                 "                   [--no-cad <无CAD检测模型>] [--local-threads <1-32>] [--flow-threads <1-32>] [--repeat <1-32>]\n\n";
     std::cout << "说明:\n";
     std::cout << "  三个模型按参数顺序串行加载，不加载预热模型，也不执行额外推理。\n";
     std::cout << "  加载过程中实时输出每个模型的耗时，完成后输出总耗时。\n";
@@ -54,16 +54,19 @@ int runInferCommandLine(int argc, char* argv[]) {
     QString noCadPath;
     QString outputPath;
     int localThreads = 2;
+    int flowThreads = 1;
+    int repeatCount = 1;
     for (int i = 6; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--no-cad" && i + 1 < argc) {
             noCadPath = QString::fromLocal8Bit(argv[++i]);
-        } else if (arg == "--local-threads" && i + 1 < argc) {
+        } else if ((arg == "--local-threads" || arg == "--flow-threads" || arg == "--repeat") && i + 1 < argc) {
             const std::string value = argv[++i];
-            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), localThreads);
+            int& number = arg == "--local-threads" ? localThreads : arg == "--flow-threads" ? flowThreads : repeatCount;
+            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), number);
             if (parsed.ec != std::errc() || parsed.ptr != value.data() + value.size()
-                || localThreads < 1 || localThreads > 32) {
-                std::cerr << "局部推理线程数须为 1 到 32 的整数。" << std::endl;
+                || number < 1 || number > 32) {
+                std::cerr << arg << " 须为 1 到 32 的整数。" << std::endl;
                 return 1;
             }
         } else if (arg == "--output" && i + 1 < argc) {
@@ -88,7 +91,7 @@ int runInferCommandLine(int argc, char* argv[]) {
         return 1;
     }
     const int code = MainWindow::runHeadlessInference(
-        imagePath, extractPath, componentPath, icPath, noCadPath, localThreads, outputPath);
+        imagePath, extractPath, componentPath, icPath, noCadPath, localThreads, outputPath, repeatCount, flowThreads);
     if (code == 0) {
         std::cout << "推理完成，结果文本: " << outputPath.toLocal8Bit().constData() << std::endl;
     }

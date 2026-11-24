@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -236,6 +239,73 @@ namespace DlcvModules
 			return Math.Max(1, Math.Min(modelLimit, cfg));
 		}
 
+		internal int ResolveThreadCount()
+		{
+			object value;
+			var parameters = Context?.Get<JObject>("infer_params", null);
+			if (parameters != null && parameters.TryGetValue("num_threads", out JToken requested))
+				value = requested;
+			else if (Properties == null || !Properties.TryGetValue("num_threads", out value))
+				return 1;
+
+			if (value is JValue token && token.Type == JTokenType.Integer)
+				value = token.Value;
+			if (!(value is sbyte || value is byte || value is short || value is ushort ||
+				value is int || value is uint || value is long || value is ulong))
+				throw new InvalidDataException("num_threads 必须是 1 到 32 的整数");
+			if (value is ulong unsignedValue && unsignedValue > 32)
+				throw new InvalidDataException("num_threads 必须是 1 到 32 的整数");
+			long count = Convert.ToInt64(value);
+			if (count < 1 || count > 32)
+				throw new InvalidDataException("num_threads 必须是 1 到 32 的整数");
+			return (int)count;
+		}
+
+		internal static void ExecuteChunks(int count, int numThreads, Action<int> execute)
+		{
+			if (numThreads == 1 || count <= 1)
+			{
+				for (int i = 0; i < count; ++i) execute(i);
+				return;
+			}
+			var gate = new object();
+			int next = 0;
+			ExceptionDispatchInfo failure = null;
+			var workers = new List<Task>(Math.Min(numThreads, count));
+			try
+			{
+				for (int worker = 0; worker < Math.Min(numThreads, count); ++worker)
+				{
+					workers.Add(Task.Run(() =>
+					{
+						while (true)
+						{
+							int index;
+							lock (gate)
+							{
+								if (failure != null || next >= count) return;
+								index = next++;
+							}
+							try { execute(index); }
+							catch (Exception error)
+							{
+								lock (gate)
+									if (failure == null) failure = ExceptionDispatchInfo.Capture(error);
+								return;
+							}
+						}
+					}));
+				}
+			}
+			catch (Exception error)
+			{
+				lock (gate)
+					if (failure == null) failure = ExceptionDispatchInfo.Capture(error);
+			}
+			Task.WaitAll(workers.ToArray());
+			failure?.Throw();
+		}
+
 		internal static int ReadModelIndex(object value)
 		{
 			if (value is JToken token)
@@ -298,6 +368,7 @@ namespace DlcvModules
 			var images = imageList ?? new List<ModuleImage>();
 			var outImages = new List<ModuleImage>();
 			var outResults = new JArray();
+			int numThreads = ResolveThreadCount();
 			LoadModel();
 
 			// 入口阈值在最终结果层处理。
@@ -317,6 +388,7 @@ namespace DlcvModules
 			var bucketAreas = new Dictionary<string, int>();
 			int inferCallCount = 0;
 			int maxActualBatch = 0;
+			List<Utils.CSharpSampleResult>[] chunkResults = null;
 
 			try
 			{
@@ -354,40 +426,53 @@ namespace DlcvModules
 					sampleByLocal.Add(new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>()));
 				}
 
-				// 2) 按桶面积从大到小执行 batch，并回填到 local 下标
+				// 2) 保留原有分桶和 batch 顺序，各批结果在调用线程回填。
 				var bucketKeys = new List<string>(buckets.Keys);
 				bucketKeys.Sort((a, b) => bucketAreas[b].CompareTo(bucketAreas[a]));
+				var chunks = new List<List<int>>();
 				foreach (var key in bucketKeys)
 				{
 					var localIndices = buckets[key];
 					for (int start = 0; start < localIndices.Count; start += effectiveBatch)
 					{
 						int take = Math.Min(effectiveBatch, localIndices.Count - start);
-						var chunkLocals = localIndices.GetRange(start, take);
-						var chunkMats = new List<Mat>(chunkLocals.Count);
-						for (int k = 0; k < chunkLocals.Count; k++)
+						chunks.Add(localIndices.GetRange(start, take));
+					}
+				}
+				chunkResults = new List<Utils.CSharpSampleResult>[chunks.Count];
+				var chunkMilliseconds = new double[chunks.Count];
+				ExecuteChunks(chunks.Count, numThreads, chunkIndex =>
+				{
+					var chunkLocals = chunks[chunkIndex];
+					var chunkMats = new List<Mat>(chunkLocals.Count);
+					for (int k = 0; k < chunkLocals.Count; k++)
+					{
+						chunkMats.Add(rgbInputs[chunkLocals[k]]);
+					}
+					var inferSw = Stopwatch.StartNew();
+					var chunkParams = p.Count > 0 ? (JObject)p.DeepClone() : null;
+					Utils.CSharpResult res = _model.InferBatch(chunkMats, chunkParams);
+					chunkResults[chunkIndex] = res.SampleResults;
+					inferSw.Stop();
+					chunkMilliseconds[chunkIndex] = inferSw.Elapsed.TotalMilliseconds;
+				});
+				for (int chunkIndex = 0; chunkIndex < chunks.Count; ++chunkIndex)
+				{
+					var chunkLocals = chunks[chunkIndex];
+					inferCallCount += 1;
+					maxActualBatch = Math.Max(maxActualBatch, chunkLocals.Count);
+					InferTiming.AddDlcvInferMs(chunkMilliseconds[chunkIndex]);
+					var batchSamples = chunkResults[chunkIndex] ?? new List<Utils.CSharpSampleResult>();
+					for (int k = 0; k < chunkLocals.Count; k++)
+					{
+						int localIdx = chunkLocals[k];
+						if (k < batchSamples.Count)
 						{
-							chunkMats.Add(rgbInputs[chunkLocals[k]]);
+							sampleByLocal[localIdx] = batchSamples[k];
 						}
-						inferCallCount += 1;
-						maxActualBatch = Math.Max(maxActualBatch, chunkMats.Count);
-
-                        var inferSw = Stopwatch.StartNew();
-                        Utils.CSharpResult res = p.Count > 0 ? _model.InferBatch(chunkMats, p) : _model.InferBatch(chunkMats, null);
-                        inferSw.Stop();
-                        InferTiming.AddDlcvInferMs(inferSw.Elapsed.TotalMilliseconds);
-						var batchSamples = res.SampleResults ?? new List<Utils.CSharpSampleResult>();
-						for (int k = 0; k < chunkLocals.Count; k++)
+						else
 						{
-							int localIdx = chunkLocals[k];
-							if (k < batchSamples.Count)
-							{
-								sampleByLocal[localIdx] = batchSamples[k];
-							}
-							else
-							{
-								sampleByLocal[localIdx] = new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>());
-							}
+							sampleByLocal[localIdx] = new Utils.CSharpSampleResult(new List<Utils.CSharpObjectResult>());
 						}
 					}
 				}
@@ -424,9 +509,45 @@ namespace DlcvModules
 			}
 			finally
 			{
+				ReleaseChunkMasks(chunkResults, images);
 				for (int i = 0; i < convertedRgbToDispose.Count; i++)
 				{
 					try { convertedRgbToDispose[i].Dispose(); } catch { }
+				}
+			}
+		}
+
+		private sealed class MatReferenceComparer : IEqualityComparer<Mat>
+		{
+			public bool Equals(Mat left, Mat right) { return ReferenceEquals(left, right); }
+			public int GetHashCode(Mat value) { return RuntimeHelpers.GetHashCode(value); }
+		}
+
+		private static void ReleaseChunkMasks(List<Utils.CSharpSampleResult>[] chunks, List<ModuleImage> inputs)
+		{
+			if (chunks == null) return;
+			var seen = new HashSet<Mat>(new MatReferenceComparer());
+			foreach (var input in inputs)
+			{
+				if (input == null) continue;
+				seen.Add(input.ImageObject);
+				seen.Add(input.OriginalImage);
+				seen.Add(input.AffineImage);
+			}
+			foreach (var chunk in chunks)
+			{
+				if (chunk == null) continue;
+				foreach (var sample in chunk)
+				{
+					if (sample.Results == null) continue;
+					foreach (var result in sample.Results)
+					{
+						var mask = result.Mask;
+						if (mask != null && seen.Add(mask))
+						{
+							try { mask.Dispose(); } catch { }
+						}
+					}
 				}
 			}
 		}
@@ -464,7 +585,7 @@ namespace DlcvModules
 				var extraInfo = obj.ExtraInfo;
 				if (extraInfo != null && extraInfo.HasValues)
 				{
-					o["extra_info"] = extraInfo;
+					o["extra_info"] = extraInfo.DeepClone();
 				}
 				list.Add(o);
 			}

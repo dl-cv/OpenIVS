@@ -117,6 +117,14 @@ namespace DlcvCSharpTest
                     return ForegroundBackgroundStatisticsSelfTest.Run();
                 }
 
+                if (args != null && args.Length >= 1 && string.Equals(args[0], "flow-model-concurrency-selftest", StringComparison.OrdinalIgnoreCase))
+                {
+                    RunFlowModuleConcurrencyChecks();
+                    RunFlowReturnedMaskChecks();
+                    Console.WriteLine("流程模型并发 CPU 检查通过");
+                    return 0;
+                }
+
                 if (args != null && args.Length >= 1 && string.Equals(args[0], "flow-infer-params-selftest", StringComparison.OrdinalIgnoreCase))
                 {
                     return RunFlowInferParamsSelfTest();
