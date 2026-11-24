@@ -1,12 +1,14 @@
 #include "MainWindow.h"
 
 #include "CudaMemoryInfo.h"
+#include "ParallelInference.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <exception>
 #include <map>
+#include <mutex>
 #include <utility>
 
 #include <QCloseEvent>
@@ -40,6 +42,8 @@ using json = nlohmann::json;
 
 constexpr double kMergeIouThreshold = 0.2;
 constexpr double kMergeIosThreshold = 0.2;
+
+using demo2::RunModelTasks;
 
 void applyDialogInitialPath(QFileDialog& dialog, const QString& path) {
     if (path.isEmpty()) {
@@ -455,7 +459,7 @@ bool tryBuildRotatedCrop(
 
 cv::Mat rotateRoiByRightAngle(const cv::Mat& roi, int angle) {
     if (angle == 0) {
-        return roi.clone();
+        return roi;
     }
     cv::Mat rotated;
     if (angle == 90) {
@@ -470,7 +474,7 @@ cv::Mat rotateRoiByRightAngle(const cv::Mat& roi, int angle) {
         cv::rotate(roi, rotated, cv::ROTATE_90_CLOCKWISE);
         return rotated;
     }
-    return roi.clone();
+    return roi;
 }
 
 std::vector<double> buildRightAngleAffine(int srcW, int srcH, int angle, int& dstW, int& dstH) {
@@ -1479,9 +1483,12 @@ std::vector<MainWindow::ExtractDetection> MainWindow::inferExtractModelOnWindows
         return output;
     }
 
-    int order = 0;
+    std::vector<std::vector<ExtractDetection>> outcomes(windows.size());
+    std::mutex progressMutex;
+    int completed = 0;
     int lastPercent = -1;
-    for (int i = 0; i < totalWindows; ++i) {
+    RunModelTasks(totalWindows, [&](int i) {
+        auto& detections = outcomes[i];
         const cv::Rect window = windows[i];
         const cv::Mat tile = fullImageRgb(window).clone();
         const dlcv_infer::Result tileResult = extractModel.Infer(tile, inferParams);
@@ -1495,15 +1502,23 @@ std::vector<MainWindow::ExtractDetection> MainWindow::inferExtractModelOnWindows
                 ExtractDetection detection;
                 detection.objectResult = mapped;
                 detection.mergeAabb = aabb;
-                detection.order = order++;
-                output.push_back(detection);
+                detections.push_back(std::move(detection));
             }
         }
 
-        const int percent = 15 + static_cast<int>(std::llround(45.0 * (i + 1) / totalWindows));
+        std::lock_guard<std::mutex> lock(progressMutex);
+        ++completed;
+        const int percent = 15 + static_cast<int>(std::llround(45.0 * completed / totalWindows));
         if (percent != lastPercent && progressCallback) {
-            progressCallback({percent, QString("元件提取模型滑窗推理 %1/%2").arg(i + 1).arg(totalWindows)});
+            progressCallback({percent, QString("元件提取模型滑窗推理 %1/%2").arg(completed).arg(totalWindows)});
             lastPercent = percent;
+        }
+    });
+    int order = 0;
+    for (auto& detections : outcomes) {
+        for (auto& detection : detections) {
+            detection.order = order++;
+            output.push_back(std::move(detection));
         }
     }
     return output;
@@ -1614,48 +1629,74 @@ MainWindow::PipelineRunResult MainWindow::runPipeline(
     runResult.mergedExtractCount = static_cast<int>(mergedExtract.size());
 
     const int roiTotal = runResult.mergedExtractCount;
-    int roiCompleted = 0;
-    for (const auto& target : mergedExtract) {
-        const int startPercent = 70 + static_cast<int>(std::llround(25.0 * roiCompleted / std::max(1, roiTotal)));
-        report(startPercent, QString("局部模型推理 %1/%2").arg(roiCompleted).arg(roiTotal));
 
+    struct LocalOutcome {
+        bool skipped = false;
+        bool failed = false;
+        bool icRoute = false;
+        bool usedFallback = false;
+        std::vector<dlcv_infer::ObjectResult> mapped;
+        QString skipLog;
+        QString failureLog;
+    };
+    std::vector<LocalOutcome> outcomes(mergedExtract.size());
+    std::mutex progressMutex;
+    int completedCount = 0;
+
+    RunModelTasks(roiTotal, [&](int i) {
+        const ExtractDetection& target = mergedExtract[i];
+        LocalOutcome& outcome = outcomes[i];
         QString baseName;
         int normalizeAngle = 0;
         parseCategoryAndAngle(categoryToQString(target.objectResult.categoryName), baseName, normalizeAngle);
-        const bool useIcDetectModel = shouldUseIcDetectModel(baseName);
+        outcome.icRoute = shouldUseIcDetectModel(baseName);
         RoiProcessResult roi = cropAndRotateRoi(fullImageRgb, target, normalizeAngle);
         if (!roi.isValid) {
-            runResult.logs.push_back(
-                QString("跳过目标[%1]：%2").arg(categoryToQString(target.objectResult.categoryName), roi.invalidReason));
-            ++roiCompleted;
+            outcome.skipped = true;
+            outcome.skipLog = QString("跳过目标[%1]：%2").arg(
+                categoryToQString(target.objectResult.categoryName), roi.invalidReason);
+        } else {
+            try {
+                outcome.mapped = inferDetectionModelAndMapBack(
+                    roi, target.objectResult, outcome.icRoute, componentModel, icModel);
+                outcome.usedFallback = outcome.mapped.size() == 1
+                    && outcome.mapped[0].categoryName == target.objectResult.categoryName
+                    && outcome.mapped[0].bbox == target.objectResult.bbox
+                    && std::abs(outcome.mapped[0].score - target.objectResult.score) < 1e-6f;
+            } catch (const std::exception& ex) {
+                outcome.failed = true;
+                const QString routeName = outcome.icRoute
+                    ? QStringLiteral("IC检测模型") : QStringLiteral("元件检测模型");
+                outcome.failureLog = QString("目标[%1]%2推理失败，保留元件提取结果：%3").arg(
+                    categoryToQString(target.objectResult.categoryName), routeName,
+                    QString::fromLocal8Bit(ex.what()));
+            }
+        }
+        std::lock_guard<std::mutex> lock(progressMutex);
+        const int done = ++completedCount;
+        report(70 + static_cast<int>(std::llround(25.0 * done / std::max(1, roiTotal))),
+               QString("局部模型推理 %1/%2").arg(done).arg(roiTotal));
+    });
+
+    for (int i = 0; i < static_cast<int>(mergedExtract.size()); ++i) {
+        const LocalOutcome& outcome = outcomes[i];
+        const ExtractDetection& target = mergedExtract[i];
+        if (outcome.skipped) {
+            runResult.logs.push_back(outcome.skipLog);
             continue;
         }
-
-        try {
-            const std::vector<dlcv_infer::ObjectResult> mapped =
-                inferDetectionModelAndMapBack(roi, target.objectResult, useIcDetectModel, componentModel, icModel);
-            runResult.finalObjects.insert(runResult.finalObjects.end(), mapped.begin(), mapped.end());
-            const bool usedFallback = mapped.size() == 1
-                && mapped[0].categoryName == target.objectResult.categoryName
-                && mapped[0].bbox == target.objectResult.bbox
-                && std::abs(mapped[0].score - target.objectResult.score) < 1e-6f;
-            const int realResultCount = usedFallback ? 0 : static_cast<int>(mapped.size());
-            if (useIcDetectModel) {
-                runResult.icModelResultCount += realResultCount;
-            } else {
-                runResult.componentModelResultCount += realResultCount;
-            }
-        } catch (const std::exception& ex) {
-            const QString routeName = useIcDetectModel ? QStringLiteral("IC检测模型") : QStringLiteral("元件检测模型");
-            runResult.logs.push_back(
-                QString("目标[%1]%2推理失败，保留元件提取结果：%3")
-                    .arg(categoryToQString(target.objectResult.categoryName), routeName, QString::fromLocal8Bit(ex.what())));
+        if (outcome.failed) {
+            runResult.logs.push_back(outcome.failureLog);
             runResult.finalObjects.push_back(target.objectResult);
+            continue;
         }
-
-        ++roiCompleted;
-        const int finishPercent = 70 + static_cast<int>(std::llround(25.0 * roiCompleted / std::max(1, roiTotal)));
-        report(finishPercent, QString("局部模型推理 %1/%2").arg(roiCompleted).arg(roiTotal));
+        runResult.finalObjects.insert(runResult.finalObjects.end(), outcome.mapped.begin(), outcome.mapped.end());
+        const int realResultCount = outcome.usedFallback ? 0 : static_cast<int>(outcome.mapped.size());
+        if (outcome.icRoute) {
+            runResult.icModelResultCount += realResultCount;
+        } else {
+            runResult.componentModelResultCount += realResultCount;
+        }
     }
 
     report(95, "整理结果");

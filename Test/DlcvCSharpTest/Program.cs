@@ -84,6 +84,10 @@ namespace DlcvCSharpTest
             Console.OutputEncoding = Encoding.UTF8;
             if (args != null && args.Length == 1 && args[0] == "memory-validation-selftest")
                 return MemoryValidationSelfTest.Run();
+            if (args != null && args.Length >= 1 && args[0] == "trt-workspace-limit-selftest")
+                return args.Length == 1 ? TrtWorkspaceLimitSelfTest.Run() : TrtWorkspaceLimitSelfTest.RunWithSdk(args);
+            if (args != null && args.Length >= 1 && args[0] == "demo2-ui-selftest")
+                return Demo2UiSelfTest.Run(args);
             Model.EnableConsoleLog = false;
             try
             {

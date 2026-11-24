@@ -46,6 +46,7 @@
   - 结果中的 `Mask` 显式 `Dispose`
   - 支持 `mask-area-selftest` 子命令：独立验证结构化与 JSON 转换保留 SDK 面积（含 `123.5`、`0`），缺失或 `null` 时按有效 mask 补充面积，并覆盖 mask 开关、全零 mask、尺寸不变和最近邻缩放；滑窗合并仍按实际合并区域重算面积。
   - 内存采样使用 `GetProcessMemoryInfo`
+  - `trt-workspace-limit-selftest` 使用测试代理检查工作空间上限的非法值、边界值、参数与返回值转发及缺少导出异常，不加载模型。
   - 支持 `demo2-rgb-selftest` 子命令：反射驱动 `DlcvDemo2.Form1` 的私有图片加载与 `RunPipeline`，对同一张图分别执行“Demo2 实际入口 RGB”“手工 RGB”“原始 BGR”三条路径并输出签名比对结果
   - 支持 `shared-index-csharp-selftest` 子命令：验证 C# 加载普通模型后底层 index 查询、底层 C 接口加载普通模型后 C# 恢复、C# 加载 DVST 后流程注册信息读取与 C# 恢复，并检查借用实例释放后持有方仍可推理、持有方释放后 index 被清理
 

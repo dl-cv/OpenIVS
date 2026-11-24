@@ -99,6 +99,7 @@ namespace dlcv_infer {
     typedef const char* (DLCV_INFER_NATIVE_CALL *GetGpuInfoFuncType)();
     typedef void (DLCV_INFER_NATIVE_CALL *ResetMaxClockFuncType)();
     typedef void (DLCV_INFER_NATIVE_CALL *SetGpuMaxClockFuncType)(bool verbose);
+    typedef int (DLCV_INFER_NATIVE_CALL *SetTrtWorkspaceLimitFuncType)(int limit);
     typedef void (DLCV_INFER_NATIVE_CALL *ResetGpuMaxClockFuncType)(bool verbose);
     typedef const char* (DLCV_INFER_NATIVE_CALL *GetPowerSchemeGuidFuncType)(int verbose);
     typedef int (DLCV_INFER_NATIVE_CALL *SetPowerSchemeGuidFuncType)(const char* schemeGuid, int verbose);
@@ -175,6 +176,7 @@ namespace dlcv_infer {
         GetGpuInfoFuncType dlcv_get_gpu_info = nullptr;
         ResetMaxClockFuncType dlcv_reset_max_clock = nullptr;
         SetGpuMaxClockFuncType dlcv_set_gpu_max_clock = nullptr;
+        SetTrtWorkspaceLimitFuncType dlcv_set_trt_workspace_limit = nullptr;
         ResetGpuMaxClockFuncType dlcv_reset_gpu_max_clock = nullptr;
         GetPowerSchemeGuidFuncType dlcv_get_power_scheme_guid = nullptr;
         SetPowerSchemeGuidFuncType dlcv_set_power_scheme_guid = nullptr;
@@ -271,6 +273,7 @@ namespace dlcv_infer {
         GetGpuInfoFuncType GetGpuInfoFunc() const { return dlcv_get_gpu_info; }
         ResetMaxClockFuncType GetResetMaxClockFunc() const { return dlcv_reset_max_clock; }
         SetGpuMaxClockFuncType GetSetGpuMaxClockFunc() const { return dlcv_set_gpu_max_clock; }
+        SetTrtWorkspaceLimitFuncType GetSetTrtWorkspaceLimitFunc() const { return dlcv_set_trt_workspace_limit; }
         ResetGpuMaxClockFuncType GetResetGpuMaxClockFunc() const { return dlcv_reset_gpu_max_clock; }
         GetPowerSchemeGuidFuncType GetPowerSchemeGuidFunc() const { return dlcv_get_power_scheme_guid; }
         SetPowerSchemeGuidFuncType GetSetPowerSchemeGuidFunc() const { return dlcv_set_power_scheme_guid; }
@@ -528,6 +531,8 @@ namespace dlcv_infer {
         static void KeepMaxClock();
         static void ResetMaxClock();
         static void SetGpuMaxClock(bool verbose);
+        // 旧版推理 DLL 不支持此设置时返回 -1，仍可加载模型和推理。
+        static int SetTrtWorkspaceLimit(int limit);
         static void ResetGpuMaxClock(bool verbose);
 
         static const char* GetPowerSchemeGuid(int verbose);

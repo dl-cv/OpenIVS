@@ -280,3 +280,9 @@ free-all-models
 - `Test/dlcv_infer_c_dll_test`
 
 覆盖范围包括普通模型和 DVS 的恢复与释放顺序、最后一次释放后失效、双模块归属、全量释放、空 DVS、恢复失败清理、模型列表不额外加载模块以及 `module_path` 来源。
+
+## 设置共享执行内存上限
+
+C 接口为 `int dlcv_set_trt_workspace_limit(int limit)`，C++ 对应 `int dlcv_infer::NativeApi::SetTrtWorkspaceLimit(int limit)`。`limit` 必填，范围 1..32，支持此设置的 SDK 默认值为 2。成功返回 0，非法参数返回 -1 且保留原设置。旧版推理 DLL 缺少该导出时，C 转发接口和 C++ 接口均返回 -1，仍可加载模型和推理。C 转发接口加载 DLL 失败时也返回 -1。
+
+加载模型前调用，设置作用于当前推理 DLL 后续创建的每 GPU 共享执行内存池，已有池保持创建值。直接调用推理库 C 接口时，设置属于该动态库。经 C 包装库首次调用时，按既有加密狗自动选择默认推理库（优先 Sentinel）；设置后加载模型。C++ 调用方可先使用 `DllLoader::EnsureForModel(modelPath)` 选择默认库。该配置不修改外层线程数。

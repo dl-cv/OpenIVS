@@ -727,3 +727,9 @@ C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/Mode
 普通模型的 C++、结构化 C 和 JSON 结果均保留 SDK 返回的 `area`，包括 `0`，不按辅助掩码的非零像素数重算。`dlcv_infer_cpp_infer_c` 内部调用 `InferBatchPreservingOriginalMask`，保留底层掩码的尺寸和像素内容；C++ `InferBatch` 与 JSON `InferOneOutJson` 仍按 bbox 宽高绝对值四舍五入后的尺寸对掩码进行最近邻缩放，JSON 再将其转换为轮廓。
 
 跨入口回归按 SDK 面积比较，掩码尺寸和像素内容按各入口规则分别核查。流程模型保持流程输出语义。
+
+## 设置共享执行内存上限
+
+C 接口为 `int dlcv_set_trt_workspace_limit(int limit)`，C++ 对应 `int dlcv_infer::NativeApi::SetTrtWorkspaceLimit(int limit)`。`limit` 必填，范围 1..32，支持此设置的 SDK 默认值为 2。成功返回 0，非法参数返回 -1 且保留原设置。旧版推理 DLL 缺少该导出时返回 -1，仍可加载模型和推理。
+
+加载模型前调用，设置作用于当前推理 DLL 后续创建的每 GPU 共享执行内存池，已有池保持创建值。应用按模型选择 DLL 时先调用 `DllLoader::EnsureForModel(modelPath)`，再设置上限，最后创建模型。该配置不修改外层线程数。

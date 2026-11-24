@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{08B17EF6-9D40-4F65-9A6F-16C59BC55078}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>demo2inferenceui</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <Demo2RepoRoot>$(MSBuildThisFileDirectory)..\..\</Demo2RepoRoot>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <Import Project="$(Demo2RepoRoot)build_script\WindowsSdk.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Release'">false</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="$(Demo2RepoRoot)build_script\QtInstall.props" />
+  <Import Project="$(Demo2RepoRoot)build_script\DlcvProInfer.props" />
+  <Import Project="$(Demo2RepoRoot)build_script\OpenCvVersion.props" />
+  <PropertyGroup>
+    <OutDir>$(Demo2RepoRoot)$(Configuration)\$(ProjectName)\</OutDir>
+    <IntDir>$(Demo2RepoRoot)x64\$(Configuration)\$(ProjectName)\</IntDir>
+    <IncludePath>$(Demo2RepoRoot)dlcv_infer_cpp_qt_demo2;$(Demo2RepoRoot)dlcv_infer_cpp_qt_demo;$(Demo2RepoRoot)dlcv_infer_cpp;$(OpenCvIncludeDir);$(DlcvProInferIncludeDir);$(QtIncludeDir);$(QtIncludeDir)\QtCore;$(QtIncludeDir)\QtGui;$(QtIncludeDir)\QtWidgets;$(IncludePath)</IncludePath>
+    <LibraryPath>$(OpenCvLibDir);$(QtLibDir);$(LibraryPath)</LibraryPath>
+    <QtDllSuffix Condition="'$(Configuration)'=='Debug'">d</QtDllSuffix>
+    <QtDllSuffix Condition="'$(Configuration)'=='Release'"></QtDllSuffix>
+    <Demo2OpenCvLib Condition="'$(Configuration)'=='Debug'">$(OpenCvWorldDebugLib)</Demo2OpenCvLib>
+    <Demo2OpenCvLib Condition="'$(Configuration)'=='Release'">$(OpenCvWorldReleaseLib)</Demo2OpenCvLib>
+    <DlcvCopyQtRuntime>true</DlcvCopyQtRuntime>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <PreprocessorDefinitions>NOMINMAX;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'=='Debug'">_DEBUG;NOMINMAX;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'=='Release'">NDEBUG;NOMINMAX;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(Demo2RepoRoot)dlcv_infer_cpp_qt_demo2;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>$(Demo2OpenCvLib);Qt6Widgets$(QtDllSuffix).lib;Qt6Gui$(QtDllSuffix).lib;Qt6Core$(QtDllSuffix).lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="$(Demo2RepoRoot)dlcv_infer_cpp_qt_demo2\MainWindow.cpp" />
+    <ClCompile Include="$(Demo2RepoRoot)dlcv_infer_cpp_qt_demo2\CudaMemoryInfo.cpp" />
+    <ClCompile Include="$(Demo2RepoRoot)dlcv_infer_cpp_qt_demo\ImageViewerWidget.cpp" />
+    <ResourceCompile Include="$(Demo2RepoRoot)dlcv_infer_cpp_qt_demo2\app_icon.rc" />
+    <ProjectReference Include="$(Demo2RepoRoot)dlcv_infer_cpp\dlcv_infer_cpp.vcxproj">
+      <Project>{2699EC49-BC3D-4786-9D73-411A0E8B4DE0}</Project>
+      <LinkLibraryDependencies>true</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Import Project="$(Demo2RepoRoot)build_script\OpenCvDiagnostics.targets" />
+  <Import Project="$(Demo2RepoRoot)build_script\DlcvNativeRuntime.targets" />
+</Project>
