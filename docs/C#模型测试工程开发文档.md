@@ -216,6 +216,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `demo2-rgb-selftest <extractModelPath> <componentModelPath> <icModelPath> <imagePath>`
   - `flow-batch-selftest <modelPath> <imagePath> [batch]`
   - `category-count-check-selftest`
+  - `category-block-selftest <cases.json>`（C# / C++ 共用 `Test/category_block_cases.json`）
   - `shared-index-csharp-selftest <model.dvo> <flow.dvst> <image> [deviceId]`
   - `shared-index-review-selftest [model.dvo] [flow.dvst]`
   - `shared-index-format-selftest`
@@ -224,6 +225,7 @@ mask 校验包含单通道、宽度、高度和非零像素数。DVT 的 mask �
   - `ui-test-options-selftest`
   - `winforms-mainwindow-selftest`
 - `cli-anomaly-threshold-selftest` 不读取模型和图片，检查 CLI 对异常分数、普通分类低分、两路结果不一致及非有限分数的验证结果；运行前需先构建 `DlcvDemo.csproj`。
+- `category-block-selftest Test/category_block_cases.json` 验证类别屏蔽注册、完整名称、Unicode 小写与空白、数值标签、多图来源、全屏蔽空条目、上游不变及重复执行。`python Test/generate_category_block_cases.py <Python参考仓库>` 从 Python 模块重新生成预期结果。C# 现有 JSON 解析器将数值 `-0.0` 解析为 `0.0`，对应两项明确跳过；类别名使用字符串 `"-0.0"` 不受此限制。`python Test/prepare_category_block_demo.py <三节点实例分割.dvst> <输出目录>` 生成保留、屏蔽“杯子”、恢复三份流程，随后用两端正式 `infer` 和 `ui-test` 入口验证。
 - `ui-test-options-selftest` 反射调用 `DlcvDemo.UiTestOptions.TryParse`，覆盖 `--screenshot` 的 `.png`/`.PNG` 与省略场景，非 `.png` 后缀拒绝，`--screenshot` 与 `--model`、`--image`、`--output`、`--output.tmp` 相同的输出碰撞拒绝，以及 `--output` 的中间 `.tmp` 路径与 `--model`、`--image` 重合拒绝；运行前需先构建 `DlcvDemo.csproj`。
 - `winforms-mainwindow-selftest` 在 STA 线程内反射创建真实 `DlcvDemo.MainWindow`（不显示、不启用设备线程），校验 Form 类型、控件 Name/文本与默认 Enabled、三个 NumericUpDown 的范围与默认值及 threshold 步进 `0.05`、原生 Flat 按钮蓝/灰/红配色及 MouseOver/MouseDown 差异，并将窗口设为 MinimumSize 后校验 threshold 完整位于父容器 ClientRectangle 内；运行前需先构建 `DlcvDemo.csproj`。
 - `DlcvCSharpTest.exe` 与 `dlcv_infer_cpp_test.exe` 各自提供 `get-model-info <model>`，构造指定模型并把 `GetModelInfo` 返回的完整 JSON 写入标准输出。

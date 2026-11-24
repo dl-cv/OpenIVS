@@ -750,6 +750,8 @@ C# 侧额外处理 `DV\n` 文件头校验、归档内存读取、子模型二进
 
 ## 15. Flow 的 C# 实现入口
 
+`post_process/category_block` 由 `flow/modules/CategoryBlock.cs` 执行；配置与结果语义见共用标准第 6.4 节。
+
 ### 15.1 执行框架
 
 `ExecutionContext`、`ModuleRegistry`、`GlobalDebug`、`InferTiming`、`TransformationState`、`ModuleImage`、`ModuleIO`、`ModuleChannel` 位于 `DlcvCsharpApi\flow\runtime\ExecutionRuntime.cs` 与 `DlcvCsharpApi\flow\runtime\ModuleRuntime.cs`。`BaseModule` / `BaseInputModule` 提供模块基类。`GraphExecutor` 位于 `DlcvCsharpApi\flow\GraphExecutor.cs`，负责节点排序、连接路由、标量写入、`NormalizeBboxProperties()` 和模型节点预加载；执行时保留流程文件中的节点属性。`LoadModels()` 对 `BaseModelModule` 调用 `LoadModel()`，加载报告记录 `model_index`。模型节点存在 `model_index` 时复用 `ExecutionContext.flow_models` 中由当前 `FlowGraphModel` 持有的模型对象，不再按 `model_path` 重复加载。

@@ -6,6 +6,8 @@
 
 ## 1. 头文件与命名空间
 
+`post_process/category_block` 由 `flow/modules/PostProcessModules.cpp` 注册执行；配置与结果语义见共用标准第 6.4 节。
+
 | 头文件 | 说明 |
 |--------|------|
 | `dlcv_infer.h` | 主接口，包含 `Model`、`Utils`、`DllLoader`、`GetAllDogInfo` |

@@ -91,6 +91,7 @@ namespace DlcvCSharpTest
             Model.EnableConsoleLog = false;
             try
             {
+                if (args != null && args.Length >= 1 && args[0] == "category-block-selftest") return CategoryBlockSelfTest.Run(args);
                 if (args != null && args.Length >= 1 && (args[0] == "demo-four-models-memory-selftest" || args[0] == "demo-single-model-memory-selftest"))
                     return DemoFourModelsMemorySelfTest.Run(args);
                 if (args != null && args.Length >= 1 && args[0] == "flow-models-memory-selftest")
