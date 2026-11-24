@@ -100,6 +100,7 @@
     <Compile Include="BackendReuseSelfTest.cs" />
     <Compile Include="GpuProcessMemorySample.cs" />
     <Compile Include="MemoryValidationSelfTest.cs" />
+    <Compile Include="CategoryBlockSelfTest.cs" />
     <Compile Include="RegionMaskSelfTest.cs" />
     <Compile Include="MaskAreaSelfTest.cs" />
     <Compile Include="DvsTempArtifactMonitor.cs" />

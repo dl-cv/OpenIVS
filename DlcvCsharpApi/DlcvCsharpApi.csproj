@@ -92,6 +92,7 @@
     <Compile Include="flow\modules\PolyFilter.cs" />
     <Compile Include="flow\modules\ResultFilterRegion.cs" />
     <Compile Include="flow\modules\ResultCategoryOverride.cs" />
+    <Compile Include="flow\modules\CategoryBlock.cs" />
     <Compile Include="flow\modules\StrokeToPoints.cs" />
     <Compile Include="flow\modules\Templates.cs" />
     <Compile Include="flow\modules\Visualize.cs" />
@@ -126,6 +127,9 @@
     </Content>
     <None Include="app.config" />
     <None Include="packages.config" />
+    <EmbeddedResource Include="flow\modules\CategoryBlockUnicode.json">
+      <LogicalName>CategoryBlockUnicode.json</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
