@@ -454,6 +454,8 @@ public static class Utils
     // 锁定 GPU 最大时钟
     public static void KeepMaxClock();
 
+    public static int SetTrtWorkspaceLimit(int limit);
+
     // 加密狗查询
     public static JObject GetAllDogInfo();
 
@@ -471,6 +473,20 @@ public static class Utils
 ```
 
 ---
+
+### TensorRT 工作空间数量
+
+`Utils.SetTrtWorkspaceLimit(int limit)` 设置实际推理 DLL 后续创建的每个 GPU 工作空间池上限。默认值为 `2`，`limit` 必填、范围为 `1..32`；成功返回 `0`，非法值返回 `-1` 并保留原值。已有池保持原上限。
+
+在首次模型加载前调用设置函数。普通模型可先用 `DllLoader.EnsureForModel(modelPath)` 选择对应 DLL，再设置上限；流程模型直接设置当前默认 DLL，再加载流程包，包内子模型在加载时解析授权类型。设置只作用于当前默认 DLL，直接转发其 `int dlcv_set_trt_workspace_limit(int limit)`，缺少导出时抛出 `EntryPointNotFoundException`。
+
+```csharp
+Utils.SetTrtWorkspaceLimit(4);
+using (var model = new Model(modelPath, 0, false, false))
+{
+    // 执行推理。
+}
+```
 
 ## 9. 调用流程
 

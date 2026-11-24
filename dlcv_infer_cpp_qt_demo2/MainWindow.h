@@ -33,17 +33,6 @@ public:
         int order = 0;
     };
 
-    // 无界面执行一次完整推理，返回 0 表示成功；结果文本写入 outputTextPath。
-    static int runHeadlessInference(
-        const QString& imagePath,
-        const QString& extractModelPath,
-        const QString& componentModelPath,
-        const QString& icModelPath,
-        const QString& noCadModelPath,
-        int localThreads,
-        const QString& outputTextPath,
-        int repeatCount = 1);
-
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override = default;
 
@@ -78,18 +67,6 @@ private:
         int mergedExtractCount = 0;
         int componentModelResultCount = 0;
         int icModelResultCount = 0;
-    };
-
-    struct PipelineTimings {
-        double extractMs = 0.0;
-        double extractCropMs = 0.0;
-        double extractInferMs = 0.0;
-        double extractMapMs = 0.0;
-        double mergeMs = 0.0;
-        double localMs = 0.0;
-        double localCropMs = 0.0;
-        double localInferMs = 0.0;
-        double collectMs = 0.0;
     };
 
     void setupUi();
@@ -138,30 +115,26 @@ private:
     void restoreUiSettings();
     void saveUiSettings();
 
-    static PipelineRunResult runPipeline(
+    PipelineRunResult runPipeline(
         const cv::Mat& fullImageRgb,
         dlcv_infer::Model& extractModel,
         dlcv_infer::Model& componentModel,
         dlcv_infer::Model& icModel,
         const SlidingWindowConfig& config,
-        const std::function<void(const PipelineProgressInfo&)>& progressCallback,
-        int localThreads,
-        PipelineTimings* timings = nullptr);
+        const std::function<void(const PipelineProgressInfo&)>& progressCallback);
 
-    static std::vector<ExtractDetection> inferExtractModelOnWindows(
+    std::vector<ExtractDetection> inferExtractModelOnWindows(
         const cv::Mat& fullImageRgb,
         dlcv_infer::Model& extractModel,
         const std::vector<cv::Rect>& windows,
-        const std::function<void(const PipelineProgressInfo&)>& progressCallback,
-        int localThreads,
-        PipelineTimings& timings);
+        const std::function<void(const PipelineProgressInfo&)>& progressCallback);
 
-    static RoiProcessResult cropAndRotateRoi(
+    RoiProcessResult cropAndRotateRoi(
         const cv::Mat& fullImageRgb,
         const ExtractDetection& target,
         int normalizeAngle);
 
-    static std::vector<dlcv_infer::ObjectResult> inferDetectionModelAndMapBack(
+    std::vector<dlcv_infer::ObjectResult> inferDetectionModelAndMapBack(
         const RoiProcessResult& roiContext,
         const dlcv_infer::ObjectResult& extractFallback,
         bool useIcDetectModel,

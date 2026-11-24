@@ -10,9 +10,10 @@
 namespace demo2 {
 
 template <typename Work>
-void RunModelTasks(int count, int numThreads, const Work& work) {
+void RunModelTasks(int count, const Work& work) {
     if (count == 0) return;
-    const int workersWanted = std::max(1, std::min(count, numThreads));
+    constexpr int threads = 4;
+    const int workersWanted = std::min(count, threads);
     if (workersWanted == 1) {
         for (int i = 0; i < count; ++i) work(i);
         return;

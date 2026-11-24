@@ -1630,6 +1630,7 @@ namespace dlcv_infer {
         dlcv_get_gpu_info = (GetGpuInfoFuncType)ResolveSymbol(hModule, "dlcv_get_gpu_info");
         dlcv_reset_max_clock = (ResetMaxClockFuncType)ResolveSymbol(hModule, "dlcv_reset_max_clock");
         dlcv_set_gpu_max_clock = (SetGpuMaxClockFuncType)ResolveSymbol(hModule, "dlcv_set_gpu_max_clock");
+        dlcv_set_trt_workspace_limit = (SetTrtWorkspaceLimitFuncType)ResolveSymbol(hModule, "dlcv_set_trt_workspace_limit");
         dlcv_reset_gpu_max_clock = (ResetGpuMaxClockFuncType)ResolveSymbol(hModule, "dlcv_reset_gpu_max_clock");
         dlcv_get_power_scheme_guid = (GetPowerSchemeGuidFuncType)ResolveSymbol(hModule, "dlcv_get_power_scheme_guid");
         dlcv_set_power_scheme_guid = (SetPowerSchemeGuidFuncType)ResolveSymbol(hModule, "dlcv_set_power_scheme_guid");
@@ -3827,6 +3828,12 @@ namespace dlcv_infer {
     void NativeApi::SetGpuMaxClock(bool verbose) {
         auto& loader = DllLoader::Instance();
         RequireNativeApiFunction(loader.GetSetGpuMaxClockFunc(), "dlcv_set_gpu_max_clock")(verbose);
+    }
+
+    int NativeApi::SetTrtWorkspaceLimit(int limit) {
+        if (limit < 1 || limit > 32) return -1;
+        auto& loader = DllLoader::Instance();
+        return RequireNativeApiFunction(loader.GetSetTrtWorkspaceLimitFunc(), "dlcv_set_trt_workspace_limit")(limit);
     }
 
     void NativeApi::ResetGpuMaxClock(bool verbose) {

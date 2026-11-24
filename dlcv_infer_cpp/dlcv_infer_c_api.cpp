@@ -1404,6 +1404,12 @@ void DLCV_NATIVE_C_CALL dlcv_set_gpu_max_clock(bool verbose) {
     });
 }
 
+int DLCV_NATIVE_C_CALL dlcv_set_trt_workspace_limit(int limit) {
+    return CallNativeInt("dlcv_set_trt_workspace_limit", [limit]() {
+        return dlcv_infer::NativeApi::SetTrtWorkspaceLimit(limit);
+    });
+}
+
 void DLCV_NATIVE_C_CALL dlcv_reset_gpu_max_clock(bool verbose) {
     CallNativeVoid("dlcv_reset_gpu_max_clock", [verbose]() {
         dlcv_infer::NativeApi::ResetGpuMaxClock(verbose);

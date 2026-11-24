@@ -4,13 +4,9 @@
 #include "ParallelInference.h"
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cmath>
-#include <cstdint>
-#include <cstdio>
 #include <exception>
-#include <fstream>
 #include <map>
 #include <mutex>
 #include <utility>
@@ -46,13 +42,6 @@ using json = nlohmann::json;
 
 constexpr double kMergeIouThreshold = 0.2;
 constexpr double kMergeIosThreshold = 0.2;
-
-// 局部推理（滑窗裁图后的小图推理）使用的线程数。
-constexpr int kLocalInferThreads = 4;
-
-double elapsedMilliseconds(std::chrono::steady_clock::time_point start) {
-    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-}
 
 using demo2::RunModelTasks;
 
@@ -1413,8 +1402,7 @@ void MainWindow::onInfer() {
                         this,
                         [this, info]() { setStatus(info.stage, info.percent); },
                         Qt::QueuedConnection);
-                },
-                kLocalInferThreads);
+                });
             const auto end = std::chrono::steady_clock::now();
             elapsedMs = std::chrono::duration<double, std::milli>(end - start).count();
         } catch (const std::exception& ex) {
@@ -1484,9 +1472,7 @@ std::vector<MainWindow::ExtractDetection> MainWindow::inferExtractModelOnWindows
     const cv::Mat& fullImageRgb,
     dlcv_infer::Model& extractModel,
     const std::vector<cv::Rect>& windows,
-    const std::function<void(const PipelineProgressInfo&)>& progressCallback,
-    int localThreads,
-    PipelineTimings& timings) {
+    const std::function<void(const PipelineProgressInfo&)>& progressCallback) {
     std::vector<ExtractDetection> output;
     const json inferParams = json{{"with_mask", false}};
     const int totalWindows = static_cast<int>(windows.size());
@@ -1497,26 +1483,15 @@ std::vector<MainWindow::ExtractDetection> MainWindow::inferExtractModelOnWindows
         return output;
     }
 
-    struct WindowOutcome {
-        std::vector<ExtractDetection> detections;
-        double cropMs = 0.0;
-        double inferMs = 0.0;
-        double mapMs = 0.0;
-    };
-    std::vector<WindowOutcome> outcomes(windows.size());
+    std::vector<std::vector<ExtractDetection>> outcomes(windows.size());
     std::mutex progressMutex;
     int completed = 0;
     int lastPercent = -1;
-    RunModelTasks(totalWindows, localThreads, [&](int i) {
-        WindowOutcome& outcome = outcomes[i];
+    RunModelTasks(totalWindows, [&](int i) {
+        auto& detections = outcomes[i];
         const cv::Rect window = windows[i];
-        auto start = std::chrono::steady_clock::now();
         const cv::Mat tile = fullImageRgb(window).clone();
-        outcome.cropMs = elapsedMilliseconds(start);
-        start = std::chrono::steady_clock::now();
         const dlcv_infer::Result tileResult = extractModel.Infer(tile, inferParams);
-        outcome.inferMs = elapsedMilliseconds(start);
-        start = std::chrono::steady_clock::now();
         if (!tileResult.sampleResults.empty()) {
             for (const auto& obj : tileResult.sampleResults[0].results) {
                 const dlcv_infer::ObjectResult mapped = liftExtractObjectToFull(obj, window);
@@ -1527,11 +1502,10 @@ std::vector<MainWindow::ExtractDetection> MainWindow::inferExtractModelOnWindows
                 ExtractDetection detection;
                 detection.objectResult = mapped;
                 detection.mergeAabb = aabb;
-                outcome.detections.push_back(std::move(detection));
+                detections.push_back(std::move(detection));
             }
         }
 
-        outcome.mapMs = elapsedMilliseconds(start);
         std::lock_guard<std::mutex> lock(progressMutex);
         ++completed;
         const int percent = 15 + static_cast<int>(std::llround(45.0 * completed / totalWindows));
@@ -1541,11 +1515,8 @@ std::vector<MainWindow::ExtractDetection> MainWindow::inferExtractModelOnWindows
         }
     });
     int order = 0;
-    for (auto& outcome : outcomes) {
-        timings.extractCropMs += outcome.cropMs;
-        timings.extractInferMs += outcome.inferMs;
-        timings.extractMapMs += outcome.mapMs;
-        for (auto& detection : outcome.detections) {
+    for (auto& detections : outcomes) {
+        for (auto& detection : detections) {
             detection.order = order++;
             output.push_back(std::move(detection));
         }
@@ -1632,11 +1603,8 @@ MainWindow::PipelineRunResult MainWindow::runPipeline(
     dlcv_infer::Model& componentModel,
     dlcv_infer::Model& icModel,
     const SlidingWindowConfig& config,
-    const std::function<void(const PipelineProgressInfo&)>& progressCallback,
-    int localThreads,
-    PipelineTimings* timings) {
+    const std::function<void(const PipelineProgressInfo&)>& progressCallback) {
     PipelineRunResult runResult;
-    PipelineTimings measured;
     auto report = [&](int percent, const QString& stage) {
         if (progressCallback) {
             progressCallback({clampProgressPercent(percent), stage});
@@ -1654,19 +1622,14 @@ MainWindow::PipelineRunResult MainWindow::runPipeline(
     runResult.slidingWindowCount = static_cast<int>(windows.size());
 
     report(12, QString("元件提取模型滑窗推理 0/%1").arg(runResult.slidingWindowCount));
-    auto start = std::chrono::steady_clock::now();
     const std::vector<ExtractDetection> extractDetections =
-        inferExtractModelOnWindows(fullImageRgb, extractModel, windows, progressCallback, localThreads, measured);
-    measured.extractMs = elapsedMilliseconds(start);
+        inferExtractModelOnWindows(fullImageRgb, extractModel, windows, progressCallback);
     report(62, "合并元件提取结果");
-    start = std::chrono::steady_clock::now();
     const std::vector<ExtractDetection> mergedExtract = mergeExtractResults(extractDetections);
-    measured.mergeMs = elapsedMilliseconds(start);
     runResult.mergedExtractCount = static_cast<int>(mergedExtract.size());
 
     const int roiTotal = runResult.mergedExtractCount;
 
-    // 局部推理：每个目标独立处理，结果按目标原顺序回收，输出与串行一致。
     struct LocalOutcome {
         bool skipped = false;
         bool failed = false;
@@ -1675,31 +1638,24 @@ MainWindow::PipelineRunResult MainWindow::runPipeline(
         std::vector<dlcv_infer::ObjectResult> mapped;
         QString skipLog;
         QString failureLog;
-        double cropMs = 0.0;
-        double inferMs = 0.0;
     };
     std::vector<LocalOutcome> outcomes(mergedExtract.size());
     std::mutex progressMutex;
     int completedCount = 0;
 
-    const int workersWanted = std::max(1, std::min(localThreads, static_cast<int>(mergedExtract.size())));
-    start = std::chrono::steady_clock::now();
-    RunModelTasks(roiTotal, workersWanted, [&](int i) {
+    RunModelTasks(roiTotal, [&](int i) {
         const ExtractDetection& target = mergedExtract[i];
         LocalOutcome& outcome = outcomes[i];
         QString baseName;
         int normalizeAngle = 0;
         parseCategoryAndAngle(categoryToQString(target.objectResult.categoryName), baseName, normalizeAngle);
         outcome.icRoute = shouldUseIcDetectModel(baseName);
-        auto itemStart = std::chrono::steady_clock::now();
         RoiProcessResult roi = cropAndRotateRoi(fullImageRgb, target, normalizeAngle);
-        outcome.cropMs = elapsedMilliseconds(itemStart);
         if (!roi.isValid) {
             outcome.skipped = true;
             outcome.skipLog = QString("跳过目标[%1]：%2").arg(
                 categoryToQString(target.objectResult.categoryName), roi.invalidReason);
         } else {
-            itemStart = std::chrono::steady_clock::now();
             try {
                 outcome.mapped = inferDetectionModelAndMapBack(
                     roi, target.objectResult, outcome.icRoute, componentModel, icModel);
@@ -1715,20 +1671,15 @@ MainWindow::PipelineRunResult MainWindow::runPipeline(
                     categoryToQString(target.objectResult.categoryName), routeName,
                     QString::fromLocal8Bit(ex.what()));
             }
-            outcome.inferMs = elapsedMilliseconds(itemStart);
         }
         std::lock_guard<std::mutex> lock(progressMutex);
         const int done = ++completedCount;
         report(70 + static_cast<int>(std::llround(25.0 * done / std::max(1, roiTotal))),
                QString("局部模型推理 %1/%2").arg(done).arg(roiTotal));
     });
-    measured.localMs = elapsedMilliseconds(start);
 
-    start = std::chrono::steady_clock::now();
     for (int i = 0; i < static_cast<int>(mergedExtract.size()); ++i) {
         const LocalOutcome& outcome = outcomes[i];
-        measured.localCropMs += outcome.cropMs;
-        measured.localInferMs += outcome.inferMs;
         const ExtractDetection& target = mergedExtract[i];
         if (outcome.skipped) {
             runResult.logs.push_back(outcome.skipLog);
@@ -1750,146 +1701,6 @@ MainWindow::PipelineRunResult MainWindow::runPipeline(
 
     report(95, "整理结果");
     runResult.displayResult = buildDisplayResult(runResult.finalObjects);
-    measured.collectMs = elapsedMilliseconds(start);
-    if (timings) *timings = measured;
     report(100, "推理完成");
     return runResult;
-}
-
-int MainWindow::runHeadlessInference(
-    const QString& imagePath,
-    const QString& extractModelPath,
-    const QString& componentModelPath,
-    const QString& icModelPath,
-    const QString& noCadModelPath,
-    int localThreads,
-    const QString& outputTextPath,
-    int repeatCount) {
-    try {
-        std::unique_ptr<dlcv_infer::Model> extractModel =
-            std::make_unique<dlcv_infer::Model>(extractModelPath.toStdWString(), kFixedDeviceId);
-        std::unique_ptr<dlcv_infer::Model> componentModel =
-            std::make_unique<dlcv_infer::Model>(componentModelPath.toStdWString(), kFixedDeviceId);
-        std::unique_ptr<dlcv_infer::Model> icModel =
-            std::make_unique<dlcv_infer::Model>(icModelPath.toStdWString(), kFixedDeviceId);
-        std::unique_ptr<dlcv_infer::Model> noCadModel;
-        if (!noCadModelPath.isEmpty()) {
-            noCadModel = std::make_unique<dlcv_infer::Model>(noCadModelPath.toStdWString(), kFixedDeviceId);
-        }
-
-        cv::Mat bgrImage = cv::imread(imagePath.toLocal8Bit().toStdString(), cv::IMREAD_UNCHANGED);
-        if (bgrImage.empty()) {
-            std::fprintf(stderr, "图片解码失败: %s\n", imagePath.toLocal8Bit().constData());
-            return 1;
-        }
-        const cv::Mat rgbImage = prepareImageForInference(bgrImage);
-        const SlidingWindowConfig config;
-
-        for (int round = 1; round <= repeatCount; ++round) {
-        PipelineTimings timings;
-        const auto start = std::chrono::steady_clock::now();
-        const PipelineRunResult runResult = runPipeline(
-            rgbImage, *extractModel, *componentModel, *icModel, config, nullptr, localThreads, &timings);
-        const auto end = std::chrono::steady_clock::now();
-        const double elapsedMs = std::chrono::duration<double, std::milli>(end - start).count();
-
-        unsigned long long hash = 1469598103934665603ULL;
-        json completeResults = json::array();
-        auto mixBytes = [&hash](const void* data, size_t size) {
-            const unsigned char* bytes = static_cast<const unsigned char*>(data);
-            for (size_t i = 0; i < size; ++i) {
-                hash ^= bytes[i];
-                hash *= 1099511628211ULL;
-            }
-        };
-        for (const auto& obj : runResult.finalObjects) {
-            completeResults.push_back({
-                {"category_id", obj.categoryId},
-                {"category_name", categoryToQString(obj.categoryName).toUtf8().toStdString()},
-                {"score", obj.score}, {"area", obj.area}, {"bbox", obj.bbox},
-                {"with_bbox", obj.withBbox}, {"with_angle", obj.withAngle}, {"angle", obj.angle},
-                {"with_mask", obj.withMask}, {"extra_info", obj.extraInfo}
-            });
-            mixBytes(obj.categoryName.data(), obj.categoryName.size());
-            mixBytes(&obj.categoryId, sizeof(obj.categoryId));
-            mixBytes(&obj.score, sizeof(obj.score));
-            for (double value : obj.bbox) {
-                mixBytes(&value, sizeof(double));
-            }
-            mixBytes(&obj.angle, sizeof(obj.angle));
-            const unsigned char withAngle = obj.withAngle ? 1 : 0;
-            mixBytes(&withAngle, 1);
-        }
-
-        QString text;
-        text += cuda_memory::describe(kFixedDeviceId) + "\n";
-        text += QString("图片: %1\n").arg(imagePath);
-        text += QString("元件提取模型: %1\n").arg(extractModelPath);
-        text += QString("元件检测模型: %1\n").arg(componentModelPath);
-        text += QString("IC检测模型: %1\n").arg(icModelPath);
-        text += QString("无CAD检测模型: %1\n")
-                    .arg(noCadModel ? noCadModelPath : QStringLiteral("未加载"));
-        text += QString("局部推理线程数: %1\n").arg(localThreads);
-        text += QString("滑窗参数: %1 x %2, overlap=(%3, %4)\n")
-                    .arg(config.windowWidth)
-                    .arg(config.windowHeight)
-                    .arg(config.overlapX)
-                    .arg(config.overlapY);
-        text += QString("滑窗数量: %1\n").arg(runResult.slidingWindowCount);
-        text += QString("元件提取模型合并后目标数: %1\n").arg(runResult.mergedExtractCount);
-        text += QString("元件检测模型结果数: %1\n").arg(runResult.componentModelResultCount);
-        text += QString("IC检测模型结果数: %1\n").arg(runResult.icModelResultCount);
-        text += QString("最终结果数: %1\n").arg(static_cast<int>(runResult.finalObjects.size()));
-        text += QString("推理耗时: %1 ms\n").arg(elapsedMs, 0, 'f', 2);
-        text += QString("提取阶段耗时: %1 ms\n").arg(timings.extractMs, 0, 'f', 2);
-        text += QString("提取裁图累计耗时: %1 ms\n").arg(timings.extractCropMs, 0, 'f', 2);
-        text += QString("提取模型调用累计耗时: %1 ms\n").arg(timings.extractInferMs, 0, 'f', 2);
-        text += QString("提取坐标回写累计耗时: %1 ms\n").arg(timings.extractMapMs, 0, 'f', 2);
-        text += QString("提取结果合并耗时: %1 ms\n").arg(timings.mergeMs, 0, 'f', 2);
-        text += QString("局部阶段耗时: %1 ms\n").arg(timings.localMs, 0, 'f', 2);
-        text += QString("局部裁图旋转累计耗时: %1 ms\n").arg(timings.localCropMs, 0, 'f', 2);
-        text += QString("局部模型调用及坐标回写累计耗时: %1 ms\n").arg(timings.localInferMs, 0, 'f', 2);
-        text += QString("最终结果整理耗时: %1 ms\n").arg(timings.collectMs, 0, 'f', 2);
-        text += "累计耗时为各线程之和，包含模型调用内的等待。\n";
-        text += QString("结果哈希: %1\n\n").arg(static_cast<qulonglong>(hash));
-
-        for (int i = 0; i < static_cast<int>(runResult.finalObjects.size()); ++i) {
-            const auto& obj = runResult.finalObjects[i];
-            const QString location = buildObjectLocationText(obj);
-            text += QString("[%1] %2  score=%3  %4\n")
-                        .arg(i + 1)
-                        .arg(categoryToQString(obj.categoryName))
-                        .arg(obj.score, 0, 'f', 2)
-                        .arg(location);
-        }
-        if (!runResult.logs.isEmpty()) {
-            text += "\n日志:\n";
-            for (const QString& log : runResult.logs) {
-                text += "- " + log + "\n";
-            }
-        }
-        text += "\n完整结果JSON:\n";
-        text += QString::fromUtf8(completeResults.dump().c_str()) + "\n";
-
-        const QString roundPath = repeatCount == 1 ? outputTextPath : outputTextPath + QString(".%1.txt").arg(round);
-        std::ofstream out(roundPath.toLocal8Bit().constData(), std::ios::binary | std::ios::trunc);
-        if (!out) {
-            std::fprintf(stderr, "无法写入结果文件: %s\n", outputTextPath.toLocal8Bit().constData());
-            return 2;
-        }
-        const QByteArray utf8 = text.toUtf8();
-        out.write(utf8.constData(), utf8.size());
-        out.flush();
-        if (!out) {
-            std::fprintf(stderr, "写入结果文件失败: %s\n", outputTextPath.toLocal8Bit().constData());
-            return 2;
-        }
-        std::printf("推理轮次 %d/%d: %.2f ms\n", round, repeatCount, elapsedMs);
-        std::fflush(stdout);
-        }
-        return 0;
-    } catch (const std::exception& ex) {
-        std::fprintf(stderr, "推理失败: %s\n", ex.what());
-        return 3;
-    }
 }

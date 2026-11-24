@@ -16,6 +16,7 @@ namespace DlcvDemo2
 {
     public partial class Form1 : Form
     {
+        private const int threads = 4;
         private const string ModelFileFilter = "AI模型 (*.dvt;*.dvo;*.dvst;*.dvso)|*.dvt;*.dvo;*.dvst;*.dvso|所有文件 (*.*)|*.*";
         private Model extractModel;
         private Model componentDetectModel;
@@ -504,11 +505,13 @@ namespace DlcvDemo2
 
             int roiTotal = mergedExtract.Count;
             int roiCompleted = 0;
-            foreach (var target in mergedExtract)
+            var roiResults = new PipelineRunResult[roiTotal];
+            var progressLock = new object();
+            Parallel.For(0, roiTotal, new ParallelOptions { MaxDegreeOfParallelism = threads }, index =>
             {
-                int startPercent = 70 + (int)Math.Round(25.0 * roiCompleted / Math.Max(1, roiTotal));
-                ReportInferenceProgress(progress, startPercent, $"局部模型推理 {roiCompleted}/{roiTotal}");
-
+                var target = mergedExtract[index];
+                var roiResult = new PipelineRunResult();
+                roiResults[index] = roiResult;
                 string baseName;
                 int normalizeAngle;
                 DetectionGeometryUtils.ParseCategoryAndAngle(target.ObjectResult.CategoryName, out baseName, out normalizeAngle);
@@ -518,37 +521,47 @@ namespace DlcvDemo2
                 {
                     if (!roi.IsValid)
                     {
-                        runResult.Logs.Add($"跳过目标[{target.ObjectResult.CategoryName}]：{roi.InvalidReason}");
-                        continue;
+                        roiResult.Logs.Add($"跳过目标[{target.ObjectResult.CategoryName}]：{roi.InvalidReason}");
+                        return;
                     }
 
                     try
                     {
                         List<CSharpObjectResult> mapped = InferDetectionModelAndMapBack(roi, target.ObjectResult, useIcDetectModel);
-                        runResult.FinalObjects.AddRange(mapped);
+                        roiResult.FinalObjects.AddRange(mapped);
                         int realResultCount = mapped.Count == 1 && ReferenceEquals(mapped[0], target.ObjectResult)
                             ? 0
                             : mapped.Count;
                         if (useIcDetectModel)
                         {
-                            runResult.IcModelResultCount += realResultCount;
+                            roiResult.IcModelResultCount += realResultCount;
                         }
                         else
                         {
-                            runResult.ComponentModelResultCount += realResultCount;
+                            roiResult.ComponentModelResultCount += realResultCount;
                         }
                     }
                     catch (Exception ex)
                     {
                         string routeName = useIcDetectModel ? "IC检测模型" : "元件检测模型";
-                        runResult.Logs.Add($"目标[{target.ObjectResult.CategoryName}]{routeName}推理失败，保留元件提取结果：{ex.Message}");
-                        runResult.FinalObjects.Add(target.ObjectResult);
+                        roiResult.Logs.Add($"目标[{target.ObjectResult.CategoryName}]{routeName}推理失败，保留元件提取结果：{ex.Message}");
+                        roiResult.FinalObjects.Add(target.ObjectResult);
                     }
                 }
 
-                roiCompleted++;
-                int finishPercent = 70 + (int)Math.Round(25.0 * roiCompleted / Math.Max(1, roiTotal));
-                ReportInferenceProgress(progress, finishPercent, $"局部模型推理 {roiCompleted}/{roiTotal}");
+                lock (progressLock)
+                {
+                    roiCompleted++;
+                    int finishPercent = 70 + (int)Math.Round(25.0 * roiCompleted / Math.Max(1, roiTotal));
+                    ReportInferenceProgress(progress, finishPercent, $"局部模型推理 {roiCompleted}/{roiTotal}");
+                }
+            });
+            foreach (var roiResult in roiResults)
+            {
+                runResult.FinalObjects.AddRange(roiResult.FinalObjects);
+                runResult.Logs.AddRange(roiResult.Logs);
+                runResult.IcModelResultCount += roiResult.IcModelResultCount;
+                runResult.ComponentModelResultCount += roiResult.ComponentModelResultCount;
             }
 
             ReportInferenceProgress(progress, 95, "整理结果");
@@ -571,11 +584,6 @@ namespace DlcvDemo2
         {
             var output = new List<ExtractDetection>();
             int order = 0;
-            JObject inferParams = new JObject
-            {
-                ["with_mask"] = false
-            };
-
             int totalWindows = windows != null ? windows.Count : 0;
             if (totalWindows == 0)
             {
@@ -583,41 +591,51 @@ namespace DlcvDemo2
                 return output;
             }
 
-            int lastPercent = -1;
-            for (int i = 0; i < totalWindows; i++)
+            var windowResults = new List<ExtractDetection>[totalWindows];
+            int completed = 0;
+            var progressLock = new object();
+            Parallel.For(0, totalWindows, new ParallelOptions { MaxDegreeOfParallelism = threads }, i =>
             {
+                var detections = new List<ExtractDetection>();
+                windowResults[i] = detections;
                 Rect window = windows[i];
-                using (var tile = new Mat(fullImageRgb, window).Clone())
+                using (var view = new Mat(fullImageRgb, window))
+                using (var tile = view.Clone())
                 {
-                    CSharpResult tileResult = extractModel.Infer(tile, inferParams);
-                    if (tileResult.SampleResults == null || tileResult.SampleResults.Count == 0)
+                    CSharpResult tileResult = extractModel.Infer(tile, new JObject { ["with_mask"] = false });
+                    if (tileResult.SampleResults != null && tileResult.SampleResults.Count > 0)
                     {
-                        continue;
-                    }
-
-                    foreach (var obj in tileResult.SampleResults[0].Results)
-                    {
-                        CSharpObjectResult mapped = DetectionGeometryUtils.LiftExtractObjectToFull(obj, window);
-                        Rect2d aabb = ExtractMergeUtils.GetAabbFromObject(mapped);
-                        if (aabb.Width <= 0 || aabb.Height <= 0)
+                        foreach (var obj in tileResult.SampleResults[0].Results)
                         {
-                            continue;
+                            CSharpObjectResult mapped = DetectionGeometryUtils.LiftExtractObjectToFull(obj, window);
+                            Rect2d aabb = ExtractMergeUtils.GetAabbFromObject(mapped);
+                            if (aabb.Width <= 0 || aabb.Height <= 0)
+                            {
+                                continue;
+                            }
+
+                            detections.Add(new ExtractDetection
+                            {
+                                ObjectResult = mapped,
+                                MergeAabb = aabb
+                            });
                         }
-
-                        output.Add(new ExtractDetection
-                        {
-                            ObjectResult = mapped,
-                            MergeAabb = aabb,
-                            Order = order++
-                        });
                     }
                 }
 
-                int percent = 15 + (int)Math.Round(45.0 * (i + 1) / totalWindows);
-                if (percent != lastPercent)
+                lock (progressLock)
                 {
-                    ReportInferenceProgress(progress, percent, $"元件提取模型滑窗推理 {i + 1}/{totalWindows}");
-                    lastPercent = percent;
+                    completed++;
+                    int percent = 15 + (int)Math.Round(45.0 * completed / totalWindows);
+                    ReportInferenceProgress(progress, percent, $"元件提取模型滑窗推理 {completed}/{totalWindows}");
+                }
+            });
+            foreach (var detections in windowResults)
+            {
+                foreach (var detection in detections)
+                {
+                    detection.Order = order++;
+                    output.Add(detection);
                 }
             }
 

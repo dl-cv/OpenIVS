@@ -131,6 +131,7 @@ DLCV_NATIVE_C_API const char* DLCV_NATIVE_C_CALL dlcv_get_gpu_info();
 DLCV_NATIVE_C_API void DLCV_NATIVE_C_CALL dlcv_keep_max_clock();
 DLCV_NATIVE_C_API void DLCV_NATIVE_C_CALL dlcv_reset_max_clock();
 DLCV_NATIVE_C_API void DLCV_NATIVE_C_CALL dlcv_set_gpu_max_clock(bool verbose);
+DLCV_NATIVE_C_API int DLCV_NATIVE_C_CALL dlcv_set_trt_workspace_limit(int limit);
 DLCV_NATIVE_C_API void DLCV_NATIVE_C_CALL dlcv_reset_gpu_max_clock(bool verbose);
 
 DLCV_NATIVE_C_API const char* DLCV_NATIVE_C_CALL dlcv_get_power_scheme_guid(int verbose);

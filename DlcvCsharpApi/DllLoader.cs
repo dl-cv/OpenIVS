@@ -71,6 +71,10 @@ namespace dlcv_infer_csharp
         public delegate IntPtr KeepMaxClock();
         public KeepMaxClock dlcv_keep_max_clock;
 
+        [UnmanagedFunctionPointer(calling_method)]
+        public delegate int SetTrtWorkspaceLimitDelegate(int limit);
+        public SetTrtWorkspaceLimitDelegate dlcv_set_trt_workspace_limit;
+
         private static DllLoader _instance;
         private static readonly Dictionary<IntPtr, DllLoader> _moduleLoaders =
             new Dictionary<IntPtr, DllLoader>();
@@ -757,6 +761,7 @@ namespace dlcv_infer_csharp
             IntPtr devInfoPtr = GetProcAddress(hModule, "dlcv_get_device_info");
             dlcv_get_device_info = devInfoPtr != IntPtr.Zero ? (GetDeviceInfo)Marshal.GetDelegateForFunctionPointer(devInfoPtr, typeof(GetDeviceInfo)) : null;
             dlcv_keep_max_clock = GetDelegate<KeepMaxClock>(hModule, "dlcv_keep_max_clock");
+            dlcv_set_trt_workspace_limit = GetDelegate<SetTrtWorkspaceLimitDelegate>(hModule, "dlcv_set_trt_workspace_limit");
         }
 
         private static bool DllExists(string dllName, string dllPath)
