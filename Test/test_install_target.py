@@ -1,9 +1,10 @@
-"""通过临时 PYTHONPATH 中的假 pip 验证批处理调用与状态，不实际安装。"""
+"""用模拟的文件检查和 pip 验证批处理的调用顺序和退出码。"""
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import unittest
 
@@ -13,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(os.name == "nt", "批处理测试仅在 Windows 执行")
 class InstallTargetTest(unittest.TestCase):
+    guard_packages = ("dlcvpro_infer_csharp",)
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix="openivs-install-")
         self.root = Path(temp.name).resolve()
@@ -35,6 +38,16 @@ class InstallTargetTest(unittest.TestCase):
             "    stream.write(json.dumps({'cwd': os.getcwd(), 'argv': sys.argv[1:]}) + '\\n')\n"
             "key = 'FAKE_PIP_UNINSTALL_EXIT' if sys.argv[1] == 'uninstall' else 'FAKE_PIP_EXIT'\n"
             "sys.exit(int(os.environ[key]))\n", encoding="utf-8")
+        guard = self.modules / "dlcv_pkg_updater"
+        guard.mkdir()
+        (guard / "__init__.py").touch()
+        (guard / "package_file_guard.py").write_text(
+            "import json, os\n"
+            "def ensure_package_files_available(package, paths):\n"
+            "    with open(os.environ['FAKE_PIP_LOG'], 'a', encoding='utf-8') as stream:\n"
+            "        stream.write(json.dumps({'cwd': os.getcwd(), 'argv': ['guard', package, *paths]}) + '\\n')\n"
+            "    if os.environ['FAKE_GUARD_LOCKED_PACKAGE'] == package:\n"
+            "        raise SystemExit(41)\n", encoding="utf-8")
         self.env = os.environ.copy()
         self.env.update({
             "PATH": str(Path(sys.executable).parent) + os.pathsep
@@ -44,6 +57,7 @@ class InstallTargetTest(unittest.TestCase):
             "PYTHONDONTWRITEBYTECODE": "1",
             "FAKE_PIP_LOG": str(self.log),
             "FAKE_PIP_EXIT": "0",
+            "FAKE_GUARD_LOCKED_PACKAGE": "",
             "FAKE_PIP_UNINSTALL_EXIT": "0",
             "LATEST": "invalid-inherited-wheel.whl",
         })
@@ -73,6 +87,17 @@ class InstallTargetTest(unittest.TestCase):
 
     def expected_call(self, *args):
         return {"cwd": str(self.dist), "argv": list(args)}
+
+    def guard_calls(self):
+        return [self.expected_call("guard", package, sysconfig.get_path("purelib"))
+                for package in self.guard_packages]
+
+    def test_default_stops_on_locked_package(self):
+        self.wheel()
+        self.env["FAKE_GUARD_LOCKED_PACKAGE"] = self.guard_packages[-1]
+        result = self.run_script()
+        self.assertEqual(result.returncode, 41, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), self.guard_calls())
 
     def test_target_uses_latest_wheel_without_uninstall_or_pause(self):
         self.wheel("old package.whl", 10)
@@ -127,16 +152,22 @@ class InstallTargetTest(unittest.TestCase):
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.calls(), [
+            *self.guard_calls(),
             self.expected_call("uninstall", "-y", "dlcvpro_infer_csharp"),
             self.expected_call("install", "-U", latest),
         ])
         self.assertTrue(result.stdout.strip())
 
-    def test_default_returns_install_error_after_pause(self):
-        self.wheel()
-        result = self.run_script(exit_code=31)
+    def test_default_returns_pip_error(self):
+        latest = self.wheel()
+        uninstall = self.expected_call("uninstall", "-y", "dlcvpro_infer_csharp")
+        result = self.run_script(uninstall_exit_code=31)
         self.assertEqual(result.returncode, 31, result.stdout + result.stderr)
-        self.assertEqual(len(self.calls()), 2)
+        self.assertEqual(self.calls(), [*self.guard_calls(), uninstall])
+        self.log.unlink()
+        result = self.run_script(exit_code=32)
+        self.assertEqual(result.returncode, 32, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), [*self.guard_calls(), uninstall, self.expected_call("install", "-U", latest)])
         self.assertTrue(result.stdout.strip())
 
 

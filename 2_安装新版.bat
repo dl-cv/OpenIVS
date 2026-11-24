@@ -10,7 +10,10 @@ set "LATEST="
 for /f "delims=" %%a in ('dir /b /a-d /od *.whl 2^>nul') do @set "LATEST=%%a"
 if not defined LATEST exit /b 1
 if defined TARGET goto install_target
+python -c "import sysconfig; from dlcv_pkg_updater.package_file_guard import ensure_package_files_available; ensure_package_files_available('dlcvpro_infer_csharp', [sysconfig.get_path('purelib')])"
+if errorlevel 1 exit /b %errorlevel%
 python -m pip uninstall -y dlcvpro_infer_csharp
+if errorlevel 1 exit /b %errorlevel%
 python -m pip install -U "%LATEST%"
 set "RESULT=%errorlevel%"
 pause
