@@ -11,32 +11,14 @@
 #include <thread>
 #include <vector>
 
-#include "json/json.hpp"
-#include "flow/utils/ParallelModelWork.h"
+#include "../../dlcv_infer_cpp_qt_demo2/ParallelInference.h"
 
-inline int RunModelParallelSelfTest() {
-    using Json = nlohmann::json;
-    using dlcv_infer::flow::detail::ReadModelThreadCount;
-    using dlcv_infer::flow::detail::RunModelTasks;
+inline int RunDemo2ParallelSelfTest() {
+    using demo2::RunModelTasks;
     try {
         const auto check = [](bool condition, const char* message) {
             if (!condition) throw std::runtime_error(message);
         };
-        check(ReadModelThreadCount(Json::object()) == 1, "未设置线程数时须使用一个线程");
-        for (int value = 1; value <= 32; ++value) {
-            check(ReadModelThreadCount(Json{{"num_threads", value}}) == value, "有效线程数读取错误");
-        }
-        check(ReadModelThreadCount(Json{{"num_threads", 32u}}) == 32, "无符号整数线程数读取错误");
-        const std::vector<Json> invalidValues = {
-            nullptr, true, false, 0, -1, 33, 1.0, 1.5, "2", "", Json::array({2}),
-            Json::object(), Json(std::numeric_limits<unsigned long long>::max())};
-        for (const auto& value : invalidValues) {
-            bool rejected = false;
-            try { (void)ReadModelThreadCount(Json{{"num_threads", value}}); }
-            catch (const std::invalid_argument&) { rejected = true; }
-            check(rejected, "无效线程数须在执行任务前拒绝");
-        }
-
         const auto caller = std::this_thread::get_id();
         std::vector<int> serial;
         RunModelTasks(9, 1, [&](int index) {
@@ -134,10 +116,10 @@ inline int RunModelParallelSelfTest() {
             check(caught && active.load() == 0 && otherFinished.load(), "须等待其他工作线程结束后抛出实际异常");
             check(started.load() == 2, "异常后不得领取尚未开始的任务");
         }
-        std::cout << "通用模型并发测试通过" << std::endl;
+        std::cout << "测试程序2外层并发测试通过" << std::endl;
         return 0;
     } catch (const std::exception& error) {
-        std::cerr << "通用模型并发测试失败: " << error.what() << std::endl;
+        std::cerr << "测试程序2外层并发测试失败: " << error.what() << std::endl;
         return 1;
     }
 }

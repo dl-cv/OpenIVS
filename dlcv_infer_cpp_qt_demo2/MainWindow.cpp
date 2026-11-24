@@ -1,7 +1,7 @@
 #include "MainWindow.h"
 
 #include "CudaMemoryInfo.h"
-#include "flow/utils/ParallelModelWork.h"
+#include "ParallelInference.h"
 
 #include <algorithm>
 #include <atomic>
@@ -54,7 +54,7 @@ double elapsedMilliseconds(std::chrono::steady_clock::time_point start) {
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 }
 
-using dlcv_infer::flow::detail::RunModelTasks;
+using demo2::RunModelTasks;
 
 void applyDialogInitialPath(QFileDialog& dialog, const QString& path) {
     if (path.isEmpty()) {
@@ -1486,10 +1486,9 @@ std::vector<MainWindow::ExtractDetection> MainWindow::inferExtractModelOnWindows
     const std::vector<cv::Rect>& windows,
     const std::function<void(const PipelineProgressInfo&)>& progressCallback,
     int localThreads,
-    PipelineTimings& timings,
-    int flowThreads) {
+    PipelineTimings& timings) {
     std::vector<ExtractDetection> output;
-    const json inferParams = json{{"with_mask", false}, {"num_threads", flowThreads}};
+    const json inferParams = json{{"with_mask", false}};
     const int totalWindows = static_cast<int>(windows.size());
     if (totalWindows == 0) {
         if (progressCallback) {
@@ -1508,7 +1507,7 @@ std::vector<MainWindow::ExtractDetection> MainWindow::inferExtractModelOnWindows
     std::mutex progressMutex;
     int completed = 0;
     int lastPercent = -1;
-    RunModelTasks(totalWindows, std::min(2, localThreads), [&](int i) {
+    RunModelTasks(totalWindows, localThreads, [&](int i) {
         WindowOutcome& outcome = outcomes[i];
         const cv::Rect window = windows[i];
         auto start = std::chrono::steady_clock::now();
@@ -1606,9 +1605,8 @@ std::vector<dlcv_infer::ObjectResult> MainWindow::inferDetectionModelAndMapBack(
     const dlcv_infer::ObjectResult& extractFallback,
     bool useIcDetectModel,
     dlcv_infer::Model& componentModel,
-    dlcv_infer::Model& icModel,
-    int flowThreads) {
-    const json inferParams = json{{"with_mask", false}, {"num_threads", flowThreads}};
+    dlcv_infer::Model& icModel) {
+    const json inferParams = json{{"with_mask", false}};
     dlcv_infer::Model& activeModel = useIcDetectModel ? icModel : componentModel;
     const dlcv_infer::Result roiResult = activeModel.Infer(roiContext.normalizedRoi, inferParams);
     if (roiResult.sampleResults.empty() || roiResult.sampleResults[0].results.empty()) {
@@ -1636,8 +1634,7 @@ MainWindow::PipelineRunResult MainWindow::runPipeline(
     const SlidingWindowConfig& config,
     const std::function<void(const PipelineProgressInfo&)>& progressCallback,
     int localThreads,
-    PipelineTimings* timings,
-    int flowThreads) {
+    PipelineTimings* timings) {
     PipelineRunResult runResult;
     PipelineTimings measured;
     auto report = [&](int percent, const QString& stage) {
@@ -1659,7 +1656,7 @@ MainWindow::PipelineRunResult MainWindow::runPipeline(
     report(12, QString("元件提取模型滑窗推理 0/%1").arg(runResult.slidingWindowCount));
     auto start = std::chrono::steady_clock::now();
     const std::vector<ExtractDetection> extractDetections =
-        inferExtractModelOnWindows(fullImageRgb, extractModel, windows, progressCallback, localThreads, measured, flowThreads);
+        inferExtractModelOnWindows(fullImageRgb, extractModel, windows, progressCallback, localThreads, measured);
     measured.extractMs = elapsedMilliseconds(start);
     report(62, "合并元件提取结果");
     start = std::chrono::steady_clock::now();
@@ -1705,7 +1702,7 @@ MainWindow::PipelineRunResult MainWindow::runPipeline(
             itemStart = std::chrono::steady_clock::now();
             try {
                 outcome.mapped = inferDetectionModelAndMapBack(
-                    roi, target.objectResult, outcome.icRoute, componentModel, icModel, flowThreads);
+                    roi, target.objectResult, outcome.icRoute, componentModel, icModel);
                 outcome.usedFallback = outcome.mapped.size() == 1
                     && outcome.mapped[0].categoryName == target.objectResult.categoryName
                     && outcome.mapped[0].bbox == target.objectResult.bbox
@@ -1767,8 +1764,7 @@ int MainWindow::runHeadlessInference(
     const QString& noCadModelPath,
     int localThreads,
     const QString& outputTextPath,
-    int repeatCount,
-    int flowThreads) {
+    int repeatCount) {
     try {
         std::unique_ptr<dlcv_infer::Model> extractModel =
             std::make_unique<dlcv_infer::Model>(extractModelPath.toStdWString(), kFixedDeviceId);
@@ -1793,7 +1789,7 @@ int MainWindow::runHeadlessInference(
         PipelineTimings timings;
         const auto start = std::chrono::steady_clock::now();
         const PipelineRunResult runResult = runPipeline(
-            rgbImage, *extractModel, *componentModel, *icModel, config, nullptr, localThreads, &timings, flowThreads);
+            rgbImage, *extractModel, *componentModel, *icModel, config, nullptr, localThreads, &timings);
         const auto end = std::chrono::steady_clock::now();
         const double elapsedMs = std::chrono::duration<double, std::milli>(end - start).count();
 
@@ -1834,7 +1830,6 @@ int MainWindow::runHeadlessInference(
         text += QString("无CAD检测模型: %1\n")
                     .arg(noCadModel ? noCadModelPath : QStringLiteral("未加载"));
         text += QString("局部推理线程数: %1\n").arg(localThreads);
-        text += QString("流程模型线程数: %1\n").arg(flowThreads);
         text += QString("滑窗参数: %1 x %2, overlap=(%3, %4)\n")
                     .arg(config.windowWidth)
                     .arg(config.windowHeight)

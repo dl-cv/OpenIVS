@@ -157,7 +157,7 @@ static void ApplyInferParamOverrides(Json& props, const Json& inferParams) {
 
         const Json& value = it.value();
         // 推理参数只透传基础配置，避免把复杂结构误覆盖到节点属性。
-        if (value.is_primitive() || value.is_null() || it.key() == "num_threads") {
+        if (value.is_primitive() || value.is_null()) {
             props[it.key()] = value;
         }
     }

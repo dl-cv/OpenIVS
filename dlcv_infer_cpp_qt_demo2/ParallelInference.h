@@ -7,19 +7,7 @@
 #include <thread>
 #include <vector>
 
-namespace dlcv_infer {
-namespace flow {
-namespace detail {
-
-template <typename Properties>
-int ReadModelThreadCount(const Properties& properties) {
-    if (!properties.is_object() || !properties.contains("num_threads")) return 1;
-    const auto& value = properties.at("num_threads");
-    if (!value.is_number_integer() || value < 1 || value > 32) {
-        throw std::invalid_argument("num_threads 须为 1 到 32 的整数");
-    }
-    return value.template get<int>();
-}
+namespace demo2 {
 
 template <typename Work>
 void RunModelTasks(int count, int numThreads, const Work& work) {
@@ -61,6 +49,4 @@ void RunModelTasks(int count, int numThreads, const Work& work) {
     if (error) std::rethrow_exception(error);
 }
 
-} // namespace detail
-} // namespace flow
-} // namespace dlcv_infer
+} // namespace demo2

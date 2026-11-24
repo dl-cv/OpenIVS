@@ -1,5 +1,4 @@
 #include "flow/modules/ModelModules.h"
-#include "flow/utils/ParallelModelWork.h"
 
 #include <algorithm>
 #include <cmath>
@@ -24,17 +23,6 @@ namespace {
 std::shared_mutex g_modelLifecycleMutex;
 thread_local unsigned int g_modelLifecycleReadDepth = 0;
 thread_local unsigned int g_modelLifecycleWriteDepth = 0;
-
-class BorrowedModelLifecycleReadGuard final {
-public:
-    // 父调用持有共享保护直到工作线程结束，避免等待释放操作时再次申请共享锁。
-    explicit BorrowedModelLifecycleReadGuard(const ModelLifecycleReadGuard&) {
-        ++g_modelLifecycleReadDepth;
-    }
-    ~BorrowedModelLifecycleReadGuard() { --g_modelLifecycleReadDepth; }
-    BorrowedModelLifecycleReadGuard(const BorrowedModelLifecycleReadGuard&) = delete;
-    BorrowedModelLifecycleReadGuard& operator=(const BorrowedModelLifecycleReadGuard&) = delete;
-};
 
 } // namespace
 
@@ -601,8 +589,6 @@ static void KeepTopKByScore(Json& samples, int topK) {
 }
 
 ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, const Json& /*resultList*/) {
-    const int numThreads = detail::ReadModelThreadCount(this->Properties);
-    const ModelLifecycleReadGuard lifecycleGuard;
     const std::vector<ModuleImage>& images = imageList;
     std::vector<ModuleImage> outImages;
     Json outResults = Json::array();
@@ -675,53 +661,48 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
         return a < b;
     });
 
-    struct BatchTask {
-        const std::vector<int>* localIndices;
-        int start;
-        int count;
-        Json samples = Json::array();
-        double sdkMs = 0.0;
-    };
-    std::vector<BatchTask> tasks;
     for (const auto& key : bucketKeys) {
         const auto& localIndices = buckets[key];
         for (int start = 0; start < static_cast<int>(localIndices.size()); start += effectiveBatch) {
             const int take = std::min(effectiveBatch, static_cast<int>(localIndices.size()) - start);
-            tasks.push_back({&localIndices, start, take});
+            std::vector<int> chunkLocals;
+            std::vector<cv::Mat> chunkMats;
+            chunkLocals.reserve(static_cast<size_t>(take));
+            chunkMats.reserve(static_cast<size_t>(take));
+            for (int k = 0; k < take; k++) {
+                const int localIdx = localIndices[static_cast<size_t>(start + k)];
+                chunkLocals.push_back(localIdx);
+                chunkMats.push_back(rgbInputs[static_cast<size_t>(localIdx)]);
+            }
+
+            dlcv_infer::Result res = LoadedModel()->InferBatch(chunkMats, paramsToPass);
+            try {
+                if (Context != nullptr) {
+                    double prev = Context->Get<double>("flow_dlcv_infer_ms_acc", 0.0);
+                    double sdkMs = 0.0;
+                    double totalMs = 0.0;
+                    dlcv_infer::Model::GetLastInferTiming(sdkMs, totalMs);
+                    if (sdkMs <= 0.0) sdkMs = totalMs;
+                    if (sdkMs > 0.0) {
+                        Context->Set<double>("flow_dlcv_infer_ms_acc", prev + sdkMs);
+                    }
+                }
+            } catch (...) {}
+            const auto& batchSamples = res.sampleResults;
+            for (int k = 0; k < static_cast<int>(chunkLocals.size()); k++) {
+                const int localIdx = chunkLocals[static_cast<size_t>(k)];
+                if (k < static_cast<int>(batchSamples.size())) {
+                    sampleByLocal[static_cast<size_t>(localIdx)] =
+                        ConvertSampleResultToLocalSamples(
+                            batchSamples[static_cast<size_t>(k)],
+                            includeMask,
+                            emitMaskRle,
+                            emitMaskDerivedMeta);
+                } else {
+                    sampleByLocal[static_cast<size_t>(localIdx)] = Json::array();
+                }
+            }
         }
-    }
-    const auto model = LoadedModel();
-    detail::RunModelTasks(static_cast<int>(tasks.size()), numThreads, [&](int taskIndex) {
-        auto& task = tasks[static_cast<size_t>(taskIndex)];
-        std::vector<cv::Mat> chunkMats;
-        chunkMats.reserve(static_cast<size_t>(task.count));
-        for (int k = 0; k < task.count; ++k) {
-            const int localIdx = task.localIndices->at(static_cast<size_t>(task.start + k));
-            chunkMats.push_back(rgbInputs[static_cast<size_t>(localIdx)]);
-        }
-        const BorrowedModelLifecycleReadGuard borrowedLifecycleGuard(lifecycleGuard);
-        const auto result = model->InferBatch(chunkMats, paramsToPass);
-        double totalMs = 0.0;
-        dlcv_infer::Model::GetLastInferTiming(task.sdkMs, totalMs);
-        if (task.sdkMs <= 0.0) task.sdkMs = totalMs;
-        for (int k = 0; k < task.count; ++k) {
-            task.samples.push_back(k < static_cast<int>(result.sampleResults.size())
-                ? ConvertSampleResultToLocalSamples(result.sampleResults[static_cast<size_t>(k)],
-                    includeMask, emitMaskRle, emitMaskDerivedMeta)
-                : Json::array());
-        }
-    });
-    double sdkMs = 0.0;
-    for (auto& task : tasks) {
-        sdkMs += std::max(0.0, task.sdkMs);
-        for (int k = 0; k < task.count; ++k) {
-            const int localIdx = task.localIndices->at(static_cast<size_t>(task.start + k));
-            sampleByLocal[static_cast<size_t>(localIdx)] = std::move(task.samples[static_cast<size_t>(k)]);
-        }
-    }
-    if (Context != nullptr && sdkMs > 0.0) {
-        const double prev = Context->Get<double>("flow_dlcv_infer_ms_acc", 0.0);
-        Context->Set<double>("flow_dlcv_infer_ms_acc", prev + sdkMs);
     }
 
     // 3) 按原输入顺序回填结果

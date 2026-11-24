@@ -501,10 +501,7 @@ auto nodes = dlcv_infer::Model::GetLastFlowNodeTimings();
 | `threshold` | float | 普通模型为 0.5；流程未传时不追加过滤 | 普通模型的推理阈值；流程模型中仅筛选最终对外结果，不覆盖节点自身阈值 |
 | `with_mask` | bool | true | 是否输出 mask |
 | `batch_size` | int | 1 | 批量大小 |
-| `num_threads` | int | 1 | 流程模型内每个模型节点的批次工作线程上限，范围 1～32；请求参数优先于节点 `properties.num_threads`，省略时沿用节点值，节点也省略时为 1 |
 | `device_id` | int | 构造时传入 | GPU 设备 ID（-1 表示 CPU） |
-
-`num_threads` 用于 `.dvst/.dvso` 的检测、旋转框、分割、分类和 OCR 模型节点。它并行执行已有批次，保留原有 batch 大小和输出顺序；图像或批次数量不足时使用更少线程。普通模型的直接调用仍由调用方控制并发。流程节点按原依赖顺序执行；多个调用同时运行时，各自遵守线程上限，因此总线程数可能超过单个请求的设置。参数必须为 JSON 整数，布尔值、字符串、小数和范围外数值会报错。
 
 `calc_mean` 不参与模型推理；统计由独立 Flow 节点按 `mean/median` 配置计算。
 

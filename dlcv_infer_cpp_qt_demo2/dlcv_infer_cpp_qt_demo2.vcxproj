@@ -180,6 +180,7 @@
   <ItemGroup>
     <ClInclude Include="CudaMemoryInfo.h" />
     <ClInclude Include="MainWindow.h" />
+    <ClInclude Include="ParallelInference.h" />
     <ClInclude Include="..\dlcv_infer_cpp_qt_demo\ImageViewerWidget.h" />
   </ItemGroup>
 

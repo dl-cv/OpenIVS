@@ -193,7 +193,6 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--no-cad", type=Path)
     parser.add_argument("--threads", type=lambda value: bounded_integer(value, 1, 32), required=True)
-    parser.add_argument("--flow-threads", type=lambda value: bounded_integer(value, 1, 32), default=1)
     parser.add_argument("--in-process-repeat", type=lambda value: bounded_integer(value, 1, 32), default=1)
     parser.add_argument("--repeat", type=int, default=2)
     parser.add_argument("--reference", type=Path)
@@ -205,7 +204,7 @@ def main():
     output = args.output.resolve()
     if output.exists() or not output.parent.is_dir():
         parser.error("报告已存在或报告父目录不存在")
-    report = {"success": False, "threads": args.threads, "flow_threads": args.flow_threads,
+    report = {"success": False, "threads": args.threads,
               "repeat": args.repeat, "in_process_repeat": args.in_process_repeat,
               "processes": [], "runs": [], "results": None}
     exit_code = 1
@@ -248,7 +247,7 @@ def main():
                     pass
             command = [str(args.exe), "--infer", str(args.image), str(args.extract_model),
                        str(args.component_model), str(args.ic_model), "--local-threads", str(args.threads),
-                       "--flow-threads", str(args.flow_threads), "--repeat", str(args.in_process_repeat),
+                       "--repeat", str(args.in_process_repeat),
                        "--output", str(result_path)]
             if args.no_cad:
                 command += ["--no-cad", str(args.no_cad)]
