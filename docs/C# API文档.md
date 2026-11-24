@@ -476,9 +476,9 @@ public static class Utils
 
 ### TensorRT 工作空间数量
 
-`Utils.SetTrtWorkspaceLimit(int limit)` 设置实际推理 DLL 后续创建的每个 GPU 工作空间池上限。默认值为 `2`，`limit` 必填、范围为 `1..32`；成功返回 `0`，非法值返回 `-1` 并保留原值。已有池保持原上限。
+`Utils.SetTrtWorkspaceLimit(int limit)` 设置实际推理 DLL 后续创建的每个 GPU 工作空间池上限。支持此设置的 SDK 默认值为 `2`，`limit` 必填、范围为 `1..32`；成功返回 `0`，非法值返回 `-1` 并保留原值。已有池保持原上限。
 
-在首次模型加载前调用设置函数。普通模型可先用 `DllLoader.EnsureForModel(modelPath)` 选择对应 DLL，再设置上限；流程模型直接设置当前默认 DLL，再加载流程包，包内子模型在加载时解析授权类型。设置只作用于当前默认 DLL，直接转发其 `int dlcv_set_trt_workspace_limit(int limit)`，缺少导出时抛出 `EntryPointNotFoundException`。
+在首次模型加载前调用设置函数。普通模型可先用 `DllLoader.EnsureForModel(modelPath)` 选择对应 DLL，再设置上限；流程模型直接设置当前默认 DLL，再加载流程包，包内子模型在加载时解析授权类型。设置只作用于当前默认 DLL，直接转发其 `int dlcv_set_trt_workspace_limit(int limit)`。旧版推理 DLL 缺少该导出时返回 `-1`，仍可加载模型和推理。
 
 ```csharp
 Utils.SetTrtWorkspaceLimit(4);

@@ -19,9 +19,7 @@ namespace dlcv_infer_csharp
             if (limit < 1 || limit > 32)
                 return -1;
             var setLimit = DllLoader.Instance.dlcv_set_trt_workspace_limit;
-            if (setLimit == null)
-                throw new EntryPointNotFoundException("当前推理 DLL 缺少 dlcv_set_trt_workspace_limit");
-            return setLimit(limit);
+            return setLimit?.Invoke(limit) ?? -1;
         }
 
         public static String jsonToString(JObject json)

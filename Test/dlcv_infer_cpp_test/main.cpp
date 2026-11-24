@@ -4790,6 +4790,38 @@ int RunFreeAllModulesSelfTest(int argc, wchar_t* argv[]) {
     return 0;
 }
 
+int RunTrtWorkspaceLimitSelfTest(int argc, wchar_t* argv[]) {
+    int expectedStatus = 0;
+    if (argc != 6 || !ParseInteger(argv[3], expectedStatus) || (expectedStatus != -1 && expectedStatus != 0)) {
+        PrintUtf8ErrorLine("用法: trt-workspace-limit-selftest <DLL路径> <-1|0> <模型路径> <图片路径>");
+        return 2;
+    }
+    try {
+        const auto expectedDll = std::filesystem::canonical(argv[2]);
+        const int status = dlcv_infer::NativeApi::SetTrtWorkspaceLimit(4);
+        if (status != expectedStatus) {
+            throw std::runtime_error("设置工作空间上限返回值与预期不符：" + std::to_string(status));
+        }
+        dlcv_infer::Model model(std::wstring(argv[4]), 0);
+        const HMODULE module = ModelModuleForSelfTest(model);
+        const auto actualDll = NativeModulePathForSelfTest(module);
+        if (_wcsicmp(actualDll.c_str(), expectedDll.c_str()) != 0 ||
+            (GetProcAddress(module, "dlcv_set_trt_workspace_limit") != nullptr) != (expectedStatus == 0)) {
+            throw std::runtime_error("实际推理 DLL 的路径或导出与预期不符：" + WideToUtf8(actualDll.wstring()));
+        }
+        const auto rgb = ReadImageRgb(argv[5]);
+        if (rgb.empty() || model.Infer(rgb).sampleResults.size() != 1) {
+            throw std::runtime_error("设置上限后未返回单张图片的推理结果");
+        }
+        PrintUtf8Line("C++：工作空间设置返回 " + std::to_string(status) +
+            "，模型加载和图片推理通过：" + WideToUtf8(actualDll.wstring()));
+        return 0;
+    } catch (const std::exception& ex) {
+        PrintUtf8ErrorLine(ex.what());
+        return 1;
+    }
+}
+
 int RunProviderLoaderSelfTest(int argc, wchar_t* argv[]) {
     if (argc != 4 && argc != 5) {
         PrintUtf8ErrorLine(
@@ -5460,6 +5492,10 @@ int RunGetModelInfoCommand(int argc, wchar_t* argv[], bool dvsInfo) {
 int wmain(int argc, wchar_t* argv[]) {
     if (argc >= 2 && std::wstring(argv[1]) == L"default-device-selftest") {
         return RunDefaultDeviceSelfTest(argc, argv);
+    }
+
+    if (argc >= 2 && std::wstring(argv[1]) == L"trt-workspace-limit-selftest") {
+        return RunTrtWorkspaceLimitSelfTest(argc, argv);
     }
 
     if (argc >= 2 && IsWorkflowCommand(std::wstring(argv[1]))) {

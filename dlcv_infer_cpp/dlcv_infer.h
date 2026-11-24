@@ -531,6 +531,7 @@ namespace dlcv_infer {
         static void KeepMaxClock();
         static void ResetMaxClock();
         static void SetGpuMaxClock(bool verbose);
+        // 旧版推理 DLL 不支持此设置时返回 -1，仍可加载模型和推理。
         static int SetTrtWorkspaceLimit(int limit);
         static void ResetGpuMaxClock(bool verbose);
 

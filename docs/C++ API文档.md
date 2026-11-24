@@ -730,6 +730,6 @@ C++ Flow 节点实现位于 `flow/modules/InputModules.cpp`、`flow/modules/Mode
 
 ## 设置共享执行内存上限
 
-C 接口为 `int dlcv_set_trt_workspace_limit(int limit)`，C++ 对应 `int dlcv_infer::NativeApi::SetTrtWorkspaceLimit(int limit)`。`limit` 必填，范围 1..32，SDK 默认 2；成功返回 0，非法参数返回 -1 且保留原设置。C 转发接口加载失败或底层缺少导出时也返回 -1，C++ 对应情况抛出异常。
+C 接口为 `int dlcv_set_trt_workspace_limit(int limit)`，C++ 对应 `int dlcv_infer::NativeApi::SetTrtWorkspaceLimit(int limit)`。`limit` 必填，范围 1..32，支持此设置的 SDK 默认值为 2。成功返回 0，非法参数返回 -1 且保留原设置。旧版推理 DLL 缺少该导出时返回 -1，仍可加载模型和推理。
 
 加载模型前调用，设置作用于当前推理 DLL 后续创建的每 GPU 共享执行内存池，已有池保持创建值。应用按模型选择 DLL 时先调用 `DllLoader::EnsureForModel(modelPath)`，再设置上限，最后创建模型。该配置不修改外层线程数。

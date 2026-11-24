@@ -3832,8 +3832,8 @@ namespace dlcv_infer {
 
     int NativeApi::SetTrtWorkspaceLimit(int limit) {
         if (limit < 1 || limit > 32) return -1;
-        auto& loader = DllLoader::Instance();
-        return RequireNativeApiFunction(loader.GetSetTrtWorkspaceLimitFunc(), "dlcv_set_trt_workspace_limit")(limit);
+        const auto setLimit = DllLoader::Instance().GetSetTrtWorkspaceLimitFunc();
+        return setLimit ? setLimit(limit) : -1;
     }
 
     void NativeApi::ResetGpuMaxClock(bool verbose) {
