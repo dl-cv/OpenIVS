@@ -2,17 +2,21 @@
 #include "flow/ModuleRegistry.h"
 
 #include <algorithm>
+#include <atomic>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <iomanip>
 #include <limits>
 #include <locale>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
+#include "opencv2/imgproc.hpp"
 
 namespace dlcv_infer {
 namespace flow {
@@ -338,12 +342,126 @@ private:
     }
 };
 
+class CircularRegionModule final : public BaseModule {
+public:
+    using BaseModule::BaseModule;
+
+    ModuleIO Process(const std::vector<ModuleImage>& images, const Json& resultList) override {
+        const std::string categoryName = ReadCategoryName();
+        const int radius = ReadRadius();
+        Json results = resultList.is_array() ? resultList : Json::array();
+        for (size_t i = 0; i < images.size(); ++i) {
+            const cv::Mat& image = images[i].GetImage();
+            if (image.empty()) throw std::invalid_argument("圆形区域绘制需要非空图像");
+            static std::shared_ptr<const CircleOutline> lastOutline;
+            auto outline = std::atomic_load(&lastOutline);
+            if (!outline || outline->Size != image.size() || outline->Radius != radius) {
+                outline = std::make_shared<const CircleOutline>(BuildOutline(image.size(), radius));
+                std::atomic_store(&lastOutline, outline);
+            }
+
+            Json detection = {
+                {"category_id", 0},
+                {"category_name", categoryName},
+                {"score", 1.0},
+                {"bbox", outline->Bbox},
+                {"area", static_cast<double>(outline->Area)},
+                {"polygon", outline->Polygon},
+                {"with_bbox", true},
+                {"with_mask", true},
+                {"with_angle", false},
+                {"angle", -100.0}
+            };
+            Json entry = images[i].ToMeta();
+            entry["type"] = "local";
+            entry["originating_module"] = "pre_process/circular_region";
+            entry["index"] = i;
+            entry["sample_results"] = Json::array({std::move(detection)});
+            results.push_back(std::move(entry));
+        }
+        return ModuleIO(images, std::move(results));
+    }
+
+private:
+    struct CircleOutline {
+        cv::Size Size;
+        int Radius = 0;
+        int Area = 0;
+        Json Bbox, Polygon;
+    };
+
+    static CircleOutline BuildOutline(cv::Size size, int radius) {
+        const int cx = size.width / 2, cy = size.height / 2;
+        const int x = std::max(0, cx - radius), y = std::max(0, cy - radius);
+        const int w = static_cast<int>(std::min<long long>(size.width, static_cast<long long>(cx) + radius + 1)) - x;
+        const int h = static_cast<int>(std::min<long long>(size.height, static_cast<long long>(cy) + radius + 1)) - y;
+        const long long dx = std::max(cx, size.width - 1 - cx), dy = std::max(cy, size.height - 1 - cy);
+        Json polygon = Json::array();
+        int area;
+        if (static_cast<long long>(radius) * radius >= dx * dx + dy * dy) {
+            area = w * h;
+        } else {
+            cv::Mat mask(h, w, CV_8UC1, cv::Scalar(0));
+            cv::circle(mask, cv::Point(cx - x, cy - y), radius, cv::Scalar(255), cv::FILLED);
+            area = cv::countNonZero(mask);
+            std::vector<std::vector<cv::Point>> contours;
+            cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE, cv::Point(x, y));
+            for (const auto& point : contours.front()) polygon.push_back(Json::array({point.x, point.y}));
+            while (polygon.size() < 3) {
+                const Json point = polygon.back();
+                polygon.push_back(point);
+            }
+        }
+        if (polygon.empty()) {
+            const int right = x + w - 1, bottom = y + h - 1;
+            polygon = Json::array({{x, y}, {right, y}, {right, bottom}, {x, bottom}});
+        }
+        return {size, radius, area, Json::array({x, y, w, h}), std::move(polygon)};
+    }
+
+    static std::string Trim(const std::string& text) {
+        size_t first = 0;
+        while (first < text.size() && std::isspace(static_cast<unsigned char>(text[first]))) ++first;
+        size_t last = text.size();
+        while (last > first && std::isspace(static_cast<unsigned char>(text[last - 1]))) --last;
+        return text.substr(first, last - first);
+    }
+
+    std::string ReadCategoryName() const {
+        if (!Properties.contains("categoryname") || Properties.at("categoryname").is_null()) return "圆形区域";
+        const auto& value = Properties.at("categoryname");
+        std::string text = value.is_string() ? value.get<std::string>() : value.dump();
+        text = Trim(text);
+        return text.empty() ? "圆形区域" : text;
+    }
+
+    int ReadRadius() const {
+        if (!Properties.contains("radius")) return 5;
+        const auto& value = Properties.at("radius");
+        double number = 0.0;
+        if (value.is_number()) {
+            number = value.get<double>();
+        } else if (value.is_string()) {
+            const std::string text = Trim(value.get<std::string>());
+            size_t used = 0;
+            try { number = std::stod(text, &used); }
+            catch (...) { throw std::invalid_argument("radius 必须为正整数"); }
+            if (used != text.size()) throw std::invalid_argument("radius 必须为正整数");
+        } else {
+            throw std::invalid_argument("radius 必须为正整数");
+        }
+        if (!std::isfinite(number) || number <= 0 || number > static_cast<double>((std::numeric_limits<int>::max)()))
+            throw std::invalid_argument("radius 必须为正整数");
+        return static_cast<int>(number);
+    }
+};
 } // namespace
 
 DLCV_FLOW_REGISTER_MODULE("post_process/sequence_check", SequenceCheckModule)
 // 仅兼容旧流程类型；判定输出统一使用新主标识。
 DLCV_FLOW_REGISTER_MODULE("post_process/wire_sequence_check", SequenceCheckModule)
 DLCV_FLOW_REGISTER_MODULE("post_process/offset_distance", OffsetDistanceModule)
+DLCV_FLOW_REGISTER_MODULE("pre_process/circular_region", CircularRegionModule)
 
 } // namespace flow
 } // namespace dlcv_infer

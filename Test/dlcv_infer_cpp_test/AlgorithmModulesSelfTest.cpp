@@ -1,6 +1,7 @@
 #include "AlgorithmModulesSelfTest.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -15,6 +16,7 @@
 #include "flow/FlowGraphModel.h"
 #include "flow/ModuleRegistry.h"
 #include "flow/FlowPayloadTypes.h"
+#include <opencv2/imgproc.hpp>
 
 // DLL 图级测试：MergeResults 的两路 image 都来自节点 3，results 分别来自 3/4。
 static dlcv_infer::flow::Json BuildAlgorithmSharedInputFlow(bool distance, bool keepDetections, bool expectedOk, bool invalidDistance, bool legacy, bool reference = false, bool sparseMerge = false) {
@@ -69,7 +71,7 @@ static dlcv_infer::flow::Json BuildAlgorithmSharedInputFlow(bool distance, bool 
 }
 
 // 合成目标使用 C++ Flow 的 xywh / cxcywh+angle，不需要客户模型或图片。
-int RunAlgorithmModulesSelfTest() {
+int RunAlgorithmModulesSelfTest(bool circularOnly) {
     using namespace dlcv_infer::flow;
     try {
         int checks = 0;
@@ -86,6 +88,174 @@ int RunAlgorithmModulesSelfTest() {
         const cv::Mat original(200, 300, CV_8UC3, cv::Scalar::all(17));
         const TransformationState identity(300, 200);
         const std::vector<ModuleImage> images{ModuleImage(original, original, identity, 7)};
+        auto circular = ModuleRegistry::Get("pre_process/circular_region");
+        check(static_cast<bool>(circular), "circular_region not registered");
+        auto circularOutput = circular(1, "", Json{{"categoryname", "圆形区域"}, {"radius", 5}}, nullptr)
+            ->Process(images, Json::array());
+        check(circularOutput.ImageList.size() == 1 && circularOutput.ResultList.size() == 1, "circular output count");
+        const auto& circularEntry = circularOutput.ResultList.at(0);
+        check(circularEntry.at("type") == "local" && circularEntry.at("index") == 0 &&
+            circularEntry.at("origin_index") == 7 && circularEntry.at("transform") == identity.ToJson(),
+            "circular result metadata");
+        check(circularEntry.at("originating_module") == "pre_process/circular_region", "circular module type");
+        const auto& circularDetection = circularEntry.at("sample_results").at(0);
+        check(circularDetection.at("category_name") == "圆形区域" && circularDetection.at("category_id") == 0 &&
+            std::abs(circularDetection.at("score").get<double>() - 1.0) < 1e-12, "circular category");
+        check(circularDetection.at("bbox") == Json::array({145, 95, 11, 11}), "circular bbox");
+        const auto verifyPolygon = [&](const Json& polygon, double area, cv::Size size, int radius) {
+            check(polygon.is_array() && polygon.size() >= 3, "circular polygon points");
+            std::vector<cv::Point> points;
+            for (const auto& point : polygon) points.emplace_back(point[0].get<int>(), point[1].get<int>());
+            cv::Mat expected(size, CV_8UC1, cv::Scalar(0)), actual(size, CV_8UC1, cv::Scalar(0));
+            if (radius == std::numeric_limits<int>::max()) expected.setTo(cv::Scalar(255));
+            else cv::circle(expected, cv::Point(size.width / 2, size.height / 2), radius, cv::Scalar(255), cv::FILLED);
+            cv::fillPoly(actual, std::vector<std::vector<cv::Point>>{points}, cv::Scalar(255));
+            check(cv::norm(expected, actual, cv::NORM_INF) == 0 && cv::countNonZero(expected) == area, "circular polygon pixels and area");
+            if (radius == 105) std::cout << "320x320 radius 105: " << points.size() << " points, area " << area << ", pixels match" << std::endl;
+        };
+        check(!circularDetection.contains("mask_array") && !circularDetection.contains("mask_rle"), "circular output only polygon");
+        verifyPolygon(circularDetection.at("polygon"), circularDetection.at("area").get<double>(), original.size(), 5);
+        auto edited = circularOutput.ResultList[0]["sample_results"][0];
+        edited["polygon"][0][0] = -1;
+        auto cached = circular(1, "", Json{{"radius", 5}}, nullptr)->Process(images, Json::array());
+        check(cached.ResultList[0]["sample_results"][0]["polygon"] == circularDetection.at("polygon"), "circular cached polygon unchanged");
+        for (const auto& sample : std::vector<std::pair<cv::Size, int>>{{{320, 320}, 105}, {{10, 12}, 6}, {{1, 20}, 5}, {{1, 1}, std::numeric_limits<int>::max()}}) {
+            const cv::Mat sampleImage(sample.first, CV_8UC3, cv::Scalar(0));
+            const std::vector<ModuleImage> sampleImages{ModuleImage(sampleImage, sampleImage,
+                TransformationState(sample.first.width, sample.first.height), 0)};
+            auto sampleOutput = circular(1, "", Json{{"radius", sample.second}}, nullptr)->Process(sampleImages, Json::array());
+            const auto& sampleDetection = sampleOutput.ResultList[0]["sample_results"][0];
+            verifyPolygon(sampleDetection.at("polygon"), sampleDetection.at("area").get<double>(), sample.first, sample.second);
+            if (sample.second == 105) check(sampleDetection.at("bbox") == Json::array({55, 55, 211, 211}), "circular radius 105 bbox");
+        }
+
+        auto circularCustom = circular(1, "", Json{{"categoryname", "  自定义圆  "}, {"radius", 3}}, nullptr)
+            ->Process(images, Json::array());
+        const auto& customDetection = circularCustom.ResultList.at(0).at("sample_results").at(0);
+        check(customDetection.at("category_name") == "自定义圆" &&
+            customDetection.at("bbox") == Json::array({147, 97, 7, 7}), "circular custom properties");
+        bool invalidCircularRejected = false;
+        try { circular(1, "", Json{{"radius", 0}}, nullptr)->Process(images, Json::array()); }
+        catch (const std::invalid_argument&) { invalidCircularRejected = true; }
+        check(invalidCircularRejected, "invalid circular radius");
+        {
+            const cv::Mat maskImage(480, 640, CV_8UC3, cv::Scalar::all(0));
+            const std::vector<ModuleImage> maskImages{ModuleImage(maskImage, maskImage,
+                TransformationState(640, 480), 0)};
+            auto maskOutput = circular(1, "", Json{{"categoryname", "圆形区域"}, {"radius", 50}}, nullptr)
+                ->Process(maskImages, Json::array());
+            const auto& maskDetection = maskOutput.ResultList.at(0).at("sample_results").at(0);
+            ExecutionContext maskContext;
+            auto returnJson = ModuleRegistry::Get("output/return_json");
+            check(static_cast<bool>(returnJson), "return_json not registered");
+            returnJson(2, "", Json::object(), &maskContext)->Process(maskOutput.ImageList, maskOutput.ResultList);
+            const auto maskPayloads = maskContext.Get<std::vector<FlowFrontendByNodePayload>>("frontend_payloads_by_node", {});
+            check(maskPayloads.size() == 1 && maskPayloads[0].Payload.ByImage.size() == 1,
+                "circular return_json image count");
+            const auto& maskResults = maskPayloads[0].Payload.ByImage[0].Results;
+            check(maskResults.size() == 1, "circular return_json result count");
+            const auto& maskItem = maskResults.at(0);
+            check(maskItem.Poly.size() == 1 && maskItem.MaskRle.empty(), "circular return_json polygon");
+            verifyPolygon(maskItem.Poly.at(0), maskDetection.at("area").get<double>(), maskImage.size(), 50);
+            check(!maskItem.ToJson().contains("mask_array"), "mask_array must not leak to final output");
+            ExecutionContext disabledContext;
+            disabledContext.Set<Json>("infer_params", Json{{"with_mask", false}});
+            returnJson(2, "", Json::object(), &disabledContext)->Process(maskOutput.ImageList, maskOutput.ResultList);
+            const auto disabled = disabledContext.Get<std::vector<FlowFrontendByNodePayload>>("frontend_payloads_by_node", {});
+            check(disabled.at(0).Payload.ByImage.at(0).Results.at(0).Poly.empty(), "with_mask=false must omit polygon");
+            TransformationState state(maskImage.cols, maskImage.rows);
+            state.CropBox = {10, 0, maskImage.cols, maskImage.rows};
+            state.AffineMatrix2x3 = {1, 0, -10, 0, 1, 0};
+            const std::vector<ModuleImage> cropped{ModuleImage(maskImage, maskImage, state, 0)};
+            const Json entry = Json::parse(R"({"type":"local","index":0,"origin_index":0,"transform":null,
+                "sample_results":[{"bbox":[12,12,3,3],"polygon":[[12,12],[14,12],[12,14]]}]})");
+            for (bool hasTransform : {true, false}) for (bool aligned : {true, false}) {
+                Json resultEntry = entry;
+                if (!hasTransform) resultEntry.erase("transform");
+                Json input = Json::array({resultEntry});
+                if (!aligned) input.push_back(Json{{"type", "global"}});
+                ExecutionContext outputContext;
+                returnJson(3, "", Json::object(), &outputContext)->Process(cropped, input);
+                const auto payload = outputContext.Get<std::vector<FlowFrontendByNodePayload>>("frontend_payloads_by_node", {});
+                const auto& item = payload.at(0).Payload.ByImage.at(0).Results.at(0);
+                const int expectedX = hasTransform ? 12 : 22;
+                check(item.Poly.at(0).at(0).at(0) == expectedX && item.Bbox.at(0) == expectedX, "invalid polygon/bbox output coordinates");
+            }
+        }
+        char* benchmark = nullptr;
+        size_t benchmarkLength = 0;
+        _dupenv_s(&benchmark, &benchmarkLength, "DLCV_CIRCULAR_REGION_BENCHMARK");
+        const bool runBenchmark = benchmark && std::string(benchmark) == "1";
+        std::free(benchmark);
+        if (runBenchmark) {
+            const int size = 320, radius = 105, diameter = 211, offset = 55, warmup = 30, iterations = 100;
+            const cv::Mat benchmarkImage(size, size, CV_8UC3, cv::Scalar(0));
+            const std::vector<ModuleImage> benchmarkImages{ModuleImage(benchmarkImage, benchmarkImage, TransformationState(size, size), 0)};
+            const auto entries = [](const Json& det) {
+                return Json::array({Json{{"type", "local"}, {"index", 0}, {"origin_index", 0}, {"sample_results", Json::array({det})}}});
+            };
+            const auto drawMask = [&]() {
+                cv::Mat mask(diameter, diameter, CV_8UC1, cv::Scalar(0));
+                cv::circle(mask, cv::Point(radius, radius), radius, cv::Scalar(255), cv::FILLED);
+                Json rows = Json::array();
+                for (int y = 0; y < diameter; ++y) {
+                    Json row = Json::array();
+                    for (int x = 0; x < diameter; ++x) row.push_back(static_cast<int>(mask.at<unsigned char>(y, x)));
+                    rows.push_back(std::move(row));
+                }
+                return entries(Json{{"bbox", {offset, offset, diameter, diameter}}, {"area", cv::countNonZero(mask)}, {"mask_array", std::move(rows)}});
+            };
+            auto circleModule = circular(1, "", Json{{"radius", radius}}, nullptr);
+            const auto drawPolygon = [&]() { return circleModule->Process(benchmarkImages, Json::array()).ResultList; };
+            const auto filterFactory = ModuleRegistry::Get("post_process/result_filter_region");
+            auto filterModule = filterFactory(2, "", Json{{"filter_mode", "mask"}}, nullptr);
+            const Json target = entries(Json{{"bbox", {150, 150, 20, 20}}});
+            const auto filter = [&]() {
+                filterModule->ExtraOutputs.clear();
+                if (filterModule->Process(benchmarkImages, target).ResultList.size() != 1)
+                    throw std::runtime_error("circular benchmark should retain center target");
+            };
+            const auto milliseconds = [&](const auto& action) {
+                for (int i = 0; i < warmup; ++i) action();
+                const auto start = std::chrono::steady_clock::now();
+                for (int i = 0; i < iterations; ++i) action();
+                return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() / iterations;
+            };
+            const auto oldRegion = drawMask(), newRegion = drawPolygon();
+            const double oldDraw = milliseconds(drawMask), newDraw = milliseconds(drawPolygon);
+            filterModule->ExtraInputsIn.emplace_back(std::vector<ModuleImage>{}, oldRegion);
+            const double maskFilter = milliseconds(filter);
+            filterModule->ExtraInputsIn[0].ResultList = newRegion;
+            const double polygonFilter = milliseconds(filter);
+            std::cout << "320x320 radius 105, one target, " << warmup << " warmups, " << iterations << " iterations, mean ms: draw (old mask / cached polygon) "
+                      << oldDraw << " / " << newDraw << ", same filter (mask / polygon inputs) " << maskFilter << " / " << polygonFilter << std::endl;
+        }
+        char* artifactPathRaw = nullptr;
+        size_t artifactPathLength = 0;
+        _dupenv_s(&artifactPathRaw, &artifactPathLength, "DLCV_CIRCULAR_REGION_CPP_ARTIFACT");
+        std::string artifactPath;
+        if (artifactPathRaw != nullptr) {
+            artifactPath.assign(artifactPathRaw);
+            std::free(artifactPathRaw);
+        }
+        if (!artifactPath.empty()) {
+            const cv::Mat visualImage(480, 640, CV_8UC3, cv::Scalar::all(0));
+            const std::vector<ModuleImage> visualImages{ModuleImage(visualImage, visualImage,
+                TransformationState(visualImage.cols, visualImage.rows), 0)};
+            auto visualOutput = circular(1, "", Json{{"categoryname", "圆形区域"}, {"radius", 50}}, nullptr)
+                ->Process(visualImages, Json::array());
+            const Json artifact = {
+                {"language", "C++"},
+                {"image_width", visualImage.cols},
+                {"image_height", visualImage.rows},
+                {"detection", visualOutput.ResultList.at(0).at("sample_results").at(0)}
+            };
+            const std::filesystem::path output(artifactPath);
+            if (output.has_parent_path()) std::filesystem::create_directories(output.parent_path());
+            std::ofstream stream(output, std::ios::binary);
+            if (!stream) throw std::runtime_error("cannot write circular region artifact");
+            stream << artifact.dump(2) << "\n";
+        }
         auto det = [](const std::string& name, double x, double y = 10, double score = 0.9) {
             return Json{{"category_name", name}, {"score", score}, {"bbox", {x - 1, y - 1, 2, 2}}};
         };
@@ -94,6 +264,11 @@ int RunAlgorithmModulesSelfTest() {
                 {"sample_results", std::move(detections)}};
         };
         int runNumber = 0;
+        if (circularOnly) {
+            std::cout << "circular-region-selftest passed: " << checks << " assertions" << std::endl;
+            return 0;
+        }
+
         auto run = [&](bool distance, const std::vector<ModuleImage>& inputImages, const Json& entries,
             const Json& props = dlcv_infer::flow::Json::object(), bool legacy = false) {
             const Json before = entries;

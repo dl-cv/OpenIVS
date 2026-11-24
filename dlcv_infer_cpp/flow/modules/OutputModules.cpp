@@ -3,6 +3,7 @@
 #include "flow/ModuleRegistry.h"
 #include "flow/utils/FlowPlatformUtils.h"
 #include "flow/utils/MaskRleUtils.h"
+#include "flow/utils/ResultPolygon.h"
 
 #include <algorithm>
 #include <chrono>
@@ -364,10 +365,46 @@ static Json MapExtraInfoToGlobal(const Json& detection, const std::vector<double
     return extraInfo;
 }
 
+// 局部掩膜数组（mask_array，与 bbox 同尺寸）缺少 RLE 时转成 RLE，
+// 让只有 mask_array 的节点在最终输出也携带掩码，供界面按 bbox 还原显示。
+static Json MaskArrayToMaskInfo(const Json& maskArray) {
+    if (!maskArray.is_array() || maskArray.empty()) return Json();
+    const size_t height = maskArray.size();
+    size_t width = 0;
+    for (size_t y = 0; y < height; ++y) {
+        if (!maskArray.at(y).is_array()) return Json();
+        if (y == 0) {
+            width = maskArray.at(y).size();
+        } else if (maskArray.at(y).size() != width) {
+            return Json();
+        }
+    }
+    if (width == 0) return Json();
+
+    cv::Mat mask(static_cast<int>(height), static_cast<int>(width), CV_8UC1, cv::Scalar(0));
+    for (size_t y = 0; y < height; ++y) {
+        const Json& row = maskArray.at(y);
+        for (size_t x = 0; x < width; ++x) {
+            int value = 0;
+            try {
+                value = row.at(x).get<int>();
+            } catch (...) {
+                return Json();
+            }
+            if (value < 0) value = 0;
+            else if (value > 255) value = 255;
+            mask.at<unsigned char>(static_cast<int>(y), static_cast<int>(x)) = static_cast<unsigned char>(value);
+        }
+    }
+    return MatToMaskInfo(mask);
+}
+
 static void AppendOutResultItemTyped(
     const Json& d,
     const std::vector<double>& T_c2o,
     bool isAxisAlignedTransform,
+    bool includePolygon,
+    const Json* polygonEntry,
     std::vector<FlowResultItem>& outResults) {
     if (!d.is_object()) return;
 
@@ -379,17 +416,25 @@ static void AppendOutResultItemTyped(
         item.Metadata = d.at("metadata");
     }
 
+    const bool polygonOnly = HasResultPolygon(d) && !HasResultMask(d);
+    std::vector<double> polygonTransform;
+    if (polygonOnly && polygonEntry && polygonEntry->contains("transform")) {
+        polygonTransform = PolygonToOriginalTransform(polygonEntry->at("transform"));
+        isAxisAlignedTransform = IsAxisAlignedTransform(polygonTransform);
+    }
+    const auto& geometryTransform = polygonTransform.empty() ? T_c2o : polygonTransform;
+
     if (d.contains("bbox") && d.at("bbox").is_array()) {
         const Json& bboxLocal = d.at("bbox");
         const bool isRot = (bboxLocal.size() == 5);
         if (isRot) {
-            Json rboxG = RBoxLocalToGlobal(bboxLocal, T_c2o);
+            Json rboxG = RBoxLocalToGlobal(bboxLocal, geometryTransform);
             if (!rboxG.is_null()) {
                 item.Bbox = std::move(rboxG);
                 item.Metadata["is_rotated"] = true;
             }
         } else if (bboxLocal.size() >= 4) {
-            Json bboxGlobal = AABBFromLocalBboxFast(bboxLocal, T_c2o, isAxisAlignedTransform);
+            Json bboxGlobal = AABBFromLocalBboxFast(bboxLocal, geometryTransform, isAxisAlignedTransform);
             if (!bboxGlobal.is_null()) {
                 item.Bbox = std::move(bboxGlobal);
                 item.Metadata["is_rotated"] = false;
@@ -399,6 +444,12 @@ static void AppendOutResultItemTyped(
 
     if (d.contains("mask_rle") && d.at("mask_rle").is_object()) {
         item.MaskRle = d.at("mask_rle");
+    } else if (d.contains("mask_array") && !d.at("mask_array").is_null()) {
+        const Json maskInfo = MaskArrayToMaskInfo(d.at("mask_array"));
+        if (maskInfo.is_object() && !maskInfo.empty()) item.MaskRle = maskInfo;
+    } else if (includePolygon && polygonOnly) {
+        const auto polygon = ReadResultPolygon(d);
+        if (!polygon.empty()) item.Poly.push_back(MapResultPolygon(polygon, geometryTransform));
     }
 
     if (d.contains("area")) {
@@ -412,7 +463,8 @@ static void AppendOutResultItemTyped(
     outResults.push_back(std::move(item));
 }
 
-static std::vector<FlowResultItem> BuildOutResultItemsTyped(const ModuleImage& wrap, const Json& dets) {
+static std::vector<FlowResultItem> BuildOutResultItemsTyped(const ModuleImage& wrap, const Json& entry, bool includePolygon) {
+    const auto& dets = entry.at("sample_results");
     std::vector<FlowResultItem> outResults;
     if (!dets.is_array() || dets.empty()) return outResults;
 
@@ -420,12 +472,13 @@ static std::vector<FlowResultItem> BuildOutResultItemsTyped(const ModuleImage& w
     const bool isAxisAlignedTransform = IsAxisAlignedTransform(T_c2o);
     outResults.reserve(dets.size());
     for (const auto& d : dets) {
-        AppendOutResultItemTyped(d, T_c2o, isAxisAlignedTransform, outResults);
+        AppendOutResultItemTyped(d, T_c2o, isAxisAlignedTransform, includePolygon, &entry, outResults);
     }
     return outResults;
 }
 
-static std::vector<FlowResultItem> BuildOutResultItemsTyped(const ModuleImage& wrap, const std::vector<const Json*>& dets) {
+static std::vector<FlowResultItem> BuildOutResultItemsTyped(const ModuleImage& wrap, const std::vector<const Json*>& dets,
+    bool includePolygon, const std::unordered_map<const Json*, const Json*>& polygonEntries) {
     std::vector<FlowResultItem> outResults;
     if (dets.empty()) return outResults;
 
@@ -434,7 +487,9 @@ static std::vector<FlowResultItem> BuildOutResultItemsTyped(const ModuleImage& w
     outResults.reserve(dets.size());
     for (const Json* d : dets) {
         if (d == nullptr) continue;
-        AppendOutResultItemTyped(*d, T_c2o, isAxisAlignedTransform, outResults);
+        const auto entry = polygonEntries.find(d);
+        AppendOutResultItemTyped(*d, T_c2o, isAxisAlignedTransform, includePolygon,
+            entry == polygonEntries.end() ? nullptr : entry->second, outResults);
     }
     return outResults;
 }
@@ -509,6 +564,8 @@ private:
         const std::vector<ModuleImage>& images = imageList;
         FlowFrontendPayload payload;
         payload.ByImage.reserve(images.size());
+        const Json inferParams = Context ? Context->Get<Json>("infer_params", Json::object()) : Json::object();
+        const bool includePolygon = !inferParams.contains("with_mask") || inferParams.at("with_mask") != false;
 
         if (CanUseAlignedFastPath(images, results)) {
             for (size_t i = 0; i < images.size(); i++) {
@@ -520,7 +577,7 @@ private:
                     if (entry.is_object()) {
                         ApplyInspectionStatus(ReadInspectionStatus(entry), byImageEntry);
                         if (entry.contains("sample_results") && entry.at("sample_results").is_array()) {
-                            byImageEntry.Results = BuildOutResultItemsTyped(wrap, entry.at("sample_results"));
+                            byImageEntry.Results = BuildOutResultItemsTyped(wrap, entry, includePolygon);
                         }
                     }
                 } catch (...) {}
@@ -529,6 +586,7 @@ private:
         } else {
             // 建立 index/origin_index/transform -> dets 映射
             std::unordered_map<std::string, std::vector<const Json*>> transToDets;
+            std::unordered_map<const Json*, const Json*> polygonEntries;
             std::unordered_map<int, std::vector<const Json*>> indexToDets;
             std::unordered_map<int, std::vector<const Json*>> originToDets;
             std::unordered_map<std::string, FlowInspectionStatus> transToStatus;
@@ -560,7 +618,9 @@ private:
                 std::vector<const Json*> detList;
                 detList.reserve(entry.at("sample_results").size());
                 for (const auto& d : entry.at("sample_results")) {
-                    if (d.is_object()) detList.push_back(&d);
+                    if (!d.is_object()) continue;
+                    detList.push_back(&d);
+                    if (HasResultPolygon(d) && !HasResultMask(d)) polygonEntries.emplace(&d, &entry);
                 }
                 const int idx = entry.contains("index") ? entry.at("index").get<int>() : -1;
                 if (idx >= 0) {
@@ -607,7 +667,7 @@ private:
                 FlowByImageEntry byImageEntry;
                 InitializeByImageEntry(wrap, byImageEntry);
                 if (dets != nullptr) {
-                    byImageEntry.Results = BuildOutResultItemsTyped(wrap, *dets);
+                    byImageEntry.Results = BuildOutResultItemsTyped(wrap, *dets, includePolygon, polygonEntries);
                 }
 
                 const FlowInspectionStatus* status = nullptr;

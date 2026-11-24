@@ -200,6 +200,7 @@
     <ClInclude Include="flow\utils\MaskRleUtils.h" />
     <ClInclude Include="flow\utils\CategoryBlockText.h" />
     <ClInclude Include="flow\utils\CategoryBlockUnicode.h" />
+    <ClInclude Include="flow\utils\ResultPolygon.h" />
     <ClInclude Include="flow\modules\ModelModules.h" />
   </ItemGroup>
 

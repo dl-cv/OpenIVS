@@ -546,12 +546,20 @@ namespace DlcvModules
                 item["area"] = detObj["area"];
             }
 
+            var polygon = ResultFilterRegion.HasPolygon(detObj) && !ResultFilterRegion.HasMask(detObj)
+                ? ResultFilterRegion.ReadPolygon(detObj["polygon"]) : null;
+            var geometryTransform = tC2O;
+            if (polygon != null && detObj.Parent?.Parent?.Parent is JObject entry && entry.Property("transform") != null)
+            {
+                geometryTransform = ResultFilterRegion.PolygonToOriginalTransform(entry["transform"]);
+                isAxisAlignedTransform = IsAxisAlignedTransform(geometryTransform);
+            }
             var bboxLocal = detObj["bbox"] as JArray;
             bool isRot = bboxLocal != null && bboxLocal.Count == 5;
 
             if (isRot)
             {
-                var rboxG = RBoxLocalToGlobal(bboxLocal, tC2O);
+                var rboxG = RBoxLocalToGlobal(bboxLocal, geometryTransform);
                 if (rboxG != null)
                 {
                     item["bbox"] = rboxG;
@@ -560,7 +568,7 @@ namespace DlcvModules
             }
             else if (bboxLocal != null && bboxLocal.Count >= 4)
             {
-                if (TryMapLocalBboxToAabb(bboxLocal, tC2O, isAxisAlignedTransform, out List<int> aabb))
+                if (TryMapLocalBboxToAabb(bboxLocal, geometryTransform, isAxisAlignedTransform, out List<int> aabb))
                 {
                     item["bbox"] = aabb;
                     item["metadata"] = new Dictionary<string, object> { { "is_rotated", false } };
@@ -568,6 +576,10 @@ namespace DlcvModules
             }
 
             var maskInfo = detObj["mask_rle"];
+            if (includeMask && (maskInfo == null || maskInfo.Type == JTokenType.Null))
+            {
+                maskInfo = MaskArrayToMaskInfo(detObj["mask_array"]);
+            }
             if (includeMask && maskInfo != null && maskInfo.Type != JTokenType.Null)
             {
                 item["mask_rle"] = !isRot && item.TryGetValue("bbox", out object globalBox)
@@ -577,6 +589,11 @@ namespace DlcvModules
                 {
                     item["poly"] = poly;
                 }
+            }
+
+            else if (includeMask && polygon != null)
+            {
+                item["poly"] = new JArray { ResultFilterRegion.MapPolygon(polygon, geometryTransform) };
             }
 
             var extraInfoSource = detObj["extra_info"] as JObject;
@@ -599,6 +616,40 @@ namespace DlcvModules
             }
 
             outResults.Add(item);
+        }
+
+        // 局部掩膜数组（mask_array，与 bbox 同尺寸）缺少 RLE 时转成 RLE，
+        // 让只有 mask_array 的节点在最终输出也携带掩码，供界面按 bbox 还原显示。
+        private static JToken MaskArrayToMaskInfo(JToken maskArray)
+        {
+            if (!(maskArray is JArray rows) || rows.Count == 0) return null;
+            int height = rows.Count;
+            int width = -1;
+            for (int y = 0; y < height; y++)
+            {
+                if (!(rows[y] is JArray row)) return null;
+                if (width < 0) width = row.Count;
+                else if (row.Count != width) return null;
+            }
+            if (width <= 0) return null;
+
+            using (var mask = new Mat(height, width, MatType.CV_8UC1, Scalar.Black))
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    var row = (JArray)rows[y];
+                    for (int x = 0; x < width; x++)
+                    {
+                        int value;
+                        try { value = row[x].Value<int>(); }
+                        catch { return null; }
+                        if (value < 0) value = 0;
+                        else if (value > 255) value = 255;
+                        mask.At<byte>(y, x) = (byte)value;
+                    }
+                }
+                return MaskRleUtils.MatToMaskInfo(mask);
+            }
         }
 
         // Mask remains bbox-relative; only its axes must follow the original image.

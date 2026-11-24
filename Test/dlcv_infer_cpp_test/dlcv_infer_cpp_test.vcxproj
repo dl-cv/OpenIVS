@@ -63,7 +63,7 @@
     <Link><SubSystem>Console</SubSystem><EnableCOMDATFolding>true</EnableCOMDATFolding><OptimizeReferences>true</OptimizeReferences><GenerateDebugInformation>true</GenerateDebugInformation><AdditionalLibraryDirectories>$(OutDir);$(ProjectDir)..\..\dlcv_infer_cpp\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories><AdditionalDependencies>$(OpenCvWorldReleaseLib);psapi.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp" />
+    <ClCompile Include="main.cpp"><AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions></ClCompile>
     <ClCompile Include="AlgorithmModulesSelfTest.cpp" />
     <ClCompile Include="..\common\NativeSharedIndexTestHelper.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\CurveTextAffineModule.cpp" />
