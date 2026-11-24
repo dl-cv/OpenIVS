@@ -5603,8 +5603,9 @@ int wmain(int argc, wchar_t* argv[]) {
             if (report.at("code") != 0) throw std::runtime_error(report.dump());
             auto factory = dlcv_infer::flow::ModuleRegistry::Get("features/barcode_reader");
             if (!factory) throw std::runtime_error("Barcode module not registered");
-            auto reader = factory(1, "", json::object(), nullptr);
-            if (!reader->Process({}, json::array()).ResultList.empty()) throw std::runtime_error("Empty batch failed");
+            auto defaultReader = factory(1, "", json::object(), nullptr);
+            auto enhancedReader = factory(1, "", {{"enhance", true}}, nullptr);
+            if (!defaultReader->Process({}, json::array()).ResultList.empty()) throw std::runtime_error("Empty batch failed");
             json output = json::array();
             for (const auto& item : manifest) {
                 std::ifstream imageFile{std::filesystem::path(Utf8ToWide(item.at("path").get<std::string>())), std::ios::binary};
@@ -5618,6 +5619,7 @@ int wmain(int argc, wchar_t* argv[]) {
                 cv::Mat roi = padded(cv::Rect(0, 0, image.cols, image.rows));
                 image.copyTo(roi);
                 dlcv_infer::flow::ModuleImage wrap(roi, roi, dlcv_infer::flow::TransformationState(roi.cols, roi.rows), 7, "barcode-roi");
+                auto& reader = item.value("enhance", false) ? enhancedReader : defaultReader;
                 auto local = reader->Process({wrap}, json::array()).ResultList;
                 if (local[0]["origin_index"] != 7 || local[0]["unique_id"] != "barcode-roi") throw std::runtime_error("Metadata lost");
                 auto result = flow.InferOneOutJson(roi);
@@ -5626,7 +5628,7 @@ int wmain(int argc, wchar_t* argv[]) {
                 auto filtered = factory(1, "", {{"formats", "DataMatrix"}}, nullptr)->Process({wrap}, json::array());
                 for (const auto& det : filtered.ResultList[0]["sample_results"])
                     if (det["extra_info"]["barcode_format"] != "Data Matrix") throw std::runtime_error("Format filter failed");
-                for (const auto& properties : {json{{"formats", "invalid-format"}}, json{{"try_rotate", "false"}}}) {
+                for (const auto& properties : {json{{"formats", "invalid-format"}}, json{{"try_rotate", "false"}}, json{{"enhance", "false"}}}) {
                     bool failed = false;
                     try { factory(1, "", properties, nullptr)->Process({wrap}, json::array()); }
                     catch (const std::exception&) { failed = true; }

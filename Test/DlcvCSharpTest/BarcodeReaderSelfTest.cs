@@ -31,7 +31,9 @@ namespace DlcvCSharpTest
                     {
                         image.CopyTo(roi);
                         var wrap = new ModuleImage(roi, roi, new TransformationState(roi.Width, roi.Height), 7) { UniqueId = "barcode-roi" };
-                        var reader = new BarcodeReader(1);
+                        var properties = (bool?)item["enhance"] == true
+                            ? new Dictionary<string, object> { ["enhance"] = true } : null;
+                        var reader = new BarcodeReader(1, properties: properties);
                         var local = reader.Process(new List<ModuleImage> { wrap }).ResultList;
                         if ((int)local[0]["origin_index"] != 7 || (string)local[0]["unique_id"] != "barcode-roi") throw new Exception("Metadata lost");
                         JToken result = flow.InferOneOutJson(roi);
@@ -40,10 +42,13 @@ namespace DlcvCSharpTest
                         var filtered = new BarcodeReader(1, properties: new Dictionary<string, object> { ["formats"] = "DataMatrix" }).Process(new List<ModuleImage> { wrap });
                         foreach (var det in filtered.ResultList[0]["sample_results"])
                             if ((string)det["extra_info"]["barcode_format"] != "Data Matrix") throw new Exception("Format filter failed");
-                        foreach (var properties in new[] {new Dictionary<string, object> { ["formats"] = "invalid-format" }, new Dictionary<string, object> { ["try_rotate"] = "false" }})
+                        foreach (var invalidProperties in new[] {
+                            new Dictionary<string, object> { ["formats"] = "invalid-format" },
+                            new Dictionary<string, object> { ["try_rotate"] = "false" },
+                            new Dictionary<string, object> { ["enhance"] = "false" } })
                         {
                             bool failed = false;
-                            try { new BarcodeReader(1, properties: properties).Process(new List<ModuleImage> { wrap }); }
+                            try { new BarcodeReader(1, properties: invalidProperties).Process(new List<ModuleImage> { wrap }); }
                             catch (ArgumentException) { failed = true; }
                             if (!failed) throw new Exception("Invalid properties accepted");
                         }

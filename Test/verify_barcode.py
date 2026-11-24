@@ -41,13 +41,31 @@ def low_contrast_ean13_image():
     return np.clip(image.astype(np.float32) - shadow, 0, 255).astype(np.uint8)
 
 
-def read_reference(image):
+def square_data_matrix(rows, scale, quiet=0):
+    n = len(rows)
+    bits = (np.asarray(rows, np.uint16)[:, None] >> np.arange(n - 1, -1, -1)) & 1
+    bitmap = np.pad(np.uint8(1 - bits) * 255, quiet, constant_values=255)
+    return bitmap.repeat(scale, 0).repeat(scale, 1)
+
+
+def uneven_data_matrix(padded=False):
+    # ECC 200 square, encoded text T1616. The contrast varies across the crop.
+    rows = (0xAAAA, 0xC859, 0xA4E8, 0xAD5B, 0x86AC, 0xCEFB, 0x9FC2, 0x8B95,
+            0xB39A, 0xF70F, 0x9578, 0xE45D, 0xA7A4, 0x9C3D, 0xEAB2, 0xFFFF)
+    bitmap = square_data_matrix(rows, 5 if padded else 6)
+    y, x = np.indices(bitmap.shape, dtype=np.float32) / bitmap.shape[0]
+    if padded:
+        image = (130 + 40 * np.sin(x * 5 + 1) * np.cos(y * 8) + np.where(bitmap > 0, 15, -15)).astype(np.uint8)
+        return cv2.copyMakeBorder(image, 7, 7, 7, 7, cv2.BORDER_CONSTANT, value=181)
+    return (125 + 25 * np.sin(x * 5) * np.cos(y * 8) + np.where(bitmap > 0, 12, -12)).astype(np.uint8)
+
+
+def read_reference(image, enhance):
+    codes = zxingcpp.read_barcodes(image, try_downscale=True, text_mode=zxingcpp.TextMode.HRI)
+    if codes or not enhance:
+        return codes
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
-    for source in (image, cv2.equalizeHist(gray)):
-        codes = zxingcpp.read_barcodes(source, try_downscale=True, text_mode=zxingcpp.TextMode.HRI)
-        if codes:
-            return codes
-    return []
+    return zxingcpp.read_barcodes(cv2.equalizeHist(gray), try_downscale=True, text_mode=zxingcpp.TextMode.HRI)
 
 
 def mixed_scale_qr_image():
@@ -80,15 +98,18 @@ def main():
     args = parser.parse_args()
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    cases = []
+    cases = {False: [], True: []}
     expected = {}
     images = {}
-    def add(name, im, texts):
+    def add(name, im, texts, *, enhance=False):
         path = output / (name + ".png")
         ok, encoded = cv2.imencode(".png", im)
         assert ok
         path.write_bytes(encoded.tobytes())
-        cases.append({"name": name, "path": str(path)})
+        item = {"name": name, "path": str(path)}
+        if enhance:
+            item["enhance"] = True
+        cases[enhance].append(item)
         expected[name] = sorted(texts)
         images[name] = im
     for fmt, text, name in [(zxingcpp.BarcodeFormat.QRCode, "深度视觉-QR", "qr"),
@@ -102,7 +123,22 @@ def main():
         add(name + "-inverted", 255-im, [] if name == "code128" else [text])
     low_contrast = low_contrast_ean13_image()
     assert zxingcpp.read_barcodes(low_contrast, text_mode=zxingcpp.TextMode.HRI) == []
-    add("ean13-low-contrast", low_contrast, ["5345898399924"])
+    add("ean13-low-contrast-default", low_contrast, [])
+    add("ean13-low-contrast-enhanced", low_contrast, ["5345898399924"], enhance=True)
+    uneven = uneven_data_matrix()
+    assert not read_reference(uneven, False) and not read_reference(uneven, True)
+    add("dm-uneven-default", uneven, [])
+    add("dm-uneven-recovered", uneven, ["T1616"], enhance=True)
+    uneven_padded = uneven_data_matrix(padded=True)
+    assert not read_reference(uneven_padded, False) and not read_reference(uneven_padded, True)
+    add("dm-padded-default", uneven_padded, [])
+    add("dm-padded-recovered", uneven_padded, ["T1616"], enhance=True)
+    small_dm = square_data_matrix((0x2AA, 0x367, 0x218, 0x24D, 0x23A, 0x3A3, 0x2DA, 0x22F, 0x28A, 0x3FF), 2, 3)
+    add("dm-small-default", small_dm, ["17"])
+    add("dm-small-enhanced", small_dm, ["17"], enhance=True)
+    add("qr-small-default", barcode_fixture("qr", scale=2), ["深度视觉-QR"])
+    add("qr-small-enhanced", barcode_fixture("qr", scale=2), ["深度视觉-QR"], enhance=True)
+    add("blank-enhanced", np.full((60, 60), 128, np.uint8), [], enhance=True)
     add("blank", np.full((200, 200), 255, np.uint8), [])
     a, b = images["qr"], images["dm"]
     im = np.full((max(a.shape[0], b.shape[0])+40, a.shape[1]+b.shape[1]+80), 255, np.uint8)
@@ -114,26 +150,48 @@ def main():
     assert len(zxingcpp.read_barcodes(mixed_scale, try_downscale=False)) == 1
     assert len(zxingcpp.read_barcodes(mixed_scale, try_downscale=True)) == 2
     add("multi-scale-qr", mixed_scale, ["深度视觉-QR", "深度视觉-QR"])
-    manifest = output / "manifest.json"
-    manifest.write_text(json.dumps(cases, ensure_ascii=False), encoding="utf-8")
-    flow = Path(__file__).resolve().parent / "data" / "barcode_flow.json"
-    reports = []
-    for runtime, exe in [("csharp", args.cs_exe), ("cpp", args.cpp_exe)]:
-        report = output / (runtime + ".json")
-        subprocess.run([str(exe.resolve()), "barcode-selftest", str(manifest), str(flow), str(report)], check=True)
-        reports.append(json.loads(report.read_text(encoding="utf-8-sig")))
-    for left, right in zip(*reports):
+    default_flow = Path(__file__).resolve().parent / "data" / "barcode_flow.json"
+    enhanced_flow = output / "barcode-flow-enhanced.json"
+    graph = json.loads(default_flow.read_text(encoding="utf-8"))
+    reader = next(node for node in graph["nodes"] if node["type"] == "features/barcode_reader")
+    reader["properties"]["enhance"] = True
+    enhanced_flow.write_text(json.dumps(graph, ensure_ascii=False), encoding="utf-8")
+    paired_reports = []
+    for enhance, batch in cases.items():
+        suffix = "enhanced" if enhance else "default"
+        manifest = output / ("manifest-" + suffix + ".json")
+        manifest.write_text(json.dumps(batch, ensure_ascii=False), encoding="utf-8")
+        flow = enhanced_flow if enhance else default_flow
+        reports = []
+        for runtime, exe in [("csharp", args.cs_exe), ("cpp", args.cpp_exe)]:
+            report = output / (runtime + "-" + suffix + ".json")
+            subprocess.run([str(exe.resolve()), "barcode-selftest", str(manifest), str(flow), str(report)], check=True)
+            reports.append(json.loads(report.read_text(encoding="utf-8-sig")))
+        assert all(len(report) == len(batch) for report in reports)
+        paired_reports.extend((enhance, left, right) for left, right in zip(*reports))
+    for enhance, left, right in paired_reports:
         name = left["name"]
         assert name == right["name"]
         for runtime in (left, right):
             for route in ("local", "flow"):
                 assert sorted(d["category_name"] for d in runtime[route]) == expected[name], (name, route, runtime[route])
             assert normalized(runtime["local"], local=True) == normalized(runtime["flow"]), (name, "local vs flow", runtime)
+        if name in ("dm-uneven-recovered", "dm-padded-recovered"):
+            start, width = (0, 96) if name == "dm-uneven-recovered" else (7, 80)
+            end = start + width
+            reference_quad = np.float32([[start, start], [end, start], [end, end], [start, end]])
+            for runtime in (left, right):
+                info = runtime["local"][0]["extra_info"]
+                assert info["barcode_format"] == "Data Matrix" and info["polyline"][0] == info["polyline"][-1]
+                quad = cv2.convexHull(np.float32(info["polyline"][:-1]))
+                area, _ = cv2.intersectConvexConvex(reference_quad, quad)
+                assert area / (width * width + cv2.contourArea(quad) - area) >= .85, (name, info)
+            continue
         assert normalized(left["local"]) == normalized(right["local"]), (name, "C# vs C++")
         image = images[name]
         if image.ndim == 3 and image.shape[2] == 4:
             image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
-        python = read_reference(image)
+        python = read_reference(image, enhance)
         assert sorted(c.text for c in python) == expected[name]
         python_geometry = []
         for c in python:
@@ -141,7 +199,10 @@ def main():
             python_geometry.append({"barcode_format": str(c.format), "polyline": points + [points[0]]})
         geometry_key = lambda value: json.dumps(value, sort_keys=True)
         assert sorted((d["extra_info"] for d in left["local"]), key=geometry_key) == sorted(python_geometry, key=geometry_key), (name, "Python geometry")
-    print(f"PASS: {len(cases)} fixtures, C#/C++ modules + exported flow API + Python geometry parity")
+    actual = {left["name"]: (left["local"], right["local"]) for _, left, right in paired_reports}
+    for name in ("qr-small", "dm-small"):
+        assert actual[name + "-default"] == actual[name + "-enhanced"], name
+    print(f"PASS: {len(expected)} fixtures: C#/C++ module and flow results, Data Matrix recovery and coordinate checks")
 
 
 if __name__ == "__main__":

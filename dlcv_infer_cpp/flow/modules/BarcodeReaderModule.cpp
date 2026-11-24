@@ -1,6 +1,7 @@
 #include "flow/BaseModule.h"
 #include "flow/ModuleRegistry.h"
 #include <opencv2/imgproc.hpp>
+#include <opencv2/calib3d.hpp>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -11,6 +12,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <stdexcept>
 
 namespace dlcv_infer {
@@ -73,6 +75,21 @@ public:
     ZXING_FN(Barcode_text, char*, const void*);
     ZXING_FN(Barcode_format, int, const void*);
     ZXING_FN(Barcode_position, BarcodePosition, const void*);
+    ZXING_FN(BarcodeFormatFromString, int, const char*);
+    ZXING_FN(BarcodeFormatsList, int*, int, int*);
+    ZXING_FN(ReaderOptions_setReturnErrors, void, void*, bool);
+    ZXING_FN(ReaderOptions_setIsPure, void, void*, bool);
+    ZXING_FN(ReaderOptions_setBinarizer, void, void*, int);
+    ZXING_FN(Barcode_isValid, bool, const void*);
+    ZXING_FN(Barcode_errorType, int, const void*);
+    ZXING_FN(WriterOptions_new, void*);
+    ZXING_FN(WriterOptions_delete, void, void*);
+    ZXING_FN(WriterOptions_setScale, void, void*, int);
+    ZXING_FN(WriterOptions_setAddQuietZones, void, void*, bool);
+    ZXING_FN(WriteBarcodeToImage, void*, const void*, const void*);
+    ZXING_FN(Image_width, int, const void*);
+    ZXING_FN(Image_height, int, const void*);
+    ZXING_FN(Image_delete, void, void*);
 #undef ZXING_FN
     BarcodeApi() : library(Load()) {}
     using Owned = std::unique_ptr<void, void (__cdecl*)(void*)>;
@@ -85,8 +102,8 @@ public:
     }
 };
 
-bool BarcodeOption(const Json& properties, const char* key) {
-    if (!properties.contains(key)) return true;
+bool BarcodeOption(const Json& properties, const char* key, bool defaultValue = true) {
+    if (!properties.contains(key)) return defaultValue;
     if (!properties.at(key).is_boolean()) throw std::invalid_argument(std::string(key) + " must be a boolean");
     return properties.at(key).get<bool>();
 }
@@ -146,6 +163,8 @@ Json ReadAtBothScales(BarcodeApi& api, const void* view, void* options) {
     return detections;
 }
 
+#include "DataMatrixRecovery.inl"
+
 class BarcodeReaderModule final : public BaseModule {
 public:
     using BaseModule::BaseModule;
@@ -156,6 +175,7 @@ public:
             formats = Properties.at("formats").get<std::string>();
         }
         const bool rotate = BarcodeOption(Properties, "try_rotate"), invert = BarcodeOption(Properties, "try_invert");
+        const bool enhance = BarcodeOption(Properties, "enhance", false);
         Json results = Json::array();
         if (images.empty()) return ModuleIO(images, results);
         static BarcodeApi api;
@@ -164,11 +184,21 @@ public:
         api.ReaderOptions_setTryRotate(options.get(), rotate);
         api.ReaderOptions_setTryInvert(options.get(), invert);
         api.ReaderOptions_setTextMode(options.get(), 2); // HRI
+        const int dm = api.BarcodeFormatFromString("DataMatrix");
+        bool allowDataMatrix = true;
         if (formats.find_first_not_of(" \t\r\n") != std::string::npos) {
             int count = 0;
             BarcodeApi::Owned parsed(api.BarcodeFormatsFromString(formats.c_str(), &count), api.free);
             api.Check(parsed.get());
-            api.ReaderOptions_setFormats(options.get(), static_cast<const int*>(parsed.get()), count);
+            const auto* list = static_cast<const int*>(parsed.get());
+            api.ReaderOptions_setFormats(options.get(), list, count);
+            if (enhance && count > 0) allowDataMatrix = std::any_of(list, list + count, [&](int id) {
+                if (id == dm) return true;
+                int size = 0;
+                BarcodeApi::Owned expanded(api.BarcodeFormatsList(id, &size), api.free);
+                const auto* values = static_cast<const int*>(expanded.get());
+                return size > 0 && values && std::find(values, values + size, dm) != values + size;
+            });
         }
         for (size_t i = 0; i < images.size(); ++i) {
             const auto& image = images[i].GetImage();
@@ -182,17 +212,20 @@ public:
             api.Check(view.get());
             Json detections = ReadAtBothScales(api, view.get(), options.get());
             cv::Mat gray, enhanced;
-            if (detections.empty()) {
-                if (channels == 1) {
-                    cv::equalizeHist(image, enhanced);
-                } else {
-                    cv::cvtColor(image, gray, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
-                    cv::equalizeHist(gray, enhanced);
+            if (enhance && detections.empty()) {
+                if (channels == 1) gray = image;
+                else cv::cvtColor(image, gray, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
+                if (allowDataMatrix) {
+                    auto hit = datamatrix::Recover(api, gray, dm, rotate, invert);
+                    if (!hit.is_null()) detections.push_back(std::move(hit));
                 }
-                BarcodeApi::Owned retryView(api.ImageView_new(enhanced.data, enhanced.cols, enhanced.rows, 0x01000000,
-                    static_cast<int>(enhanced.step), 0), api.ImageView_delete);
-                api.Check(retryView.get());
-                detections = ReadAtBothScales(api, retryView.get(), options.get());
+                if (detections.empty()) {
+                    cv::equalizeHist(gray, enhanced);
+                    BarcodeApi::Owned retryView(api.ImageView_new(enhanced.data, enhanced.cols, enhanced.rows, 0x01000000,
+                        static_cast<int>(enhanced.step), 0), api.ImageView_delete);
+                    api.Check(retryView.get());
+                    detections = ReadAtBothScales(api, retryView.get(), options.get());
+                }
             }
             auto entry = images[i].ToMeta();
             entry["type"] = "local"; entry["index"] = i; entry["sample_results"] = std::move(detections);

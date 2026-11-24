@@ -3,7 +3,7 @@ import shutil
 
 from setuptools import setup
 
-version = '2026.11.24.0a0'
+version = '2026.11.24.1a0'
 
 package_name = "dlcvpro_infer_cpp"
 
@@ -17,6 +17,7 @@ def main():
         author_email="ypw@dlcv.ai",
         url="",
         keywords="AI, Deep Learning, Computer Vision",
+        license_files=["LICENSE", "third_party/scipy/LICENSE.txt"],
         packages=[package_name],
         package_data={package_name: ["*"]},
         options={

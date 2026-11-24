@@ -72,6 +72,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="flow\modules\BarcodeReader.cs" />
+    <Compile Include="flow\modules\DataMatrixRecovery.cs" />
     <Compile Include="flow\modules\CircularRegion.cs" />
     <Compile Include="DllLoader.cs" />
     <Compile Include="Model.cs" />
