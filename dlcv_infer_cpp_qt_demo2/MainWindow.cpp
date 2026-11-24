@@ -48,7 +48,7 @@ constexpr double kMergeIouThreshold = 0.2;
 constexpr double kMergeIosThreshold = 0.2;
 
 // 局部推理（滑窗裁图后的小图推理）使用的线程数。
-constexpr int kLocalInferThreads = 2;
+constexpr int kLocalInferThreads = 4;
 
 double elapsedMilliseconds(std::chrono::steady_clock::time_point start) {
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();

@@ -53,7 +53,7 @@ int runInferCommandLine(int argc, char* argv[]) {
     const QString icPath = QString::fromLocal8Bit(argv[5]);
     QString noCadPath;
     QString outputPath;
-    int localThreads = 2;
+    int localThreads = 4;
     int repeatCount = 1;
     for (int i = 6; i < argc; ++i) {
         const std::string arg = argv[i];

@@ -233,6 +233,7 @@ def main():
             reference = reference_report["results"]
         environment = os.environ.copy()
         environment.update(TEMP=str(output.parent), TMP=str(output.parent), TMPDIR=str(output.parent))
+        report["trt_workspace_limit"] = environment.get("DLCV_TRT_WORKSPACE_LIMIT")
         for index in range(1, args.repeat + 1):
             stem = output.parent / f"{output.stem}-{index:03d}"
             result_path = Path(str(stem) + ".txt")
