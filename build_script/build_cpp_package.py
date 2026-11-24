@@ -52,6 +52,7 @@ def copy_package_files() -> Path:
     sources = {
         DEMO_EXE_NAME: DEMO_OUTPUT_DIR / "dlcv_infer_cpp_qt_demo.exe",
         "dlcv_infer_cpp.dll": DEMO_OUTPUT_DIR / "dlcv_infer_cpp.dll",
+        "dlcv_datamatrix_runtime.dll": DEMO_OUTPUT_DIR / "dlcv_datamatrix_runtime.dll",
         "hasp_26146.ini": REPO_ROOT / "hasp_26146.ini",
     }
     for source in (*sources.values(), *(SHARED_RUNTIME_DIR / name for name in SHARED_FILE_NAMES)):
@@ -102,8 +103,17 @@ def main() -> int:
             [sys.executable, str(REPO_ROOT / "build_script" / "setup_cpp.py"), "bdist_wheel", "--dist-dir", str(DIST_DIR)],
         )
         wheel = find_generated_wheel(before)
+        run_step(
+            "构建独立读码运行时 wheel",
+            [sys.executable, str(REPO_ROOT / "build_script" / "setup_datamatrix_runtime.py"),
+             "bdist_wheel", "--dist-dir", str(DIST_DIR)],
+        )
+        runtime_wheel = DIST_DIR / f"dlcv_datamatrix_runtime-{wheel.name.split('-')[1]}-py3-none-win_amd64.whl"
+        require_file(runtime_wheel)
         if args.install:
-            run_step("安装 C++ wheel", [sys.executable, "-m", "pip", "install", "--force-reinstall", str(wheel)])
+            run_step("安装 C++ 和读码运行时 wheel", [sys.executable, "-m", "pip", "install",
+                     "--force-reinstall", str(wheel), str(runtime_wheel)])
+        print(f"[build_cpp_package] runtime wheel: {runtime_wheel}")
         print(f"[build_cpp_package] wheel: {wheel}")
         return 0
     except subprocess.CalledProcessError as exc:

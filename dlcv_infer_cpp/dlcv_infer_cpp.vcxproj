@@ -207,6 +207,14 @@
   <Target Name="ValidatePortableDeps" BeforeTargets="ClCompile" Condition="'$(Platform)'=='x64'" DependsOnTargets="ValidateOpenCvDependencies">
   </Target>
 
+  <ItemGroup Condition="'$(Platform)'=='x64'">
+    <ProjectReference Include="native\datamatrix\DataMatrixRuntime.vcxproj">
+      <Project>{74398845-981C-4888-9BA5-9E5CF0F6B0AA}</Project>
+    </ProjectReference>
+  </ItemGroup>
+  <Target Name="CopyDataMatrixRuntime" AfterTargets="Build" Condition="'$(Platform)'=='x64'">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\native\datamatrix\bin\$(Platform)\$(Configuration)\dlcv_datamatrix_runtime.dll" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <PropertyGroup>
     <OpenCvDiagnosticBinDir>$(OpenCvLibDir)\..\bin</OpenCvDiagnosticBinDir>
@@ -218,6 +226,7 @@
     <ItemGroup>
       <_FlowRuntimeFiles Include="$(TargetPath)" />
       <_FlowRuntimeFiles Include="$(TargetDir)ZXing.dll" />
+      <_FlowRuntimeFiles Include="$(TargetDir)dlcv_datamatrix_runtime.dll" />
       <_FlowRuntimeFiles Include="$(OpenCvBinDir)\$(OpenCvWorldDebugDll)" Condition="'$(Configuration)'=='Debug'" />
       <_FlowRuntimeFiles Include="$(OpenCvBinDir)\$(OpenCvWorldReleaseDll)" Condition="'$(Configuration)'!='Debug'" />
     </ItemGroup>

@@ -132,6 +132,25 @@
       <LogicalName>CategoryBlockUnicode.json</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
+  <Import Project="..\build_script\OpenCvVersion.props" Condition="'$(Platform)'=='x64'" />
+  <PropertyGroup Condition="'$(Platform)'=='x64'">
+    <DataMatrixOpenCvDll Condition="'$(Configuration)'=='Debug'">$(OpenCvWorldDebugDll)</DataMatrixOpenCvDll>
+    <DataMatrixOpenCvDll Condition="'$(Configuration)'!='Debug'">$(OpenCvWorldReleaseDll)</DataMatrixOpenCvDll>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(Platform)'=='x64'">
+    <ProjectReference Include="..\dlcv_infer_cpp\native\datamatrix\DataMatrixRuntime.vcxproj">
+      <Project>{74398845-981C-4888-9BA5-9E5CF0F6B0AA}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+    <Content Include="..\dlcv_infer_cpp\native\datamatrix\bin\$(Platform)\$(Configuration)\dlcv_datamatrix_runtime.dll">
+      <Link>dlcv_datamatrix_runtime.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="$(OpenCvBinDir)\$(DataMatrixOpenCvDll)">
+      <Link>$(DataMatrixOpenCvDll)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>

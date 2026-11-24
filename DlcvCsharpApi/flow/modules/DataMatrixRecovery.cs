@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using OpenCvSharp;
 using ZXingCpp;
 
@@ -508,6 +509,44 @@ namespace DlcvModules
                 Text = text; Corners = corners.Select(p => new Point2f(p.X - pad, p.Y - pad)).ToArray();
             }
         }
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int VerifyBitmap(IntPtr bitmap, IntPtr context);
+
+        [DllImport("dlcv_datamatrix_runtime.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "dlcv_datamatrix_read_v1")]
+        private static extern int ReadNative(IntPtr gray, int width, int height, int stride,
+            int flags, [Out] float[] corners, VerifyBitmap verify, IntPtr context);
+
+        internal static Result RecoverDeep(Mat gray, bool rotate, bool invert)
+        {
+            if (gray.Rows < 32 || gray.Cols < 32) return null;
+            using (var pure = new ZXingCpp.BarcodeReader { Formats = BarcodeFormat.DataMatrix, TryDownscale = false,
+                TryRotate = false, TryInvert = false, IsPure = true, TextMode = TextMode.HRI })
+            {
+                string text = null;
+                Exception verifyError = null;
+                VerifyBitmap verify = (bitmap, context) =>
+                {
+                    try
+                    {
+                        var view = new ImageView(bitmap, 38, 38, ImageFormat.Lum, 38);
+                        var codes = pure.From(view) ?? Array.Empty<Barcode>();
+                        try { text = codes.FirstOrDefault(b => b.IsValid && b.Format == BarcodeFormat.DataMatrix)?.Text; }
+                        finally { foreach (var b in codes) b.Dispose(); }
+                        return text == null ? 0 : 1;
+                    }
+                    catch (Exception error) { verifyError = error; return 0; }
+                };
+                var corners = new float[8];
+                int found = ReadNative(gray.Data, gray.Cols, gray.Rows, checked((int)gray.Step()),
+                    (rotate ? 1 : 0) | (invert ? 2 : 0), corners, verify, IntPtr.Zero);
+                GC.KeepAlive(verify);
+                GC.KeepAlive(gray);
+                if (verifyError != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(verifyError).Throw();
+                return found == 0 ? null : new Result(text, Enumerable.Range(0, 4)
+                    .Select(i => new Point2f(corners[2 * i], corners[2 * i + 1])).ToArray(), 0);
+            }
+        }
+
         private sealed class Row : IDisposable
         {
             public Geometry Geometry;

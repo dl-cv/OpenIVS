@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{74398845-981C-4888-9BA5-9E5CF0F6B0AA}</ProjectGuid>
+    <RootNamespace>DlcvDataMatrixRuntime</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <Import Project="..\..\build\WindowsSdk.props" Condition="Exists('..\..\build\WindowsSdk.props')" />
+  <Import Project="..\..\..\build_script\WindowsSdk.props" Condition="!Exists('..\..\build\WindowsSdk.props')" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <TargetName>dlcv_datamatrix_runtime</TargetName>
+    <OutDir>$(MSBuildProjectDirectory)\bin\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(MSBuildProjectDirectory)\obj\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
+  <Import Project="..\..\build\OpenCvVersion.props" Condition="Exists('..\..\build\OpenCvVersion.props')" />
+  <Import Project="..\..\..\build_script\OpenCvVersion.props" Condition="!Exists('..\..\build\OpenCvVersion.props')" />
+  <PropertyGroup>
+    <DataMatrixOpenCvLib Condition="'$(Configuration)'=='Debug'">$(OpenCvWorldDebugLib)</DataMatrixOpenCvLib>
+    <DataMatrixOpenCvLib Condition="'$(Configuration)'!='Debug'">$(OpenCvWorldReleaseLib)</DataMatrixOpenCvLib>
+    <DataMatrixOpenCvDll Condition="'$(Configuration)'=='Debug'">$(OpenCvWorldDebugDll)</DataMatrixOpenCvDll>
+    <DataMatrixOpenCvDll Condition="'$(Configuration)'!='Debug'">$(OpenCvWorldReleaseDll)</DataMatrixOpenCvDll>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <AdditionalIncludeDirectories>$(OpenCvIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>DLCV_DATAMATRIX_BUILD;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <RuntimeLibrary Condition="'$(Configuration)'=='Debug'">MultiThreadedDebugDLL</RuntimeLibrary>
+       <RuntimeLibrary Condition="'$(Configuration)'!='Debug'">MultiThreadedDLL</RuntimeLibrary>
+      <Optimization Condition="'$(Configuration)'=='Release'">MaxSpeed</Optimization>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(OpenCvLibDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(DataMatrixOpenCvLib);%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="DataMatrixNative.c"><CompileAs>CompileAsC</CompileAs></ClCompile>
+    <ClCompile Include="DataMatrixLight.cpp" />
+    <ClInclude Include="DataMatrixNative.h" />
+    <ClInclude Include="DataMatrixGrid.inl" />
+    <ClInclude Include="Ecc200Search.inl" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="CopyDataMatrixOpenCv" AfterTargets="Build">
+    <ItemGroup>
+      <OpenCvNotices Include="$(OpenCvBinDir)\..\..\..\etc\licenses\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(OpenCvNotices)" DestinationFolder="$(TargetDir)opencv_licenses" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(OpenCvBinDir)\$(DataMatrixOpenCvDll)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

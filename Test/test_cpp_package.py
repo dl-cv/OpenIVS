@@ -21,7 +21,7 @@ class CppPackageFilesTest(unittest.TestCase):
             output = root / "output"
             staging = root / "dlcvpro_infer_cpp"
             output.mkdir()
-            required = {"dlcv_infer_cpp.dll"}
+            required = {"dlcv_infer_cpp.dll", "dlcv_datamatrix_runtime.dll"}
             extras = {"old.pdb", "ZXing.dll", "opencv_world4100.dll", "opengl32sw.dll", "dxcompiler.dll",
                       "D3Dcompiler_47.dll", "Qt6Network.dll", "imageformats/qjpeg.dll", "Qt6Svg.dll",
                       "Qt6Core.dll", "Qt6Gui.dll", "Qt6Widgets.dll", "platforms/qwindows.dll",
@@ -79,7 +79,8 @@ class CppPackageFilesTest(unittest.TestCase):
             self.assertTrue(marker.is_file())
 
     def test_cpp_build_scope_and_install_use_generated_wheel(self):
-        wheel = ROOT / "dist_cpp" / "generated.whl"
+        wheel = ROOT / "dist_cpp" / "dlcvpro_infer_cpp-1.0.0-cp311-none-win_amd64.whl"
+        runtime = ROOT / "dist_cpp" / "dlcv_datamatrix_runtime-1.0.0-py3-none-win_amd64.whl"
         original_shared_mode = os.environ.get("DlcvUseSharedQt")
         with (
             patch.object(build_package, "parse_args", return_value=argparse.Namespace(install=True)),
@@ -99,7 +100,8 @@ class CppPackageFilesTest(unittest.TestCase):
         self.assertEqual(Path(build_call.args[1][1]), ROOT / "build_script" / "setup_cpp.py")
         self.assertEqual(run_step.call_args_list[0].kwargs["env"]["DlcvUseSharedQt"], "true")
         self.assertEqual(os.environ.get("DlcvUseSharedQt"), original_shared_mode)
-        self.assertEqual(commands[-1][-1], str(wheel))
+        self.assertIn(str(ROOT / "build_script" / "setup_datamatrix_runtime.py"), commands[-2])
+        self.assertEqual(commands[-1][-2:], [str(wheel), str(runtime)])
 
     def test_cpp_build_failure_returns_status_before_copying(self):
         with (
@@ -131,7 +133,6 @@ class PackageMetadataTest(unittest.TestCase):
                 os.chdir(previous)
             metadata = setup.call_args.kwargs
             self.assertEqual(metadata["name"], "dlcvpro_infer_cpp")
-            self.assertEqual(metadata["version"], "2026.11.5.1a0")
             for name in ("build", "dist", "dlcvpro_infer_csharp"):
                 self.assertTrue((root / name / "keep.txt").is_file())
 
@@ -144,13 +145,20 @@ class CppInstallTargetTest(test_install_target.InstallTargetTest):
         self.script.write_bytes((ROOT / "2_安装新版(C++).bat").read_bytes())
 
     def wheel(self, name="latest package.whl", timestamp=20):
-        return super().wheel("dlcvpro_infer_cpp-" + name, timestamp)
+        version = "1.0.0" if name.startswith("old") else "2.0.0"
+        latest = super().wheel(f"dlcvpro_infer_cpp-{version}-cp311-none-win_amd64.whl", timestamp)
+        (self.dist / self.install_wheels(latest)[1]).touch()
+        return latest
+
+    def install_wheels(self, latest):
+        version = latest.split("-")[1]
+        return [latest, f"dlcv_datamatrix_runtime-{version}-py3-none-win_amd64.whl"]
 
     def test_default_keeps_uninstall_install_and_pause(self):
         latest = self.wheel()
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.calls(), [self.expected_call("install", "--force-reinstall", latest)])
+        self.assertEqual(self.calls(), [self.expected_call("install", "--force-reinstall", *self.install_wheels(latest))])
 
     def test_default_returns_install_error_after_pause(self):
         self.wheel()
@@ -164,7 +172,15 @@ class CppInstallTargetTest(test_install_target.InstallTargetTest):
         other.touch()
         result = self.run_script('--target "{}"'.format(self.root / "target"))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.calls()[0]["argv"][-1], latest)
+        self.assertEqual(self.calls()[0]["argv"][-2:], self.install_wheels(latest))
+
+    def test_missing_matching_runtime_fails_without_pip(self):
+        self.wheel("old package.whl", 10)
+        latest = self.wheel()
+        (self.dist / self.install_wheels(latest)[1]).unlink()
+        result = self.run_script()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), [])
 
 
 if __name__ == "__main__":

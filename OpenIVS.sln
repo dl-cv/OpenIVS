@@ -87,12 +87,18 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinelManager", "Test\Sen
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SentinelManagerTest", "Test\SentinelManagerTest\SentinelManagerTest.csproj", "{36E52E2D-BAAE-4CDE-8C9D-89A13AA8C035}"
 EndProject
+Project("{BC8A1FFA-BEE3-4634-8014-F334798102B3}") = "DataMatrixRuntime", "dlcv_infer_cpp\native\datamatrix\DataMatrixRuntime.vcxproj", "{74398845-981C-4888-9BA5-9E5CF0F6B0AA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
 		Release|x64 = Release|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{74398845-981C-4888-9BA5-9E5CF0F6B0AA}.Debug|x64.ActiveCfg = Debug|x64
+		{74398845-981C-4888-9BA5-9E5CF0F6B0AA}.Debug|x64.Build.0 = Debug|x64
+		{74398845-981C-4888-9BA5-9E5CF0F6B0AA}.Release|x64.ActiveCfg = Release|x64
+		{74398845-981C-4888-9BA5-9E5CF0F6B0AA}.Release|x64.Build.0 = Release|x64
 		{70004706-161E-4B41-9014-AB1DDB6027A6}.Debug|x64.ActiveCfg = Debug|x64
 		{70004706-161E-4B41-9014-AB1DDB6027A6}.Debug|x64.Build.0 = Debug|x64
 		{70004706-161E-4B41-9014-AB1DDB6027A6}.Release|x64.ActiveCfg = Release|x64

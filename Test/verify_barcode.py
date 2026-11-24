@@ -1,5 +1,6 @@
 """Generate synthetic fixtures and verify real C#/C++ executables (no SDK/model required)."""
 import argparse
+from base64 import b64decode
 import json
 import re
 from pathlib import Path
@@ -59,6 +60,24 @@ def uneven_data_matrix(padded=False):
         return cv2.copyMakeBorder(image, 7, 7, 7, 7, cv2.BORDER_CONSTANT, value=181)
     return (125 + 25 * np.sin(x * 5) * np.cos(y * 8) + np.where(bitmap > 0, 12, -12)).astype(np.uint8)
 
+
+def damaged_data_matrix():
+    packed = b64decode(
+        "qqqqqrFHqC+TjuwA2jHpxZ16i97Lmbwl+Jzano4VyyvKKucwv3ucDZV00dCi77RRs0KRNN4V/ZH6js94/////6qqqqrBgb"
+        "qD3PLyks/J2YXPGKYcxbmPP9mukC6qy7JVmxqAdJ2HiuHjSpaImfWN3+5oh9yK9dn9zBy56P////8="
+    )
+    code = np.unpackbits(np.frombuffer(packed, np.uint8)).reshape(32, 32).astype(bool)
+    pristine = np.pad(np.where(code, 0, 255).astype(np.uint8), 3, constant_values=255)
+    assert zxingcpp.read_barcode(pristine, is_pure=True).bytes == b"DLCV-NATIVE-0123456789"
+    axis = np.arange(32) % 16
+    payload = np.flatnonzero(((axis != 0) & (axis != 15))[:, None] & ((axis != 0) & (axis != 15))[None, :])
+    selected = np.random.default_rng(26).choice(payload, 40, replace=False)
+    values = np.where(code, 42, 200).astype(np.float32)
+    values.flat[selected] = np.where(code.flat[selected], 124, 111)
+    gray = np.pad(values, 3, constant_values=211).repeat(5, 0).repeat(5, 1)
+    y, x = np.mgrid[-1:1:190j, -1:1:190j]
+    return np.uint8(np.clip(cv2.GaussianBlur(gray, (0, 0), .8) + 9 * np.sin(2 * x) * y
+                            + np.random.default_rng(17).normal(0, 4, gray.shape), 0, 255))
 
 def read_reference(image, enhance):
     codes = zxingcpp.read_barcodes(image, try_downscale=True, text_mode=zxingcpp.TextMode.HRI)
@@ -133,6 +152,10 @@ def main():
     assert not read_reference(uneven_padded, False) and not read_reference(uneven_padded, True)
     add("dm-padded-default", uneven_padded, [])
     add("dm-padded-recovered", uneven_padded, ["T1616"], enhance=True)
+    damaged = damaged_data_matrix()
+    assert not read_reference(damaged, False) and not read_reference(damaged, True)
+    add("dm-damaged-default", damaged, [])
+    add("dm-damaged-recovered", damaged, ["DLCV-NATIVE-0123456789"], enhance=True)
     small_dm = square_data_matrix((0x2AA, 0x367, 0x218, 0x24D, 0x23A, 0x3A3, 0x2DA, 0x22F, 0x28A, 0x3FF), 2, 3)
     add("dm-small-default", small_dm, ["17"])
     add("dm-small-enhanced", small_dm, ["17"], enhance=True)
@@ -169,6 +192,7 @@ def main():
             reports.append(json.loads(report.read_text(encoding="utf-8-sig")))
         assert all(len(report) == len(batch) for report in reports)
         paired_reports.extend((enhance, left, right) for left, right in zip(*reports))
+    recovered_boxes = {"dm-uneven-recovered": (0, 96), "dm-padded-recovered": (7, 80), "dm-damaged-recovered": (15, 160)}
     for enhance, left, right in paired_reports:
         name = left["name"]
         assert name == right["name"]
@@ -176,8 +200,8 @@ def main():
             for route in ("local", "flow"):
                 assert sorted(d["category_name"] for d in runtime[route]) == expected[name], (name, route, runtime[route])
             assert normalized(runtime["local"], local=True) == normalized(runtime["flow"]), (name, "local vs flow", runtime)
-        if name in ("dm-uneven-recovered", "dm-padded-recovered"):
-            start, width = (0, 96) if name == "dm-uneven-recovered" else (7, 80)
+        if name in recovered_boxes:
+            start, width = recovered_boxes[name]
             end = start + width
             reference_quad = np.float32([[start, start], [end, start], [end, end], [start, end]])
             for runtime in (left, right):

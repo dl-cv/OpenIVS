@@ -158,6 +158,12 @@ namespace DlcvModules
                                 view = new ImageView(enhanced.Data, enhanced.Width, enhanced.Height, ImageFormat.Lum, checked((int)enhanced.Step()));
                                 detections = ReadAtBothScales(reader, view);
                             }
+                            if (allowDataMatrix && detections.Count == 0)
+                            {
+                                var hit = DataMatrixRecovery.RecoverDeep(gray, rotate, invert);
+                                if (hit != null) detections.Add(ToDetection(hit.Text, BarcodeFormat.DataMatrix.ToString(), hit.Corners
+                                    .Select(p => new Point((int)Math.Round(p.X), (int)Math.Round(p.Y))).ToArray()));
+                            }
                         }
                         var entry = JObject.FromObject(wrap.ToMeta());
                         entry["type"] = "local";

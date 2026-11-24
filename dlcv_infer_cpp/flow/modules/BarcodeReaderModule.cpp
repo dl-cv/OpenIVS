@@ -2,6 +2,9 @@
 #include "flow/ModuleRegistry.h"
 #include <opencv2/imgproc.hpp>
 #include <opencv2/calib3d.hpp>
+#ifdef _WIN64
+#include "native/datamatrix/DataMatrixNative.h"
+#endif
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -10,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -226,7 +230,13 @@ public:
                     api.Check(retryView.get());
                     detections = ReadAtBothScales(api, retryView.get(), options.get());
                 }
-            }
+#ifdef _WIN64
+                if (allowDataMatrix && detections.empty()) {
+                    auto hit = datamatrix::RecoverDeep(api, gray, dm, rotate, invert);
+                    if (!hit.is_null()) detections.push_back(std::move(hit));
+                }
+#endif
+           }
             auto entry = images[i].ToMeta();
             entry["type"] = "local"; entry["index"] = i; entry["sample_results"] = std::move(detections);
             results.push_back(std::move(entry));

@@ -54,6 +54,9 @@ class InstallTargetTest(unittest.TestCase):
         os.utime(path, (timestamp, timestamp))
         return name
 
+    def install_wheels(self, latest):
+        return [latest]
+
     def run_script(self, arguments="", exit_code=0, uninstall_exit_code=0):
         self.env["FAKE_PIP_EXIT"] = str(exit_code)
         self.env["FAKE_PIP_UNINSTALL_EXIT"] = str(uninstall_exit_code)
@@ -79,7 +82,7 @@ class InstallTargetTest(unittest.TestCase):
         result = self.run_script('--target "{}"'.format(target))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.calls(), [self.expected_call(
-            "install", "--no-deps", "--upgrade", "--target", str(target), latest)])
+            "install", "--no-deps", "--upgrade", "--target", str(target), *self.install_wheels(latest))])
         self.assertEqual(result.stdout, b"")
         self.assertFalse(target.exists())
 
@@ -96,7 +99,7 @@ class InstallTargetTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         target = self.launcher / "relative packages"
         self.assertEqual(self.calls(), [self.expected_call(
-            "install", "--no-deps", "--upgrade", "--target", str(target), latest)])
+            "install", "--no-deps", "--upgrade", "--target", str(target), *self.install_wheels(latest))])
 
     def test_target_requires_path(self):
         for args in ('--target', '--target ""'):

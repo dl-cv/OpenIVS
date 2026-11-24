@@ -22,6 +22,7 @@ PACKAGE_OUTPUT_FILE_NAMES = (
     "DlcvCsharpApi.dll",
     "ZXingCpp.dll",
     "ZXing.dll",
+    "dlcv_datamatrix_runtime.dll",
     "DlcvCsharpApi.dll.config",
     "ImageViewer.dll",
     "ImageViewer.dll.config",
@@ -145,10 +146,19 @@ def copy_package_files() -> list[Path]:
 
     rebuild_staging_directory()
 
-    for file_name in PACKAGE_OUTPUT_FILE_NAMES:
+    opencv = [file.name for file in DEMO_OUTPUT_DIR.glob("opencv_world*.dll")
+              if re.fullmatch(r"opencv_world\d+\.dll", file.name)]
+    if len(opencv) != 1:
+        raise RuntimeError(f"读码运行时需要一份 OpenCV Release DLL，实际找到 {len(opencv)} 份")
+    for file_name in (*PACKAGE_OUTPUT_FILE_NAMES, *opencv):
         source = DEMO_OUTPUT_DIR / file_name
         require_file(source)
         shutil.copy2(source, STAGING_DIR / source.name)
+
+    opencv_notices = (REPO_ROOT / "dlcv_infer_cpp" / "native" / "datamatrix" /
+                      "bin" / "x64" / "Release" / "opencv_licenses")
+    if opencv_notices.is_dir():
+        shutil.copytree(opencv_notices, STAGING_DIR / opencv_notices.name)
 
     require_file(RPC_EXE_SOURCE)
     shutil.copy2(RPC_EXE_SOURCE, STAGING_DIR / RPC_EXE_NAME)
