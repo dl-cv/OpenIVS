@@ -2319,6 +2319,9 @@ namespace dlcv_infer_csharp
 
         // 处理推理结果到CSharpResult对象
         public Utils.CSharpResult ParseToStructResult(JObject resultObject)
+            => ParseToStructResult(resultObject, preserveOriginalMask: false);
+
+        private Utils.CSharpResult ParseToStructResult(JObject resultObject, bool preserveOriginalMask)
         {
             // 解析 json 结果
             var sampleResults = new List<Utils.CSharpSampleResult>();
@@ -2399,7 +2402,7 @@ namespace dlcv_infer_csharp
                         if (_isDvpMode && result.ContainsKey("polygon"))
                         {
                             // DVP 模式：从 polygon 数据生成 mask，使用转换后的bbox
-                            mask_img = CreateMaskFromPolygon(result["polygon"] as JArray, bbox);
+                            mask_img = CreateMaskFromPolygon(result["polygon"] as JArray, bbox, preserveOriginalMask);
                         }
                         else if (!_isDvpMode && result["mask"] != null)
                         {
@@ -2447,9 +2450,8 @@ namespace dlcv_infer_csharp
                         }
                     }
 
-                    // DVT 模式：将 mask resize 到 bbox 尺寸
-                    // DVP 的 mask 已经是 bbox 尺寸，不需要 resize
-                    if (!_isDvpMode && !mask_img.Empty() && bbox != null && bbox.Count >= 4)
+                    // 保留公开推理的缩放规则；实例分割流程直接使用 SDK 的整数窗口掩码。
+                    if (!preserveOriginalMask && !_isDvpMode && !mask_img.Empty() && bbox != null && bbox.Count >= 4)
                     {
                         int bboxW = (int)bbox[2];
                         int bboxH = (int)bbox[3];
@@ -2524,7 +2526,7 @@ namespace dlcv_infer_csharp
         /// <param name="polygonArray">多边形点集</param>
         /// <param name="bbox">边界框信息 [x, y, w, h]</param>
         /// <returns>生成的mask图像</returns>
-        private Mat CreateMaskFromPolygon(JArray polygonArray, List<double> bbox)
+        private Mat CreateMaskFromPolygon(JArray polygonArray, List<double> bbox, bool usePixelWindow)
         {
             if (polygonArray == null || polygonArray.Count == 0 || bbox == null || bbox.Count < 4)
             {
@@ -2534,10 +2536,10 @@ namespace dlcv_infer_csharp
             try
             {
                 // 解析边界框 [x, y, w, h]
-                int x = (int)bbox[0];
-                int y = (int)bbox[1];
-                int width = (int)bbox[2];
-                int height = (int)bbox[3];
+                int x = usePixelWindow ? (int)Math.Floor(bbox[0]) : (int)bbox[0];
+                int y = usePixelWindow ? (int)Math.Floor(bbox[1]) : (int)bbox[1];
+                int width = usePixelWindow ? (int)Math.Ceiling(bbox[0] + bbox[2]) - x : (int)bbox[2];
+                int height = usePixelWindow ? (int)Math.Ceiling(bbox[1] + bbox[3]) - y : (int)bbox[3];
 
                 if (width <= 0 || height <= 0)
                 {
@@ -2635,6 +2637,9 @@ namespace dlcv_infer_csharp
         }
 
         public Utils.CSharpResult InferBatch(List<Mat> image_list, JObject params_json = null)
+            => InferBatch(image_list, params_json, preserveOriginalMask: false);
+
+        internal Utils.CSharpResult InferBatch(List<Mat> image_list, JObject params_json, bool preserveOriginalMask)
         {
             EnsureExternalIndexReady();
             if (_isDvsMode)
@@ -2654,7 +2659,7 @@ namespace dlcv_infer_csharp
             var resultTuple = InferInternal(image_list, params_json);
             try
             {
-                return ParseToStructResult(resultTuple.Item1);
+                return ParseToStructResult(resultTuple.Item1, preserveOriginalMask);
             }
             finally
             {

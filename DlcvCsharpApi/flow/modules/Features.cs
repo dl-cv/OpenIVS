@@ -676,8 +676,9 @@ namespace DlcvModules
                     var bbox = d["bbox"] as JArray;
                     if (bbox == null || bbox.Count < 4) continue;
 
-                    float bx = bbox[0].Value<float>();
-                    float by = bbox[1].Value<float>();
+                    // 模型掩码由整数像素窗口生成，浮点检测框的左上角向下取整。
+                    float bx = (float)Math.Floor(bbox[0].Value<double>());
+                    float by = (float)Math.Floor(bbox[1].Value<double>());
 
                     // 直接通过 mask 计算最小外接矩
                     RotatedRect rr;
@@ -691,7 +692,6 @@ namespace DlcvModules
                     }
                     catch { continue; }
 
-                    // 加上偏移（mask 坐标是相对于 bbox 左上角的）
                     rr.Center += new Point2f(bx, by);
 
                     float rw = rr.Size.Width;

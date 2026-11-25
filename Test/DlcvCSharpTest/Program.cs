@@ -7571,6 +7571,37 @@ namespace DlcvCSharpTest
                         Cv2.Rectangle(tied, new Rect(20, 2, 5, 3), Scalar.White, -1);
                         AssertMaskToRBoxGeometry(tied, new[] { 4.0, 3.0, 4.0, 2.0, 0.0 });
                     }
+                    using (var edge = new Mat(5, 6, MatType.CV_8UC1, Scalar.Black))
+                    {
+                        edge.Set(2, 5, (byte)255);
+                        var box = new JArray(10.75, 20.25, 4.5, 4.5);
+                        var raw = new JObject
+                        {
+                            ["sample_results"] = new JArray(new JObject
+                            {
+                                ["results"] = new JArray(new JObject
+                                {
+                                    ["bbox"] = box,
+                                    ["with_mask"] = true,
+                                    ["mask"] = new JObject { ["width"] = 6, ["height"] = 5, ["mask_ptr"] = edge.Data.ToInt64() }
+                                })
+                            })
+                        };
+                        using (var model = new Model())
+                        {
+                            var parse = typeof(Model).GetMethod("ParseToStructResult", BindingFlags.NonPublic | BindingFlags.Instance,
+                                null, new[] { typeof(JObject), typeof(bool) }, null);
+                            var preserved = (Utils.CSharpResult)parse.Invoke(model, new object[] { raw, true });
+                            using (var mask = preserved.SampleResults[0].Results[0].Mask)
+                                AssertMaskToRBoxGeometry(mask, new[] { 15.0, 22.0 }, box);
+                            using (var mask = model.ParseToStructResult(raw).SampleResults[0].Results[0].Mask)
+                            {
+                                if (mask.Cols != 4 || mask.Rows != 4) throw new Exception("公开推理的掩码尺寸改变");
+                            }
+                        }
+                        AssertMaskToRBoxGeometry(edge, new[] { 15.0, 22.0 }, new JArray(10, 20, 6, 5));
+                        AssertMaskToRBoxGeometry(edge, new[] { 4.0, 2.0 }, new JArray(-0.25, 0, 5, 5));
+                    }
                     using (var empty = new Mat(20, 20, MatType.CV_8UC1, Scalar.Black))
                     {
                         AssertMaskToRBoxGeometry(empty, null);
@@ -7587,7 +7618,7 @@ namespace DlcvCSharpTest
             }
         }
 
-        private static void AssertMaskToRBoxGeometry(Mat mask, double[] expected)
+        private static void AssertMaskToRBoxGeometry(Mat mask, double[] expected, JArray inputBox = null)
         {
             var resultList = new JArray
             {
@@ -7598,7 +7629,7 @@ namespace DlcvCSharpTest
                     {
                         new JObject
                         {
-                            ["bbox"] = new JArray(0, 0, mask.Cols, mask.Rows),
+                            ["bbox"] = inputBox ?? new JArray(0, 0, mask.Cols, mask.Rows),
                             ["mask_rle"] = MaskRleUtils.MatToMaskInfo(mask)
                         }
                     }

@@ -373,7 +373,8 @@ namespace DlcvModules
 						maxActualBatch = Math.Max(maxActualBatch, chunkMats.Count);
 
                         var inferSw = Stopwatch.StartNew();
-                        Utils.CSharpResult res = p.Count > 0 ? _model.InferBatch(chunkMats, p) : _model.InferBatch(chunkMats, null);
+                        Utils.CSharpResult res = _model.InferBatch(chunkMats, p.Count > 0 ? p : null,
+                            preserveOriginalMask: this is InstanceSegModel);
                         inferSw.Stop();
                         InferTiming.AddDlcvInferMs(inferSw.Elapsed.TotalMilliseconds);
 						var batchSamples = res.SampleResults ?? new List<Utils.CSharpSampleResult>();

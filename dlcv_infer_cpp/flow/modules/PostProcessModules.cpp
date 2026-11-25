@@ -2050,8 +2050,9 @@ private:
                 }
                 if (!d.contains("bbox") || !d.at("bbox").is_array() || d.at("bbox").size() < 4) continue;
                 const Json& bbox = d.at("bbox");
-                const float offsetX = static_cast<float>(bbox.at(0).get<double>());
-                const float offsetY = static_cast<float>(bbox.at(1).get<double>());
+                // 模型掩码由整数像素窗口生成，浮点检测框的左上角向下取整。
+                const float offsetX = static_cast<float>(std::floor(bbox.at(0).get<double>()));
+                const float offsetY = static_cast<float>(std::floor(bbox.at(1).get<double>()));
 
                 cv::RotatedRect rr;
                 if (hasPrecomputedRect) {

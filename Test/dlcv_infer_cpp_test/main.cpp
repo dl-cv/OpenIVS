@@ -1876,6 +1876,41 @@ int RunBBoxIoUDedupSelfTest() {
 }
 
 
+int RunMaskToRBoxSelfTest() {
+    const auto factory = dlcv_infer::flow::ModuleRegistry::Get("post_process/mask_to_rbox");
+    if (!factory) return 1;
+    auto module = factory(1, "", json::object(), nullptr);
+    cv::Mat edge = cv::Mat::zeros(5, 6, CV_8UC1);
+    edge.at<unsigned char>(2, 5) = 255;
+    const auto check = [&](const json& box, double x, double y) {
+        const json rawObject{{"category_id", 0}, {"category_name", "target"}, {"score", 0.9}, {"area", 1},
+            {"bbox", box}, {"with_mask", true},
+            {"mask", {{"width", edge.cols}, {"height", edge.rows}, {"mask_ptr", reinterpret_cast<uintptr_t>(edge.data)}}}};
+        const json rawSample{{"results", json::array({rawObject})}};
+        MaskAreaParseModel model;
+        const auto preserved = model.ParseToStructResultPreservingOriginalMask({{"sample_results", json::array({rawSample})}});
+        const auto mask = dlcv_infer::flow::MatToMaskInfo(preserved.sampleResults.at(0).results.at(0).mask);
+        const json detection{{"bbox", box}, {"mask_rle", mask}};
+        const json entry{{"type", "local"}, {"sample_results", json::array({detection})}};
+        const json entries = json::array({entry});
+        const auto output = module->Process({}, entries);
+        const auto& detections = output.ResultList.at(0).at("sample_results");
+        if (detections.size() != 1) return false;
+        const auto& rbox = detections.at(0).at("bbox");
+        return rbox.size() == 5 && std::abs(rbox.at(0).get<double>() - x) < 0.01
+            && std::abs(rbox.at(1).get<double>() - y) < 0.01;
+    };
+    // RLE 分支以像素为方格，单像素外接矩中心比行列坐标多半个像素。
+    if (!check(json::array({10.75, 20.25, 4.5, 4.5}), 15.5, 22.5)
+        || !check(json::array({10, 20, 6, 5}), 15.5, 22.5)
+        || !check(json::array({-0.25, 0, 5, 5}), 4.5, 2.5)) {
+        PrintUtf8Line("掩码旋转框坐标错误");
+        return 1;
+    }
+    PrintUtf8Line("掩码旋转框坐标测试通过");
+    return 0;
+}
+
 int RunPolyFilterSelfTest() {
     auto fail = [](const std::string& message) -> int {
         PrintUtf8Line("poly_filter selftest failed: " + message);
@@ -5555,6 +5590,9 @@ int wmain(int argc, wchar_t* argv[]) {
     if (argc >= 2 && std::wstring(argv[1]) == L"bbox-iou-dedup-selftest") {
         return RunBBoxIoUDedupSelfTest();
     }
+    if (argc >= 2 && std::wstring(argv[1]) == L"maskrbox-selftest") {
+        return RunMaskToRBoxSelfTest();
+    }
     if (argc >= 2 && std::wstring(argv[1]) == L"poly-filter-selftest") {
         return RunPolyFilterSelfTest();
     }
@@ -5704,6 +5742,7 @@ int wmain(int argc, wchar_t* argv[]) {
     std::cout << "  rect-image-correction-selftest\n";
     std::cout << "  sliding-merge-selftest\n";
     std::cout << "  bbox-iou-dedup-selftest\n";
+    std::cout << "  maskrbox-selftest\n";
     std::cout << "  poly-filter-selftest\n";
     std::cout << "  count-results-selftest\n";
     std::cout << "  category-count-check-selftest\n";

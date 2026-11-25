@@ -675,7 +675,9 @@ ModuleIO DetModelModule::Process(const std::vector<ModuleImage>& imageList, cons
                 chunkMats.push_back(rgbInputs[static_cast<size_t>(localIdx)]);
             }
 
-            dlcv_infer::Result res = LoadedModel()->InferBatch(chunkMats, paramsToPass);
+            dlcv_infer::Result res = dynamic_cast<InstanceSegModelModule*>(this) != nullptr
+                ? LoadedModel()->InferBatchPreservingOriginalMask(chunkMats, paramsToPass)
+                : LoadedModel()->InferBatch(chunkMats, paramsToPass);
             try {
                 if (Context != nullptr) {
                     double prev = Context->Get<double>("flow_dlcv_infer_ms_acc", 0.0);
