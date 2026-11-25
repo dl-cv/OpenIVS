@@ -13,6 +13,7 @@
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NuGetPackageImportStamp>
     </NuGetPackageImportStamp>
   </PropertyGroup>
@@ -72,6 +73,10 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="flow\modules\BarcodeReader.cs" />
+    <Compile Include="flow\modules\dpm\DpmCompat.cs" />
+    <Compile Include="flow\modules\dpm\DpmDataMatrixEnhancer.cs" />
+    <Compile Include="flow\modules\dpm\Ecc200BinaryOsdDecoder.cs" />
+    <Compile Include="flow\modules\dpm\FastVisionOps.cs" />
     <Compile Include="flow\modules\CircularRegion.cs" />
     <Compile Include="DllLoader.cs" />
     <Compile Include="Model.cs" />

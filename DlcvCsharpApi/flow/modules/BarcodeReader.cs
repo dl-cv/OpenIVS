@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using ZXingCpp;
@@ -19,9 +20,9 @@ namespace DlcvModules
             Dictionary<string, object> properties = null, ExecutionContext context = null)
             : base(nodeId, title, properties, context) { }
 
-        private bool Option(string key)
+        private bool Option(string key, bool defaultValue = true)
         {
-            if (!Properties.TryGetValue(key, out object value)) return true;
+            if (!Properties.TryGetValue(key, out object value)) return defaultValue;
             if (value is bool option) return option;
             if (value is JValue token && token.Type == JTokenType.Boolean) return token.Value<bool>();
             throw new ArgumentException(key + " must be a boolean");
@@ -64,6 +65,32 @@ namespace DlcvModules
             return Cv2.IntersectConvexConvex(firstPoints, secondPoints, out Point2f[] intersection) >= area * 0.8;
         }
 
+        private static bool AllowsDataMatrix(string formats)
+        {
+            return string.IsNullOrWhiteSpace(formats) ||
+                formats.IndexOf("DataMatrix", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static JObject ToDpmDetection(string text, int width, int height, DpmEnhancementResult enhanced)
+        {
+            int right = Math.Max(0, width - 1);
+            int bottom = Math.Max(0, height - 1);
+            var line = new JArray(
+                new JArray(0, 0), new JArray(right, 0), new JArray(right, bottom), new JArray(0, bottom), new JArray(0, 0));
+            return new JObject {
+                ["category_id"] = 0, ["category_name"] = text, ["score"] = 1.0,
+                ["bbox"] = new JArray(0, 0, width, height), ["area"] = (double)width * height,
+                ["with_bbox"] = true, ["with_angle"] = false, ["angle"] = -100, ["with_mask"] = false,
+                ["extra_info"] = new JObject {
+                    ["barcode_format"] = "Data Matrix",
+                    ["polyline"] = line,
+                    ["dpm_decode_mode"] = enhanced.DecodeMode,
+                    ["dpm_enhance_ms"] = enhanced.EnhanceTotalMs,
+                    ["dpm_total_ms"] = enhanced.EndToEndMs
+                }
+            };
+        }
+
         private static JArray ReadAtBothScales(ZXingCpp.BarcodeReader reader, ImageView view)
         {
             var detections = new JArray();
@@ -100,7 +127,7 @@ namespace DlcvModules
                 else if (value is JValue token && token.Type == JTokenType.String) formats = token.Value<string>();
                 else throw new ArgumentException("formats must be a comma-separated string");
             }
-            bool rotate = Option("try_rotate"), invert = Option("try_invert");
+            bool rotate = Option("try_rotate"), invert = Option("try_invert"), enhance = Option("enhance", false);
             if (images.Count == 0) return new ModuleIO(images, results);
             using (var reader = new ZXingCpp.BarcodeReader())
             {
@@ -136,6 +163,14 @@ namespace DlcvModules
                             Cv2.EqualizeHist(gray, enhanced);
                             view = new ImageView(enhanced.Data, enhanced.Width, enhanced.Height, ImageFormat.Lum, checked((int)enhanced.Step()));
                             detections = ReadAtBothScales(reader, view);
+                        }
+                        if (detections.Count == 0 && enhance && AllowsDataMatrix(formats))
+                        {
+                            byte[] grayBytes = new byte[checked(gray.Width * gray.Height)];
+                            Marshal.Copy(gray.Data, grayBytes, 0, grayBytes.Length);
+                            var dpmResult = DpmDataMatrixEnhancer.EnhanceAndDecode(grayBytes, gray.Width, gray.Height);
+                            if (!string.IsNullOrEmpty(dpmResult.DecodedText))
+                                detections.Add(ToDpmDetection(dpmResult.DecodedText, gray.Width, gray.Height, dpmResult));
                         }
                         var entry = JObject.FromObject(wrap.ToMeta());
                         entry["type"] = "local";
