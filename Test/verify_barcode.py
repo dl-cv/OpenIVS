@@ -1,6 +1,5 @@
 """Generate synthetic fixtures and verify real C#/C++ executables (no SDK/model required)."""
 import argparse
-from base64 import b64decode
 import json
 import re
 from pathlib import Path
@@ -42,49 +41,26 @@ def low_contrast_ean13_image():
     return np.clip(image.astype(np.float32) - shadow, 0, 255).astype(np.uint8)
 
 
-def square_data_matrix(rows, scale, quiet=0):
-    n = len(rows)
-    bits = (np.asarray(rows, np.uint16)[:, None] >> np.arange(n - 1, -1, -1)) & 1
-    bitmap = np.pad(np.uint8(1 - bits) * 255, quiet, constant_values=255)
-    return bitmap.repeat(scale, 0).repeat(scale, 1)
+def low_contrast_data_matrix():
+    image = barcode_fixture("dm", scale=6)
+    y, x = np.indices(image.shape, dtype=np.float32)
+    shade = (x / image.shape[1] + y / image.shape[0] - 1) * 60
+    return np.uint8(np.rint(128 + shade + np.where(image > 0, 12, -12)))
 
 
-def uneven_data_matrix(padded=False):
-    # ECC 200 square, encoded text T1616. The contrast varies across the crop.
-    rows = (0xAAAA, 0xC859, 0xA4E8, 0xAD5B, 0x86AC, 0xCEFB, 0x9FC2, 0x8B95,
-            0xB39A, 0xF70F, 0x9578, 0xE45D, 0xA7A4, 0x9C3D, 0xEAB2, 0xFFFF)
-    bitmap = square_data_matrix(rows, 5 if padded else 6)
-    y, x = np.indices(bitmap.shape, dtype=np.float32) / bitmap.shape[0]
-    if padded:
-        image = (130 + 40 * np.sin(x * 5 + 1) * np.cos(y * 8) + np.where(bitmap > 0, 15, -15)).astype(np.uint8)
-        return cv2.copyMakeBorder(image, 7, 7, 7, 7, cv2.BORDER_CONSTANT, value=181)
-    return (125 + 25 * np.sin(x * 5) * np.cos(y * 8) + np.where(bitmap > 0, 12, -12)).astype(np.uint8)
+def enhance_image(gray):
+    kernel = np.full(3, 1 / 3, np.float32)
+    smooth = cv2.sepFilter2D(gray, cv2.CV_32F, kernel, kernel)
+    background = cv2.GaussianBlur(smooth, (9, 9), 2)
+    return cv2.addWeighted(smooth, 4.5, background, -3.5, 0, dtype=cv2.CV_8U)
 
-
-def damaged_data_matrix():
-    packed = b64decode(
-        "qqqqqrFHqC+TjuwA2jHpxZ16i97Lmbwl+Jzano4VyyvKKucwv3ucDZV00dCi77RRs0KRNN4V/ZH6js94/////6qqqqrBgb"
-        "qD3PLyks/J2YXPGKYcxbmPP9mukC6qy7JVmxqAdJ2HiuHjSpaImfWN3+5oh9yK9dn9zBy56P////8="
-    )
-    code = np.unpackbits(np.frombuffer(packed, np.uint8)).reshape(32, 32).astype(bool)
-    pristine = np.pad(np.where(code, 0, 255).astype(np.uint8), 3, constant_values=255)
-    assert zxingcpp.read_barcode(pristine, is_pure=True).bytes == b"DLCV-NATIVE-0123456789"
-    axis = np.arange(32) % 16
-    payload = np.flatnonzero(((axis != 0) & (axis != 15))[:, None] & ((axis != 0) & (axis != 15))[None, :])
-    selected = np.random.default_rng(26).choice(payload, 40, replace=False)
-    values = np.where(code, 42, 200).astype(np.float32)
-    values.flat[selected] = np.where(code.flat[selected], 124, 111)
-    gray = np.pad(values, 3, constant_values=211).repeat(5, 0).repeat(5, 1)
-    y, x = np.mgrid[-1:1:190j, -1:1:190j]
-    return np.uint8(np.clip(cv2.GaussianBlur(gray, (0, 0), .8) + 9 * np.sin(2 * x) * y
-                            + np.random.default_rng(17).normal(0, 4, gray.shape), 0, 255))
 
 def read_reference(image, enhance):
     codes = zxingcpp.read_barcodes(image, try_downscale=True, text_mode=zxingcpp.TextMode.HRI)
     if codes or not enhance:
         return codes
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
-    return zxingcpp.read_barcodes(cv2.equalizeHist(gray), try_downscale=True, text_mode=zxingcpp.TextMode.HRI)
+    return zxingcpp.read_barcodes(enhance_image(gray), try_downscale=True, text_mode=zxingcpp.TextMode.HRI)
 
 
 def mixed_scale_qr_image():
@@ -140,27 +116,17 @@ def main():
         add(name + "-bgr", cv2.cvtColor(im, cv2.COLOR_GRAY2BGR), [text])
         add(name + "-bgra", cv2.cvtColor(im, cv2.COLOR_GRAY2BGRA), [text])
         add(name + "-inverted", 255-im, [] if name == "code128" else [text])
-    low_contrast = low_contrast_ean13_image()
-    assert zxingcpp.read_barcodes(low_contrast, text_mode=zxingcpp.TextMode.HRI) == []
-    add("ean13-low-contrast-default", low_contrast, [])
-    add("ean13-low-contrast-enhanced", low_contrast, ["5345898399924"], enhance=True)
-    uneven = uneven_data_matrix()
-    assert not read_reference(uneven, False) and not read_reference(uneven, True)
-    add("dm-uneven-default", uneven, [])
-    add("dm-uneven-recovered", uneven, ["T1616"], enhance=True)
-    uneven_padded = uneven_data_matrix(padded=True)
-    assert not read_reference(uneven_padded, False) and not read_reference(uneven_padded, True)
-    add("dm-padded-default", uneven_padded, [])
-    add("dm-padded-recovered", uneven_padded, ["T1616"], enhance=True)
-    damaged = damaged_data_matrix()
-    assert not read_reference(damaged, False) and not read_reference(damaged, True)
-    add("dm-damaged-default", damaged, [])
-    add("dm-damaged-recovered", damaged, ["DLCV-NATIVE-0123456789"], enhance=True)
-    small_dm = square_data_matrix((0x2AA, 0x367, 0x218, 0x24D, 0x23A, 0x3A3, 0x2DA, 0x22F, 0x28A, 0x3FF), 2, 3)
-    add("dm-small-default", small_dm, ["17"])
-    add("dm-small-enhanced", small_dm, ["17"], enhance=True)
-    add("qr-small-default", barcode_fixture("qr", scale=2), ["深度视觉-QR"])
-    add("qr-small-enhanced", barcode_fixture("qr", scale=2), ["深度视觉-QR"], enhance=True)
+    add("ean13-low-contrast-default", low_contrast_ean13_image(), [])
+    low_contrast = low_contrast_data_matrix()
+    assert not read_reference(low_contrast, False)
+    assert [code.text for code in read_reference(low_contrast, True)] == ["DLCV-DM-123"]
+    add("dm-low-contrast-default", low_contrast, [])
+    add("dm-low-contrast-enhanced", low_contrast, ["DLCV-DM-123"], enhance=True)
+    for name, text in (("dm", "DLCV-DM-123"), ("qr", "深度视觉-QR")):
+        small = barcode_fixture(name, scale=2)
+        assert not read_reference(enhance_image(small), False)
+        add(name + "-small-default", small, [text])
+        add(name + "-small-enhanced", small, [text], enhance=True)
     add("blank-enhanced", np.full((60, 60), 128, np.uint8), [], enhance=True)
     add("blank", np.full((200, 200), 255, np.uint8), [])
     a, b = images["qr"], images["dm"]
@@ -192,7 +158,6 @@ def main():
             reports.append(json.loads(report.read_text(encoding="utf-8-sig")))
         assert all(len(report) == len(batch) for report in reports)
         paired_reports.extend((enhance, left, right) for left, right in zip(*reports))
-    recovered_boxes = {"dm-uneven-recovered": (0, 96), "dm-padded-recovered": (7, 80), "dm-damaged-recovered": (15, 160)}
     for enhance, left, right in paired_reports:
         name = left["name"]
         assert name == right["name"]
@@ -200,17 +165,6 @@ def main():
             for route in ("local", "flow"):
                 assert sorted(d["category_name"] for d in runtime[route]) == expected[name], (name, route, runtime[route])
             assert normalized(runtime["local"], local=True) == normalized(runtime["flow"]), (name, "local vs flow", runtime)
-        if name in recovered_boxes:
-            start, width = recovered_boxes[name]
-            end = start + width
-            reference_quad = np.float32([[start, start], [end, start], [end, end], [start, end]])
-            for runtime in (left, right):
-                info = runtime["local"][0]["extra_info"]
-                assert info["barcode_format"] == "Data Matrix" and info["polyline"][0] == info["polyline"][-1]
-                quad = cv2.convexHull(np.float32(info["polyline"][:-1]))
-                area, _ = cv2.intersectConvexConvex(reference_quad, quad)
-                assert area / (width * width + cv2.contourArea(quad) - area) >= .85, (name, info)
-            continue
         assert normalized(left["local"]) == normalized(right["local"]), (name, "C# vs C++")
         image = images[name]
         if image.ndim == 3 and image.shape[2] == 4:
@@ -226,7 +180,7 @@ def main():
     actual = {left["name"]: (left["local"], right["local"]) for _, left, right in paired_reports}
     for name in ("qr-small", "dm-small"):
         assert actual[name + "-default"] == actual[name + "-enhanced"], name
-    print(f"PASS: {len(expected)} fixtures: C#/C++ module and flow results, Data Matrix recovery and coordinate checks")
+    print(f"PASS: {len(expected)} fixtures: C#/C++ module and flow results, enhancement and coordinate checks")
 
 
 if __name__ == "__main__":

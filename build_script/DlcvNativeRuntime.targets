@@ -15,7 +15,6 @@
     <Error Condition="!Exists('%(_DlcvRuntimeOutput.FullPath)')" Text="本次引用工程的 DLL 不存在：%(_DlcvRuntimeOutput.FullPath)" />
     <ItemGroup>
       <_BarcodeRuntime Include="%(_DlcvRuntimeOutput.RootDir)%(_DlcvRuntimeOutput.Directory)ZXing.dll" />
-      <_BarcodeRuntime Include="%(_DlcvRuntimeOutput.RootDir)%(_DlcvRuntimeOutput.Directory)dlcv_datamatrix_runtime.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(_BarcodeRuntime)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_DlcvRuntimeOutput)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="false" />

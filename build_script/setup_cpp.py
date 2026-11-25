@@ -17,7 +17,6 @@ def main():
         author_email="ypw@dlcv.ai",
         url="",
         keywords="AI, Deep Learning, Computer Vision",
-        license_files=["LICENSE", "third_party/scipy/LICENSE.txt"],
         packages=[package_name],
         package_data={package_name: ["*"]},
         options={

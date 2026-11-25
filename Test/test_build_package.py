@@ -21,12 +21,6 @@ class CopyPackageFilesTest(unittest.TestCase):
             for file_name in build_package.PACKAGE_OUTPUT_FILE_NAMES:
                 (output_dir / file_name).write_bytes(file_name.encode("utf-8"))
 
-            opencv_name = "opencv_world4100.dll"
-            (output_dir / opencv_name).write_bytes(b"opencv runtime")
-            (output_dir / "opencv_world4100d.dll").write_bytes(b"debug runtime")
-            notices = repo_root / "dlcv_infer_cpp/native/datamatrix/bin/x64/Release/opencv_licenses"
-            notices.mkdir(parents=True)
-            (notices / "sample-LICENSE").write_bytes(b"opencv notice")
             rpc_exe_source.write_bytes(b"rpc executable")
             (output_dir / "AIModelRPC.exe").write_bytes(b"old rpc executable")
             (output_dir / "DlcvDemo.exe").write_bytes(b"unexpected executable")
@@ -45,7 +39,7 @@ class CopyPackageFilesTest(unittest.TestCase):
                 signed_executables = build_package.copy_package_files()
 
             expected_names = set(build_package.PACKAGE_OUTPUT_FILE_NAMES)
-            expected_names.update({build_package.RPC_EXE_NAME, "hasp_26146.ini", opencv_name, notices.name})
+            expected_names.update({build_package.RPC_EXE_NAME, "hasp_26146.ini"})
             actual_names = {path.name for path in staging_dir.iterdir()}
 
             self.assertEqual(expected_names, actual_names)
@@ -61,9 +55,7 @@ class CopyPackageFilesTest(unittest.TestCase):
             self.assertNotIn("DlcvDemo.exe.config", actual_names)
             self.assertNotIn("old-runtime.dll", actual_names)
             self.assertNotIn("dlcv_infer_cpp.dll", actual_names)
-            self.assertNotIn("opencv_world4100d.dll", actual_names)
-            self.assertEqual(b"opencv runtime", (staging_dir / opencv_name).read_bytes())
-            self.assertEqual(b"opencv notice", (staging_dir / notices.name / "sample-LICENSE").read_bytes())
+            self.assertNotIn("opencv_world4100.dll", actual_names)
             self.assertNotIn("ZXing-LICENSE.txt", actual_names)
             self.assertNotIn("ZXing-NOTICE.txt", actual_names)
 

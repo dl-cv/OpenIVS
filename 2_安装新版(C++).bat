@@ -9,17 +9,14 @@ cd /d "%~dp0dist_cpp" || exit /b 1
 set "LATEST="
 for /f "delims=" %%a in ('dir /b /a-d /od dlcvpro_infer_cpp-*.whl 2^>nul') do @set "LATEST=%%a"
 if not defined LATEST exit /b 1
-set "RUNTIME="
-for /f "tokens=2 delims=-" %%V in ("%LATEST%") do set "RUNTIME=dlcv_datamatrix_runtime-%%V-py3-none-win_amd64.whl"
-if not exist "%RUNTIME%" exit /b 1
 if defined TARGET goto install_target
-python -c "import sysconfig; from dlcv_pkg_updater.package_file_guard import ensure_package_files_available; ensure_package_files_available('dlcvpro_infer_cpp', [sysconfig.get_path('purelib')]); ensure_package_files_available('dlcv_datamatrix_runtime', [sysconfig.get_path('purelib')])"
+python -c "import sysconfig; from dlcv_pkg_updater.package_file_guard import ensure_package_files_available; ensure_package_files_available('dlcvpro_infer_cpp', [sysconfig.get_path('purelib')])"
 if errorlevel 1 exit /b %errorlevel%
-python -m pip install --force-reinstall "%LATEST%" "%RUNTIME%"
+python -m pip install --force-reinstall "%LATEST%"
 set "RESULT=%errorlevel%"
 pause
 exit /b %RESULT%
 
 :install_target
-python -m pip install --no-deps --upgrade --target "%TARGET%" "%LATEST%" "%RUNTIME%"
+python -m pip install --no-deps --upgrade --target "%TARGET%" "%LATEST%"
 exit /b %errorlevel%

@@ -4,7 +4,6 @@ using System.Linq;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
 using ZXingCpp;
-using Point = OpenCvSharp.Point;
 
 namespace DlcvModules
 {
@@ -36,25 +35,20 @@ namespace DlcvModules
             {
                 var pos = code.Position;
                 var points = new[] { pos.TopLeft, pos.TopRight, pos.BottomRight, pos.BottomLeft };
-                detections.Add(ToDetection(code.Text, code.Format.ToString(), points.Select(p => new Point(p.X, p.Y)).ToArray()));
+                int x = points.Min(p => p.X), y = points.Min(p => p.Y);
+                int width = points.Max(p => p.X) - x, height = points.Max(p => p.Y) - y;
+                double area = 0;
+                for (int j = 0; j < 4; j++) area += (double)points[j].X * points[(j + 1) % 4].Y - (double)points[j].Y * points[(j + 1) % 4].X;
+                var line = new JArray(points.Select(p => new JArray(p.X, p.Y)));
+                line.Add(new JArray(points[0].X, points[0].Y));
+                detections.Add(new JObject {
+                    ["category_id"] = 0, ["category_name"] = code.Text, ["score"] = 1.0,
+                    ["bbox"] = new JArray(x, y, width, height), ["area"] = Math.Abs(area) / 2,
+                    ["with_bbox"] = true, ["with_angle"] = false, ["angle"] = -100, ["with_mask"] = false,
+                    ["extra_info"] = new JObject { ["barcode_format"] = code.Format.ToString(), ["polyline"] = line }
+                });
             }
             return detections;
-        }
-
-        private static JObject ToDetection(string text, string format, Point[] points)
-        {
-            int x = points.Min(p => p.X), y = points.Min(p => p.Y);
-            int width = points.Max(p => p.X) - x, height = points.Max(p => p.Y) - y;
-            double area = 0;
-            for (int j = 0; j < 4; j++) area += (double)points[j].X * points[(j + 1) % 4].Y - (double)points[j].Y * points[(j + 1) % 4].X;
-            var line = new JArray(points.Select(p => new JArray(p.X, p.Y)));
-            line.Add(new JArray(points[0].X, points[0].Y));
-            return new JObject {
-                ["category_id"] = 0, ["category_name"] = text, ["score"] = 1.0,
-                ["bbox"] = new JArray(x, y, width, height), ["area"] = Math.Abs(area) / 2,
-                ["with_bbox"] = true, ["with_angle"] = false, ["angle"] = -100, ["with_mask"] = false,
-                ["extra_info"] = new JObject { ["barcode_format"] = format, ["polyline"] = line }
-            };
         }
 
         private static bool SameRegion(JToken first, JToken second)
@@ -106,25 +100,19 @@ namespace DlcvModules
                 else if (value is JValue token && token.Type == JTokenType.String) formats = token.Value<string>();
                 else throw new ArgumentException("formats must be a comma-separated string");
             }
-            bool rotate = Option("try_rotate"), invert = Option("try_invert"), enhance = Option("enhance", false);
+            bool rotate = Option("try_rotate"), invert = Option("try_invert");
+            bool enhance = Option("enhance", false);
             if (images.Count == 0) return new ModuleIO(images, results);
             using (var reader = new ZXingCpp.BarcodeReader())
             {
                 reader.TryRotate = rotate;
                 reader.TryInvert = invert;
                 reader.TextMode = TextMode.HRI;
-                bool allowDataMatrix = true;
                 if (!string.IsNullOrWhiteSpace(formats))
                 {
                     if (!BarcodeFormats.TryParse(formats, out BarcodeFormats parsed))
                         throw new ArgumentException("Invalid barcode formats: " + formats);
                     reader.Formats = parsed;
-                    if (enhance)
-                    {
-                        BarcodeFormat[] requested = parsed;
-                        allowDataMatrix = requested.Length == 0 || parsed.Contains(BarcodeFormat.DataMatrix) ||
-                            requested.Any(f => BarcodeFormats.List(f).Contains(BarcodeFormat.DataMatrix));
-                    }
                 }
                 for (int i = 0; i < images.Count; i++)
                 {
@@ -144,26 +132,19 @@ namespace DlcvModules
                         {
                             gray = new Mat();
                             enhanced = new Mat();
-                            if (channels == 1) image.CopyTo(gray);
-                            else Cv2.CvtColor(image, gray, channels == 3 ? ColorConversionCodes.RGB2GRAY : ColorConversionCodes.RGBA2GRAY);
-                            if (allowDataMatrix)
+                            if (channels != 1)
+                                Cv2.CvtColor(image, gray, channels == 3 ? ColorConversionCodes.RGB2GRAY : ColorConversionCodes.RGBA2GRAY);
+                            using (var kernel = Mat.FromArray(new[] { 1f / 3, 1f / 3, 1f / 3 }))
+                            using (var smooth = new Mat())
+                            using (var background = new Mat())
                             {
-                                var hit = DataMatrixRecovery.Recover(gray, rotate, invert);
-                                if (hit != null) detections.Add(ToDetection(hit.Text, BarcodeFormat.DataMatrix.ToString(), hit.Corners
-                                    .Select(p => new Point((int)Math.Round(p.X), (int)Math.Round(p.Y))).ToArray()));
+                                Cv2.SepFilter2D(channels == 1 ? image : gray, smooth, MatType.CV_32F, kernel, kernel,
+                                    borderType: BorderTypes.Default | BorderTypes.Isolated);
+                                Cv2.GaussianBlur(smooth, background, new Size(9, 9), 2);
+                                Cv2.AddWeighted(smooth, 4.5, background, -3.5, 0, enhanced, MatType.CV_8U);
                             }
-                            if (detections.Count == 0)
-                            {
-                                Cv2.EqualizeHist(gray, enhanced);
-                                view = new ImageView(enhanced.Data, enhanced.Width, enhanced.Height, ImageFormat.Lum, checked((int)enhanced.Step()));
-                                detections = ReadAtBothScales(reader, view);
-                            }
-                            if (allowDataMatrix && detections.Count == 0)
-                            {
-                                var hit = DataMatrixRecovery.RecoverDeep(gray, rotate, invert);
-                                if (hit != null) detections.Add(ToDetection(hit.Text, BarcodeFormat.DataMatrix.ToString(), hit.Corners
-                                    .Select(p => new Point((int)Math.Round(p.X), (int)Math.Round(p.Y))).ToArray()));
-                            }
+                            view = new ImageView(enhanced.Data, enhanced.Width, enhanced.Height, ImageFormat.Lum, checked((int)enhanced.Step()));
+                            detections = ReadAtBothScales(reader, view);
                         }
                         var entry = JObject.FromObject(wrap.ToMeta());
                         entry["type"] = "local";
