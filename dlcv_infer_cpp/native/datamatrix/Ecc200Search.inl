@@ -57,10 +57,12 @@ static float best;
 static float absval[N], lut[36][256];
 static void score(V v, float w, int n) {
   unsigned char *b = (unsigned char *)v.a;
-  for (int i = 0; i < 36; i++) {
+  for (int i = 0; i < 36; i += 4) {
     w += lut[i][b[i]];
-    if (w >= best)
-      return;
+    w += lut[i + 1][b[i + 1]];
+    w += lut[i + 2][b[i + 2]];
+    w += lut[i + 3][b[i + 3]];
+    if (w >= best) return;
   }
   best = w;
   bestv = v;
@@ -88,16 +90,27 @@ static void put(int sig, int a, int b, int c) {
   ent[i][2] = c;
 }
 static void join(int sig, int a, int b, int c) {
+  if (head[sig] < 0) return;
+  const int right[3] = {a, b, c};
+  int rightCount = 0;
+  float rightWeight = 0;
+  V rightValue = base;
+  for (int j = 0; j < 3; j++) if (right[j] >= 0) {
+    rightWeight += absval[freeidx[right[j]]];
+    add(&rightValue, &reps[right[j]]);
+    chosen[rightCount++] = freeidx[right[j]];
+  }
   for (int e = head[sig]; e >= 0; e = next[e]) {
-    int ids[6] = {a, b, c, ent[e][0], ent[e][1], ent[e][2]}, n = 0;
-    float w = 0;
-    V z = base;
-    for (int j = 0; j < 6; j++) {
-      int k = ids[j];
+    float w = rightWeight;
+    for (int j = 0; j < 3; j++) if (ent[e][j] >= 0) w += absval[freeidx[ent[e][j]]];
+    if (w >= best) continue;
+    V z = rightValue;
+    int n = rightCount;
+    for (int j = 0; j < 3; j++) {
+      int k = ent[e][j];
       if (k >= 0) {
         add(&z, &reps[k]);
         chosen[n++] = freeidx[k];
-        w += absval[freeidx[k]];
       }
     }
     score(z, w, n);
@@ -162,7 +175,7 @@ static void Search(const U *par, const float *soft, int its, int k, int depth,
       int i = order[n].idx;
       V z = pc[i], r = {0};
       int j;
-      while ((j = lead(&z)) >= 0 && lead(&basis[j]) >= 0) {
+      while ((j = lead(&z)) >= 0 && bit(&basis[j], j)) {
         add(&z, &basis[j]);
         add(&r, &repr[j]);
       }

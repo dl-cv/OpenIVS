@@ -29,7 +29,7 @@ Quad Transform(const Quad &q, const cv::Mat &matrix) {
     return {{out[0], out[1], out[2], out[3]}};
 }
 
-bool FindPolygon(const cv::Mat &image, Quad seed, Quad &corners) {
+bool FindPolygon(const cv::Mat &image, Quad seed, Quad &corners, bool nearbyAngles = false) {
     if (!cv::isContourConvex(Grid(seed.begin(), seed.end()))) return false;
     if (cv::contourArea(Grid(seed.begin(), seed.end()), true) < 0) std::swap(seed[1], seed[3]);
     Point center{};
@@ -46,7 +46,7 @@ bool FindPolygon(const cv::Mat &image, Quad seed, Quad &corners) {
     const cv::Point end(std::min(image.cols, static_cast<int>(center.x + size * 1.28f)),
                         std::min(image.rows, static_cast<int>(center.y + size * 1.28f)));
     if (end.x - origin.x < 16 || end.y - origin.y < 16) return false;
-    cv::Mat clean, small8, rotated, a, b, c;
+    cv::Mat clean, small8, rotated;
     cv::medianBlur(image(cv::Rect(origin, end)), clean, 5);
     cv::resize(clean, small8, {}, .5, .5, cv::INTER_AREA);
     const auto small = Float(small8);
@@ -56,21 +56,53 @@ bool FindPolygon(const cv::Mat &image, Quad seed, Quad &corners) {
     const auto region = cv::Rect(peak.x - radius, peak.y - radius, 2 * radius + 1, 2 * radius + 1)
                         & cv::Rect(0, 0, small.cols, small.rows);
     if (region.empty()) return false;
+    std::vector<int> widths;
+    int padding = 0;
+    for (double width = size * .4; width < size * .61; width += 3) {
+        const int n = cvRound(width), band = std::max(2, cvRound(n / 23.0));
+        widths.push_back(n);
+        padding = std::max(padding, (n + 2 * band) / 2);
+    }
+    const auto direction = seed[1] - seed[0];
+    const int nearestAngle = (cvRound(std::atan2(direction.y, direction.x) * 180 / CV_PI / 3) % 30 + 30) % 30;
     double best = -std::numeric_limits<double>::infinity();
     for (int angle = 0; angle < 90; angle += 3) {
+        const int distance = (angle / 3 - nearestAngle + 30) % 30;
+        if (nearbyAngles && distance > 1 && distance < 29) continue;
         const auto rot = cv::getRotationMatrix2D(local, angle, 1);
         cv::warpAffine(small, rotated, rot, small.size(), cv::INTER_LINEAR, cv::BORDER_REPLICATE);
-        for (double width = size * .4; width < size * .61; width += 3) {
-            const int n = cvRound(width), band = std::max(2, cvRound(n / 23.0));
+        cv::Mat padded, integral;
+        cv::copyMakeBorder(rotated, padded, padding, padding, padding, padding, cv::BORDER_REFLECT_101);
+        cv::integral(padded, integral, CV_64F);
+        // 按行扫描候选中心，只保留当前最大值及其位置。
+        for (int n : widths) {
+            const int band = std::max(2, cvRound(n / 23.0));
             const int inner = n - 2 * band, outer = n + 2 * band;
             if (inner < 1) continue;
-            cv::boxFilter(rotated, a, -1, {inner, inner}, {-1, -1}, false);
-            cv::boxFilter(rotated, b, -1, {n, n}, {-1, -1}, false);
-            cv::boxFilter(rotated, c, -1, {outer, outer}, {-1, -1}, false);
-            const cv::Mat signal = (c - b) / (outer * outer - n * n) - (b - a) / (n * n - inner * inner);
-            double value;
+            const double outsideScale = 1.0 / (outer * outer - n * n);
+            const double insideScale = 1.0 / (n * n - inner * inner);
+            double value = -std::numeric_limits<double>::infinity();
             cv::Point position;
-            cv::minMaxLoc(signal(region), nullptr, &value, nullptr, &position);
+            for (int y = 0; y < region.height; ++y) {
+                std::array<const double*, 3> top, bottom;
+                const std::array<int, 3> lengths{inner, n, outer};
+                for (int k = 0; k < 3; ++k) {
+                    const int row = region.y + y + padding - lengths[k] / 2;
+                    top[k] = integral.ptr<double>(row);
+                    bottom[k] = integral.ptr<double>(row + lengths[k]);
+                }
+                for (int x = 0; x < region.width; ++x) {
+                    std::array<float, 3> sums;
+                    for (int k = 0; k < 3; ++k) {
+                        const int left = region.x + x + padding - lengths[k] / 2;
+                        sums[k] = static_cast<float>(bottom[k][left + lengths[k]] - top[k][left + lengths[k]] - bottom[k][left] + top[k][left]);
+                    }
+                    const float outside = static_cast<float>(sums[2] * outsideScale - sums[1] * outsideScale);
+                    const float inside = static_cast<float>(sums[1] * insideScale - sums[0] * insideScale);
+                    const float score = outside - inside;
+                    if (score > value) { value = score; position = {x, y}; }
+                }
+            }
             if (value <= best) continue;
             best = value;
             position += region.tl();
@@ -104,26 +136,35 @@ bool FindPolygon(const cv::Mat &image, Quad seed, Quad &corners) {
         if (length < 1) return false;
         const Point normal = Point(-delta.y, delta.x) * static_cast<float>(1 / length);
         const Point mid = (p + q) * .5f;
+        std::array<float, 96> times;
+        std::array<Point, 96> base;
+        for (int j = 0; j < 96; ++j) {
+            times[j] = static_cast<float>(-.43 + .86 * j / 95);
+            base[j] = mid + delta * times[j];
+        }
         const auto choose = [&](double shift0, double shift1, double step, double slope0, double slope1,
                                 double stepSlope, float near, bool coarse) {
             double highest = -std::numeric_limits<double>::infinity();
             Point selected{};
-            for (double a = slope0; a < slope1; a += stepSlope)
+            const Point nearOffset = normal * near, farOffset = normal * 6.f, edgeOffset = normal * 12.f;
+            for (double a = slope0; a < slope1; a += stepSlope) {
+                std::array<double, 96> slopes;
+                for (int j = 0; j < 96; ++j) slopes[j] = a * times[j];
                 for (double s = shift0; s < shift1; s += step) {
                     double f = 0, far = 0, edge = 0;
                     for (int j = 0; j < 96; ++j) {
-                        const float t = static_cast<float>(-.43 + .86 * j / 95);
-                        const auto at = mid + delta * t + normal * static_cast<float>(s + a * t);
-                        const float outside = Pixel(data, at - normal * near, true);
-                        f += outside - Pixel(data, at + normal * near, true);
+                        const auto at = base[j] + normal * static_cast<float>(s + slopes[j]);
+                        const float outside = Pixel(data, at - nearOffset, true);
+                        f += outside - Pixel(data, at + nearOffset, true);
                         if (coarse) {
-                            far += Pixel(data, at - normal * 6.f, true) - Pixel(data, at + normal * 6.f, true);
-                            edge += Pixel(data, at - normal * 12.f, true) - outside;
+                            far += Pixel(data, at - farOffset, true) - Pixel(data, at + farOffset, true);
+                            edge += Pixel(data, at - edgeOffset, true) - outside;
                         }
                     }
                     const double score = f + .7 * far - .45 * std::max(0., edge);
                     if (score > highest) { highest = score; selected = Point(static_cast<float>(s), static_cast<float>(a)); }
                 }
+            }
             return selected;
         };
         const float range = size * .12f;
@@ -152,7 +193,7 @@ bool GetGrids(const cv::Mat &a, const Quad &quad, bool rotate, std::array<Grid, 
     grids[1] = Refine(im, grids[0], finder, side);
     grids[2] = grids[0];
     // 格线采样前先锐化，再分别拟合各区域。
-    const auto sharp = Sharpen(Blur(im, 1), 2, 2.8);
+    const auto sharp = Sharpen(low, 2, 2.8);
     FitRegionsFromSignal(sharp, grids[2], side, 2);
     grids[3] = Refine(im, grids[2], finder, side);
     return true;
@@ -319,20 +360,32 @@ bool Confirm(const std::pair<Fields, cv::Mat> &signals, std::initializer_list<in
 }
 
 bool FirstFrames(const cv::Mat &a, const cv::Mat &original, const cv::Mat &mapping, bool rotate,
-                 Signals &z, Quad &output) {
+                 Signals &z, Quad &output, DlcvDataMatrixVerify verify = nullptr, void* context = nullptr, bool* earlyFound = nullptr, bool nearbyAngles = false) {
     const auto rough = RoughBox(a);
     Quad tight{};
-    if (!FindPolygon(a, rough, tight)) return false;
+    if (!FindPolygon(a, rough, tight, nearbyAngles)) return false;
     std::array<Grid, 4> grids;
     if (!GetGrids(a, tight, rotate, grids)) return false;
     output = MapCorners(grids[0], side, cv::Mat::eye(3, 3, CV_64F));
     if (!cv::isContourConvex(Grid(output.begin(), output.end()))) return false;
     for (const auto &g : grids) z.push_back(MakeSignal(a, g));
+    if (verify && earlyFound) {
+        Fields fields(49);
+        const auto mid = MedianSlice(z, 0, 4, 1);
+        fields[14] = MedianSlice(z, 0, 4, 1, 4);
+        fields[30] = MedianSlice(z, 1, 2, 1, 4);
+        fields[48] = MedianSlice(z, 0, 4, 1, 7, 8);
+        Observations seen;
+        if (Confirm({std::move(fields), Uncertainty(z, mid, 3)}, {14,30,48}, 1, 7653, seen, verify, context)) {
+            *earlyFound = true;
+            return true;
+        }
+    }
     const bool same = a.data == original.data && cv::norm(mapping, cv::Mat::eye(2, 3, CV_32F)) == 0;
     std::vector<Quad> quads;
     if (!same) {
         Quad fitted{};
-        if (!FindPolygon(original, Transform(rough, mapping), fitted)) return false;
+        if (!FindPolygon(original, Transform(rough, mapping), fitted, nearbyAngles)) return false;
         quads.push_back(Order(fitted));
     }
     quads.push_back(Order(Transform(tight, mapping)));
@@ -353,35 +406,45 @@ bool FirstFrames(const cv::Mat &a, const cv::Mat &original, const cv::Mat &mappi
     return true;
 }
 
+struct RecoveryState {
+    Quad corners{};
+    Observations seen;
+    bool ready = false;
+};
+
 bool TryLight(const cv::Mat &a, const cv::Mat &original, const cv::Mat &mapping, bool rotate,
-              float *corners, DlcvDataMatrixVerify verify, void *context) {
-    Quad output{};
+              float *corners, DlcvDataMatrixVerify verify, void *context, bool nearbyAngles,
+              int stage, RecoveryState& state) {
     Signals z;
     z.reserve(56);
-    if (!FirstFrames(a, original, mapping, rotate, z, output)) return false;
     const auto found = [&] {
         for (int i = 0; i < 4; ++i) {
-            corners[2 * i] = output[i].x;
-            corners[2 * i + 1] = output[i].y;
+            corners[2 * i] = state.corners[i].x;
+            corners[2 * i + 1] = state.corners[i].y;
         }
         return true;
     };
-    Observations seen;
-    const auto first = {0,2,7,9,10,25,34,48,64,14};
-    const auto fields = FirstSignals(z);
-    if (Confirm(fields, first, 8, 3321, seen, verify, context) ||
-        Confirm(fields, {30,34,64,2}, 12, 7653, seen, verify, context)) return found();
-
+    auto& seen = state.seen;
+    if (stage == 0) {
+        bool earlyFound = false;
+        state.ready = FirstFrames(a, original, mapping, rotate, z, state.corners, verify, context, &earlyFound, nearbyAngles);
+        if (!state.ready) return false;
+        if (earlyFound) return found();
+        const auto fields = FirstSignals(z);
+        return (Confirm(fields, {0,2,7,9,10,25,34,48,64,14}, 8, 3321, seen, verify, context) ||
+            Confirm(fields, {30,34,64,2}, 12, 7653, seen, verify, context)) && found();
+    }
+    if (!state.ready) return false;
     const auto resample = [&](double scale, std::initializer_list<int> order, int iterations, int seed) {
         cv::Mat scaled;
         cv::resize(a, scaled, {}, scale, scale, cv::INTER_CUBIC);
         Signals augmented;
         Quad scaledCorners{};
-        return FirstFrames(scaled, scaled, cv::Mat::eye(2, 3, CV_32F), rotate, augmented, scaledCorners) &&
+        return FirstFrames(scaled, scaled, cv::Mat::eye(2, 3, CV_32F), rotate, augmented, scaledCorners, nullptr, nullptr, nullptr, nearbyAngles) &&
             Confirm(FirstSignals(augmented), order, iterations, seed, seen, verify, context);
     };
     // 改变采样相位，让靠近格线的采样点得到另一组置信度。
-    if (resample(1.1, {34,48,14}, 12, 7653)) return found();
+    if (stage == 1) return resample(1.1, {34,48,14}, 12, 7653) && found();
 
     const auto rough = RoughBox(a);
     std::array<Quad, 2> sourceQuads;
@@ -389,13 +452,13 @@ bool TryLight(const cv::Mat &a, const cv::Mat &original, const cv::Mat &mapping,
     Quad target{};
     cv::Mat transform;
     z.clear();
-    if (!FindPolygon(original, Transform(rough, mapping), sourceQuads[0])) return false;
+    if (!FindPolygon(original, Transform(rough, mapping), sourceQuads[0], nearbyAngles)) return false;
     Point center{};
     for (const auto &p : rough) center += p * .25f;
     auto shifted = rough;
     // 移动粗框后重新拟合，避免所有网格继承同一处边界偏差。
     for (auto &p : shifted) p = center + (p - center) * .9613578f + Point(-1.7452953f, -5.8736502f);
-    if (!FindPolygon(original, Transform(shifted, mapping), sourceQuads[1])) return false;
+    if (!FindPolygon(original, Transform(shifted, mapping), sourceQuads[1], nearbyAngles)) return false;
     const std::array<int, 7> sizes{160,176,192,224,144,160,224};
     for (size_t i = 0; i < sizes.size(); ++i) {
         const auto canvas = Rectify(original, sourceQuads[i % 2], sizes[i], target, transform);
@@ -428,24 +491,39 @@ int __cdecl dlcv_datamatrix_read_v2(const unsigned char *gray, int width, int he
         cv::minMaxLoc(a, &low, &high);
         if (high - low < 5) return 0;
         const bool rotate = (flags & 1) != 0;
-        const auto read = [&](const cv::Mat &image, const cv::Mat &full) {
-            if (TryLight(image, full, mapping, rotate, corners, verify, context)) return true;
-            if (!rotate) return false;
-            // 调换相对边的采样方向，复查边界拟合接近的候选。
-            cv::Mat reversed;
-            cv::rotate(image, reversed, cv::ROTATE_180);
-            cv::Mat reverseMap = mapping.clone();
-            for (int row = 0; row < 2; ++row) {
-                reverseMap.at<float>(row, 2) += mapping.at<float>(row, 0) * (width - 1) + mapping.at<float>(row, 1) * (height - 1);
-                reverseMap.at<float>(row, 0) *= -1; reverseMap.at<float>(row, 1) *= -1;
+        const auto read = [&](const cv::Mat &image, const cv::Mat &full, bool nearbyAngles = false) {
+            std::array<RecoveryState, 2> states;
+            cv::Mat reversed, reverseMap;
+            if (rotate) {
+                cv::rotate(image, reversed, cv::ROTATE_180);
+                reverseMap = mapping.clone();
+                for (int row = 0; row < 2; ++row) {
+                    reverseMap.at<float>(row, 2) += mapping.at<float>(row, 0) * (width - 1) + mapping.at<float>(row, 1) * (height - 1);
+                    reverseMap.at<float>(row, 0) *= -1; reverseMap.at<float>(row, 1) *= -1;
+                }
             }
-            if (!TryLight(reversed, source ? full : reversed, source ? reverseMap : cv::Mat::eye(2, 3, CV_32F), true, corners, verify, context)) return false;
-            for (int i = 0; i < 8; i += 2) {
-                corners[i] = static_cast<float>(width - 1) - corners[i];
-                corners[i + 1] = static_cast<float>(height - 1) - corners[i + 1];
+            // 两个方向各完成初始与重采样后，再进入较长的多组采样。
+            const std::array<std::pair<int, int>, 6> stages{{{0,0}, {0,1}, {1,0}, {1,1}, {0,2}, {1,2}}};
+            for (const auto& entry : stages) {
+                const int direction = entry.first, stage = entry.second;
+                if (direction == 0) {
+                    if (TryLight(image, full, mapping, rotate, corners, verify, context, nearbyAngles, stage, states[0])) return true;
+                } else if (rotate && TryLight(reversed, source ? full : reversed,
+                    source ? reverseMap : cv::Mat::eye(2, 3, CV_32F), true, corners, verify, context, nearbyAngles, stage, states[1])) {
+                    for (int i = 0; i < 8; i += 2) {
+                        corners[i] = static_cast<float>(width - 1) - corners[i];
+                        corners[i + 1] = static_cast<float>(height - 1) - corners[i + 1];
+                    }
+                    return true;
+                }
             }
-            return true;
+            return false;
         };
+        // 优先使用输入四角的方向；双采样校验未通过时仍执行完整角度搜索。
+        try {
+            if (read(a, original, true)) return 1;
+        } catch (const std::exception&) {
+        }
         if (read(a, original)) return 1;
         if (flags & 2) {
             cv::Mat negative;

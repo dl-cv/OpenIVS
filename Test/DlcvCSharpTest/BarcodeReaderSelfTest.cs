@@ -11,6 +11,31 @@ namespace DlcvCSharpTest
 {
     internal static class BarcodeReaderSelfTest
     {
+        private static void CheckSharedOriginals()
+        {
+            using (var roi = new Mat(40, 40, MatType.CV_8UC1, Scalar.All(128)))
+            using (var first = new Mat(48, 48, MatType.CV_8UC3, Scalar.All(96)))
+            using (var second = new Mat(48, 48, MatType.CV_8UC3, Scalar.All(160)))
+            {
+                var state = new TransformationState(48, 48, affine2x3: new double[] { 1, 0, 0, 0, 1, 0 });
+                var images = new List<ModuleImage> {
+                    new ModuleImage(roi, first, state, 0), new ModuleImage(roi, first, state, 0),
+                    new ModuleImage(roi, second, state, 1) };
+                var reader = new BarcodeReader(1, properties: new Dictionary<string, object> { ["enhance"] = true });
+                var results = reader.Process(images).ResultList;
+                if (results.Count != 3 || results.Where((entry, index) =>
+                    (int)entry["index"] != index || entry["sample_results"].HasValues).Any())
+                    throw new Exception("共享原图的结果顺序或空白图结果错误");
+                images.Add(null);
+                bool rejected = false;
+                try { reader.Process(images); }
+                catch (ArgumentException) { rejected = true; }
+                if (!rejected) throw new Exception("无效图像未被拒绝");
+                if (first.At<Vec3b>(0, 0).Item0 != 96 || second.At<Vec3b>(0, 0).Item0 != 160 || roi.At<byte>(0, 0) != 128)
+                    throw new Exception("读码修改或释放了调用方图像");
+            }
+        }
+
         // barcode-selftest <manifest.json> <flow.json> <output.json>
         public static int Run(string[] args)
         {
@@ -82,6 +107,7 @@ namespace DlcvCSharpTest
                 }
             }
             if (new BarcodeReader(1).Process().ResultList.Count != 0) throw new Exception("Empty batch failed");
+            CheckSharedOriginals();
             File.WriteAllText(args[3], output.ToString(), new System.Text.UTF8Encoding(false));
             Console.WriteLine("Barcode selftest passed: " + output.Count);
             return 0;

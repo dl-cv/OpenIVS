@@ -130,10 +130,15 @@ Geometry Score(const cv::Mat &im, const Quad &p, int known = 0) {
             break;
         const auto base = Maps(n, p);
         std::vector<float> v(n * n);
+        std::vector<int> edges;
+        for (int i = 0; i < n * n; ++i) {
+            const int x = i % n % s, y = i / n % s;
+            if (x == 0 || x == s - 1 || y == 0 || y == s - 1) edges.push_back(i);
+        }
         for (float dx : {-2.f, 0.f, 2.f})
             for (float dy : {-2.f, 0.f, 2.f}) {
                 const Point offset(dx, dy);
-                for (int i = 0; i < n * n; ++i)
+                for (int i : edges)
                     v[i] = Pixel(im, base[i] + offset, true);
                 for (int r = 0; r < 4; ++r) {
                     double score = 0;
@@ -327,15 +332,20 @@ Grid Optimize(const cv::Mat &im, const Geometry &g) {
     std::array<std::vector<float>, 2> samples;
     for (int k = 0; k < 2; ++k)
         samples[k].resize(std::count(m.begin(), m.end(), k ? 1 : -1));
+    struct FinderPoint { int group; std::array<float, 4> weights; };
+    std::vector<FinderPoint> points;
+    for (int i = 0; i < g.n * g.n; ++i) if (m[i]) {
+        const float x = (i % g.n + .5f) / g.n, y = (i / g.n + .5f) / g.n;
+        points.push_back({m[i] > 0, {{(1 - x) * (1 - y), x * (1 - y), x * y, (1 - x) * y}}});
+    }
     const auto loss = [&](const Params &p) {
         const auto q = Shift(p, g.corners);
         int count[2] = {};
-        for (int i = 0; i < g.n * g.n; ++i)
-            if (m[i]) {
-                const auto v = Pixel(high, Weighted(q, (i % g.n + .5f) / g.n, (i / g.n + .5f) / g.n));
-                const int c = m[i] > 0;
-                samples[c][count[c]++] = v;
-            }
+        for (const auto& point : points) {
+            const auto& w = point.weights;
+            const auto v = Pixel(high, q[0] * w[0] + q[1] * w[1] + q[2] * w[2] + q[3] * w[3]);
+            samples[point.group][count[point.group]++] = v;
+        }
         double penalty = 0;
         for (auto d : p)
             penalty += d * d;
