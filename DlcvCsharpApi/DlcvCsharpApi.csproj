@@ -93,6 +93,7 @@
     <Compile Include="flow\modules\ResultFilterRegion.cs" />
     <Compile Include="flow\modules\ResultCategoryOverride.cs" />
     <Compile Include="flow\modules\CategoryBlock.cs" />
+    <Compile Include="flow\modules\ImageAngle.cs" />
     <Compile Include="flow\modules\StrokeToPoints.cs" />
     <Compile Include="flow\modules\Templates.cs" />
     <Compile Include="flow\modules\Visualize.cs" />

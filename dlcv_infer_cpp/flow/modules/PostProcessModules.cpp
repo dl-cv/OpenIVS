@@ -10,6 +10,9 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <iomanip>
+#include <locale>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -27,6 +30,59 @@ namespace dlcv_infer {
 namespace flow {
 
 static constexpr double kPi = 3.14159265358979323846;
+
+class ImageAngleModule final : public BaseModule {
+public:
+    using BaseModule::BaseModule;
+
+    static std::string AngleLabel(const ModuleImage& image, int places) {
+        // 本地运行时以空数组表示未发生变换的单位矩阵。
+        const auto m = image.TransformState.AffineMatrix2x3.empty()
+            ? std::vector<double>{1, 0, 0, 0, 1, 0} : image.TransformState.AffineMatrix2x3;
+        if (m.size() != 6 || !std::all_of(m.begin(), m.end(), [](double v) { return std::isfinite(v); }))
+            throw std::invalid_argument("获取图像角度需要有限的 2×3 变换矩阵");
+        const double xx = m[0] * m[0] + m[3] * m[3];
+        const double yy = m[1] * m[1] + m[4] * m[4];
+        const double xy = m[0] * m[1] + m[3] * m[4];
+        const double scale = (xx + yy) / 2;
+        if (!(scale > 0) || !std::isfinite(scale) || !(m[0] * m[4] - m[1] * m[3] > 0) ||
+            std::abs(xx / scale - 1) > 1e-6 || std::abs(yy / scale - 1) > 1e-6 || std::abs(xy / scale) > 1e-6)
+            throw std::invalid_argument("获取图像角度仅支持旋转、平移和正等比缩放矩阵");
+        double angle = std::atan2(m[1], m[0]) * 180 / kPi;
+        if (angle < 0) angle += 360;
+        // 用十二位十进制定点整数消除半值附近噪声，再按目标位数半入舍入。
+        const int64_t ticks = static_cast<int64_t>(std::round(angle * 1e12));
+        const int64_t divisor = places == 0 ? 1000000000000LL : places == 1 ? 100000000000LL : 10000000000LL;
+        const int units = places == 0 ? 1 : places == 1 ? 10 : 100;
+        const auto rounded = ((ticks + divisor / 2) / divisor) % (360 * units);
+        std::ostringstream label;
+        label.imbue(std::locale::classic());
+        label << std::fixed << std::setprecision(places) << static_cast<double>(rounded) / units;
+        return label.str();
+    }
+
+    ModuleIO Process(const std::vector<ModuleImage>& imageList, const Json& resultList) override {
+        const Json placesValue = Properties.value("decimal_places", Json(0));
+        if (!placesValue.is_number_integer() || placesValue < 0 || placesValue > 2)
+            throw std::invalid_argument("小数位数必须是 0～2 的整数");
+        const int places = placesValue.get<int>();
+        Json output = resultList.is_array() ? resultList : Json::array();
+        for (auto& entry : output) {
+            if (!entry.is_object() || !entry.contains("type") || entry.at("type") != "local" ||
+                !entry.contains("sample_results") || !entry.at("sample_results").is_array() || entry.at("sample_results").empty()) continue;
+            if (!entry.contains("index") || !entry.at("index").is_number_integer() ||
+                entry.at("index") < 0 || entry.at("index") >= imageList.size())
+                throw std::invalid_argument("获取图像角度：结果 index 无法定位输入图像");
+            const auto label = AngleLabel(imageList.at(entry.at("index").get<size_t>()), places);
+            for (auto& detection : entry["sample_results"])
+                if (detection.is_object()) detection["category_name"] = label;
+            if (entry.contains("category_name")) entry["category_name"] = label;
+        }
+        return ModuleIO(imageList, std::move(output));
+    }
+};
+
+DLCV_FLOW_REGISTER_MODULE("post_process/image_angle", ImageAngleModule);
 
 class CategoryBlockModule final : public BaseModule {
 public:

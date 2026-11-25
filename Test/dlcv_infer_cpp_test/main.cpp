@@ -46,6 +46,7 @@
 #include "../DvsTempArtifactMonitor.h"
 #include "dlcv_infer.h"
 #include "CategoryBlockSelfTest.h"
+#include "ImageAngleSelfTest.h"
 #include "RegionMaskSelfTest.h"
 #include "MaskAreaSelfTest.h"
 #include "SlidingMergeSelfTest.h"
@@ -5545,6 +5546,7 @@ int wmain(int argc, wchar_t* argv[]) {
     if (argc >= 2 && std::wstring(argv[1]) == L"mask-area-selftest") {
         return RunMaskAreaSelfTest();
     }
+    if (argc >= 2 && std::wstring(argv[1]) == L"image-angle-selftest") return RunImageAngleSelfTest(argc, argv);
     if (argc >= 2 && std::wstring(argv[1]) == L"category-block-selftest") return RunCategoryBlockSelfTest(argc, argv);
     if (argc >= 2 && std::wstring(argv[1]) == L"region-mask-selftest") {
         return RunRegionMaskSelfTest();
