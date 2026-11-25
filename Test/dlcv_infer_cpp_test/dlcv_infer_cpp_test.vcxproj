@@ -81,6 +81,7 @@
     <ClInclude Include="..\common\NativeSharedIndexTestHelper.h" />
     <ClInclude Include="SlidingMergeSelfTest.h" />
     <ClInclude Include="CategoryBlockSelfTest.h" />
+    <ClInclude Include="ImageAngleSelfTest.h" />
     <ClInclude Include="AlgorithmModulesSelfTest.h" />
     <ClInclude Include="Demo2ParallelSelfTest.h" />
   </ItemGroup>

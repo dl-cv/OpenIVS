@@ -555,6 +555,13 @@ namespace DlcvModules
                 isAxisAlignedTransform = IsAxisAlignedTransform(geometryTransform);
             }
             var bboxLocal = detObj["bbox"] as JArray;
+            // 裁图等模块输出 [cx,cy,w,h] + angle；按水平框处理会把中心当左上角。
+            if (bboxLocal != null && bboxLocal.Count == 4 && (detObj["with_angle"]?.Value<bool>() ?? false))
+            {
+                double angle = detObj["angle"]?.Value<double?>() ?? -100.0;
+                if (angle != -100.0)
+                    bboxLocal = new JArray(bboxLocal[0], bboxLocal[1], bboxLocal[2], bboxLocal[3], angle);
+            }
             bool isRot = bboxLocal != null && bboxLocal.Count == 5;
 
             if (isRot)

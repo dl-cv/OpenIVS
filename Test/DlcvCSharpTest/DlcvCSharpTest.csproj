@@ -104,6 +104,8 @@
     <Compile Include="GpuProcessMemorySample.cs" />
     <Compile Include="MemoryValidationSelfTest.cs" />
     <Compile Include="CategoryBlockSelfTest.cs" />
+    <Compile Include="ImageAngleSelfTest.cs" />
+    <Compile Include="ReturnJsonRBoxSelfTest.cs" />
     <Compile Include="RegionMaskSelfTest.cs" />
     <Compile Include="MaskAreaSelfTest.cs" />
     <Compile Include="DvsTempArtifactMonitor.cs" />
