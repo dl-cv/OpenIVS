@@ -7460,13 +7460,13 @@ namespace DlcvCSharpTest
         {
             Console.WriteLine("==== mask_to_rbox 自测 ====");
 
-            using (var mask = new Mat(64, 64, MatType.CV_8UC1, Scalar.Black))
+            using (var multiComponentMask = new Mat(64, 64, MatType.CV_8UC1, Scalar.Black))
             {
-                Cv2.Rectangle(mask, new Rect(6, 12, 12, 28), Scalar.White, -1);
-                Cv2.Rectangle(mask, new Rect(28, 20, 20, 12), Scalar.White, -1);
+                Cv2.Rectangle(multiComponentMask, new Rect(6, 12, 12, 28), Scalar.White, -1);
+                Cv2.Rectangle(multiComponentMask, new Rect(28, 20, 20, 12), Scalar.White, -1);
 
-                var maskInfo = MaskRleUtils.MatToMaskInfo(mask);
-                var bbox = new JArray(100.0, 200.0, mask.Cols, mask.Rows);
+                var maskInfo = MaskRleUtils.MatToMaskInfo(multiComponentMask);
+                var bbox = new JArray(100.0, 200.0, multiComponentMask.Cols, multiComponentMask.Rows);
 
                 RotatedRect expected;
                 using (var baselineMask = MaskRleUtils.MaskInfoToMat(maskInfo))
@@ -7611,7 +7611,7 @@ namespace DlcvCSharpTest
                     using (var model = new Model())
                     {
                         var createMask = typeof(Model).GetMethod("CreateMaskFromPolygon", BindingFlags.NonPublic | BindingFlags.Instance);
-                        var polygon = new JArray(new JArray(1, 1));
+                        var polygon = new JArray { new JArray(1, 1) };
                         using (var mask = (Mat)createMask.Invoke(model, new object[] { polygon, clippedBox.ToObject<List<double>>(), true }))
                         {
                             if (mask.Cols != 6 || mask.Rows != 5) throw new Exception("多边形掩码尺寸错误");
