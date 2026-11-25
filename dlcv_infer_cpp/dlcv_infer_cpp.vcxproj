@@ -181,6 +181,8 @@
     <ClCompile Include="flow\modules\ForegroundBackgroundStatisticsModule.cpp" />
     <ClCompile Include="flow\modules\AlgorithmModules.cpp" />
     <ClCompile Include="flow\modules\BarcodeReaderModule.cpp" />
+    <ClCompile Include="native\datamatrix\DataMatrixLight.cpp" />
+    <ClCompile Include="native\datamatrix\DataMatrixNative.c"><CompileAs>CompileAsC</CompileAs><LanguageStandard_C>stdc17</LanguageStandard_C></ClCompile>
     <ClCompile Include="flow\modules\RegionStrokeVisualizeTemplateModules.cpp" />
   </ItemGroup>
   <ItemGroup>

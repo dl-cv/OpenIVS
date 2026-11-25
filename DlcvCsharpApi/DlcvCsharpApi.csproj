@@ -2,6 +2,7 @@
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="..\packages\OpenCvSharp4.runtime.win.4.10.0.20241108\build\netstandard\OpenCvSharp4.runtime.win.props" Condition="Exists('..\packages\OpenCvSharp4.runtime.win.4.10.0.20241108\build\netstandard\OpenCvSharp4.runtime.win.props')" />
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <Import Project="..\build_script\OpenCvVersion.props" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
@@ -72,6 +73,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="flow\modules\BarcodeReader.cs" />
+    <Compile Include="flow\modules\DataMatrixRecovery.cs" />
     <Compile Include="flow\modules\CircularRegion.cs" />
     <Compile Include="DllLoader.cs" />
     <Compile Include="Model.cs" />
@@ -125,11 +127,34 @@
       <Link>ZXing.dll</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="..\dlcv_infer_cpp\native\datamatrix\bin\x64\$(Configuration)\dlcv_datamatrix_native.dll">
+      <Link>dlcv_datamatrix_native.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="$(OpenCvBinDir)\$(OpenCvWorldReleaseDll)" Condition="'$(Configuration)'=='Release'">
+      <Link>$(OpenCvWorldReleaseDll)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="$(OpenCvBinDir)\$(OpenCvWorldDebugDll)" Condition="'$(Configuration)'=='Debug'">
+      <Link>$(OpenCvWorldDebugDll)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="$(OpenCvBinDir)\..\..\..\etc\licenses\*">
+      <Link>opencv_licenses\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <None Include="app.config" />
     <None Include="packages.config" />
     <EmbeddedResource Include="flow\modules\CategoryBlockUnicode.json">
       <LogicalName>CategoryBlockUnicode.json</LogicalName>
     </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\dlcv_infer_cpp\native\datamatrix\DataMatrixNative.vcxproj">
+      <Name>DataMatrixNative</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <BuildReference>true</BuildReference>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">

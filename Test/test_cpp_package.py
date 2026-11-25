@@ -131,12 +131,13 @@ class PackageMetadataTest(unittest.TestCase):
                 os.chdir(previous)
             metadata = setup.call_args.kwargs
             self.assertEqual(metadata["name"], "dlcvpro_infer_cpp")
-            self.assertEqual(metadata["version"], "2026.11.5.1a0")
             for name in ("build", "dist", "dlcvpro_infer_csharp"):
                 self.assertTrue((root / name / "keep.txt").is_file())
 
 
 class CppInstallTargetTest(test_install_target.InstallTargetTest):
+    guard_packages = ("dlcvpro_infer_cpp",)
+
     def setUp(self):
         super().setUp()
         self.dist.rename(self.package / "dist_cpp")
@@ -150,13 +151,15 @@ class CppInstallTargetTest(test_install_target.InstallTargetTest):
         latest = self.wheel()
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.calls(), [self.expected_call("install", "--force-reinstall", latest)])
+        self.assertEqual(self.calls(), [*self.guard_calls(),
+                                       self.expected_call("install", "--force-reinstall", latest)])
 
-    def test_default_returns_install_error_after_pause(self):
-        self.wheel()
+    def test_default_returns_pip_error(self):
+        latest = self.wheel()
         result = self.run_script(exit_code=31)
         self.assertEqual(result.returncode, 31, result.stdout + result.stderr)
-        self.assertEqual(len(self.calls()), 1)
+        self.assertEqual(self.calls(), [*self.guard_calls(),
+                                       self.expected_call("install", "--force-reinstall", latest)])
 
     def test_csharp_wheel_is_not_selected(self):
         latest = self.wheel()

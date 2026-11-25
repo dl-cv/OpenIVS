@@ -4,11 +4,11 @@ import shutil
 
 from setuptools import setup
 
-version = '2026.11.24.0a0'
+version = '2026.11.24.1a0'
 
 package_name = "dlcvpro_infer_csharp"  # 包名
 packages: list = [package_name]  # 需要打包的包
-package_data: dict[str:list] = {package_name: ["*"]}  # 哪个包需要打包哪些资源文件
+package_data: dict[str:list] = {package_name: ["*", "opencv_licenses/*"]}  # 哪个包需要打包哪些资源文件
 
 
 def main():

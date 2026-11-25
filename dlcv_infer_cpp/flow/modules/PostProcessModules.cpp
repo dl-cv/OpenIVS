@@ -1998,6 +1998,22 @@ private:
 };
 
 class MaskToRBoxModule final : public BaseModule {
+    static bool LargestComponentRect(const Json& maskInfo, cv::RotatedRect& rect) {
+        const cv::Mat mask = MaskInfoToMat(maskInfo);
+        if (mask.empty()) return false;
+        cv::Mat labels, stats, centers, largest;
+        const int count = cv::connectedComponentsWithStats(mask, labels, stats, centers, 8, CV_32S);
+        if (count <= 1) return false;
+        int selected = 1;
+        for (int label = 2; label < count; ++label)
+            if (stats.at<int>(label, cv::CC_STAT_AREA) > stats.at<int>(selected, cv::CC_STAT_AREA)) selected = label;
+        cv::compare(labels, selected, largest, cv::CMP_EQ);
+        const int kernelSize = std::max(1, std::min(2, std::min(mask.cols, mask.rows) / 30));
+        // 去除主区域边缘突起，使用轮廓像素坐标计算转正框。
+        if (stats.at<int>(selected, cv::CC_STAT_AREA) > 100 && kernelSize > 1)
+            cv::erode(largest, largest, cv::getStructuringElement(cv::MORPH_ELLIPSE, {kernelSize, kernelSize}));
+        return TryComputeMinAreaRectInplace(largest, rect);
+    }
 public:
     using BaseModule::BaseModule;
 
@@ -2045,16 +2061,18 @@ private:
                 const bool hasPrecomputedRect = d.contains("mask_min_area_rect")
                     && d.at("mask_min_area_rect").is_array()
                     && d.at("mask_min_area_rect").size() >= 5;
-                if (!hasPrecomputedRect && (!d.contains("mask_rle") || !d.at("mask_rle").is_object())) {
+                const bool hasMask = d.contains("mask_rle") && d.at("mask_rle").is_object();
+                if (!hasPrecomputedRect && !hasMask) {
                     continue; // 与 C# 对齐：无 mask_rle 直接跳过该条
                 }
                 if (!d.contains("bbox") || !d.at("bbox").is_array() || d.at("bbox").size() < 4) continue;
                 const Json& bbox = d.at("bbox");
-                const float offsetX = static_cast<float>(bbox.at(0).get<double>());
-                const float offsetY = static_cast<float>(bbox.at(1).get<double>());
+                // 模型掩码在图像内的整数像素窗口中生成。
+                const float offsetX = static_cast<float>(std::max(0.0, std::floor(bbox.at(0).get<double>())));
+                const float offsetY = static_cast<float>(std::max(0.0, std::floor(bbox.at(1).get<double>())));
 
                 cv::RotatedRect rr;
-                if (hasPrecomputedRect) {
+                if (hasPrecomputedRect && !hasMask) {
                     try {
                         const Json& maskRect = d.at("mask_min_area_rect");
                         rr = cv::RotatedRect(
@@ -2075,7 +2093,7 @@ private:
                     if (it != rectCache.end()) {
                         rr = it->second;
                     } else {
-                        if (!TryComputeMinAreaRectFromMaskInfo(maskInfo, rr)) continue;
+                        if (!LargestComponentRect(maskInfo, rr)) continue;
                         rectCache.emplace(maskKey, rr);
                     }
                 }

@@ -41,13 +41,26 @@ def low_contrast_ean13_image():
     return np.clip(image.astype(np.float32) - shadow, 0, 255).astype(np.uint8)
 
 
-def read_reference(image):
+def low_contrast_data_matrix():
+    image = barcode_fixture("dm", scale=6)
+    y, x = np.indices(image.shape, dtype=np.float32)
+    shade = (x / image.shape[1] + y / image.shape[0] - 1) * 60
+    return np.uint8(np.rint(128 + shade + np.where(image > 0, 12, -12)))
+
+
+def enhance_image(gray):
+    kernel = np.full(3, 1 / 3, np.float32)
+    smooth = cv2.sepFilter2D(gray, cv2.CV_32F, kernel, kernel)
+    background = cv2.GaussianBlur(smooth, (9, 9), 2)
+    return cv2.addWeighted(smooth, 4.5, background, -3.5, 0, dtype=cv2.CV_8U)
+
+
+def read_reference(image, enhance):
+    codes = zxingcpp.read_barcodes(image, try_downscale=True, text_mode=zxingcpp.TextMode.HRI)
+    if codes or not enhance:
+        return codes
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
-    for source in (image, cv2.equalizeHist(gray)):
-        codes = zxingcpp.read_barcodes(source, try_downscale=True, text_mode=zxingcpp.TextMode.HRI)
-        if codes:
-            return codes
-    return []
+    return zxingcpp.read_barcodes(enhance_image(gray), try_downscale=True, text_mode=zxingcpp.TextMode.HRI)
 
 
 def mixed_scale_qr_image():
@@ -80,15 +93,18 @@ def main():
     args = parser.parse_args()
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    cases = []
+    cases = {False: [], True: []}
     expected = {}
     images = {}
-    def add(name, im, texts):
+    def add(name, im, texts, *, enhance=False):
         path = output / (name + ".png")
         ok, encoded = cv2.imencode(".png", im)
         assert ok
         path.write_bytes(encoded.tobytes())
-        cases.append({"name": name, "path": str(path)})
+        item = {"name": name, "path": str(path)}
+        if enhance:
+            item["enhance"] = True
+        cases[enhance].append(item)
         expected[name] = sorted(texts)
         images[name] = im
     for fmt, text, name in [(zxingcpp.BarcodeFormat.QRCode, "深度视觉-QR", "qr"),
@@ -100,9 +116,18 @@ def main():
         add(name + "-bgr", cv2.cvtColor(im, cv2.COLOR_GRAY2BGR), [text])
         add(name + "-bgra", cv2.cvtColor(im, cv2.COLOR_GRAY2BGRA), [text])
         add(name + "-inverted", 255-im, [] if name == "code128" else [text])
-    low_contrast = low_contrast_ean13_image()
-    assert zxingcpp.read_barcodes(low_contrast, text_mode=zxingcpp.TextMode.HRI) == []
-    add("ean13-low-contrast", low_contrast, ["5345898399924"])
+    add("ean13-low-contrast-default", low_contrast_ean13_image(), [])
+    low_contrast = low_contrast_data_matrix()
+    assert not read_reference(low_contrast, False)
+    assert [code.text for code in read_reference(low_contrast, True)] == ["DLCV-DM-123"]
+    add("dm-low-contrast-default", low_contrast, [])
+    add("dm-low-contrast-enhanced", low_contrast, ["DLCV-DM-123"], enhance=True)
+    for name, text in (("dm", "DLCV-DM-123"), ("qr", "深度视觉-QR")):
+        small = barcode_fixture(name, scale=2)
+        assert not read_reference(enhance_image(small), False)
+        add(name + "-small-default", small, [text])
+        add(name + "-small-enhanced", small, [text], enhance=True)
+    add("blank-enhanced", np.full((60, 60), 128, np.uint8), [], enhance=True)
     add("blank", np.full((200, 200), 255, np.uint8), [])
     a, b = images["qr"], images["dm"]
     im = np.full((max(a.shape[0], b.shape[0])+40, a.shape[1]+b.shape[1]+80), 255, np.uint8)
@@ -114,15 +139,26 @@ def main():
     assert len(zxingcpp.read_barcodes(mixed_scale, try_downscale=False)) == 1
     assert len(zxingcpp.read_barcodes(mixed_scale, try_downscale=True)) == 2
     add("multi-scale-qr", mixed_scale, ["深度视觉-QR", "深度视觉-QR"])
-    manifest = output / "manifest.json"
-    manifest.write_text(json.dumps(cases, ensure_ascii=False), encoding="utf-8")
-    flow = Path(__file__).resolve().parent / "data" / "barcode_flow.json"
-    reports = []
-    for runtime, exe in [("csharp", args.cs_exe), ("cpp", args.cpp_exe)]:
-        report = output / (runtime + ".json")
-        subprocess.run([str(exe.resolve()), "barcode-selftest", str(manifest), str(flow), str(report)], check=True)
-        reports.append(json.loads(report.read_text(encoding="utf-8-sig")))
-    for left, right in zip(*reports):
+    default_flow = Path(__file__).resolve().parent / "data" / "barcode_flow.json"
+    enhanced_flow = output / "barcode-flow-enhanced.json"
+    graph = json.loads(default_flow.read_text(encoding="utf-8"))
+    reader = next(node for node in graph["nodes"] if node["type"] == "features/barcode_reader")
+    reader["properties"]["enhance"] = True
+    enhanced_flow.write_text(json.dumps(graph, ensure_ascii=False), encoding="utf-8")
+    paired_reports = []
+    for enhance, batch in cases.items():
+        suffix = "enhanced" if enhance else "default"
+        manifest = output / ("manifest-" + suffix + ".json")
+        manifest.write_text(json.dumps(batch, ensure_ascii=False), encoding="utf-8")
+        flow = enhanced_flow if enhance else default_flow
+        reports = []
+        for runtime, exe in [("csharp", args.cs_exe), ("cpp", args.cpp_exe)]:
+            report = output / (runtime + "-" + suffix + ".json")
+            subprocess.run([str(exe.resolve()), "barcode-selftest", str(manifest), str(flow), str(report)], check=True)
+            reports.append(json.loads(report.read_text(encoding="utf-8-sig")))
+        assert all(len(report) == len(batch) for report in reports)
+        paired_reports.extend((enhance, left, right) for left, right in zip(*reports))
+    for enhance, left, right in paired_reports:
         name = left["name"]
         assert name == right["name"]
         for runtime in (left, right):
@@ -133,7 +169,7 @@ def main():
         image = images[name]
         if image.ndim == 3 and image.shape[2] == 4:
             image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
-        python = read_reference(image)
+        python = read_reference(image, enhance)
         assert sorted(c.text for c in python) == expected[name]
         python_geometry = []
         for c in python:
@@ -141,7 +177,10 @@ def main():
             python_geometry.append({"barcode_format": str(c.format), "polyline": points + [points[0]]})
         geometry_key = lambda value: json.dumps(value, sort_keys=True)
         assert sorted((d["extra_info"] for d in left["local"]), key=geometry_key) == sorted(python_geometry, key=geometry_key), (name, "Python geometry")
-    print(f"PASS: {len(cases)} fixtures, C#/C++ modules + exported flow API + Python geometry parity")
+    actual = {left["name"]: (left["local"], right["local"]) for _, left, right in paired_reports}
+    for name in ("qr-small", "dm-small"):
+        assert actual[name + "-default"] == actual[name + "-enhanced"], name
+    print(f"PASS: {len(expected)} fixtures: C#/C++ module and flow results, enhancement and coordinate checks")
 
 
 if __name__ == "__main__":

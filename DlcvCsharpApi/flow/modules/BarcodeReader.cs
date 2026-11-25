@@ -19,9 +19,9 @@ namespace DlcvModules
             Dictionary<string, object> properties = null, ExecutionContext context = null)
             : base(nodeId, title, properties, context) { }
 
-        private bool Option(string key)
+        private bool Option(string key, bool defaultValue = true)
         {
-            if (!Properties.TryGetValue(key, out object value)) return true;
+            if (!Properties.TryGetValue(key, out object value)) return defaultValue;
             if (value is bool option) return option;
             if (value is JValue token && token.Type == JTokenType.Boolean) return token.Value<bool>();
             throw new ArgumentException(key + " must be a boolean");
@@ -35,20 +35,25 @@ namespace DlcvModules
             {
                 var pos = code.Position;
                 var points = new[] { pos.TopLeft, pos.TopRight, pos.BottomRight, pos.BottomLeft };
-                int x = points.Min(p => p.X), y = points.Min(p => p.Y);
-                int width = points.Max(p => p.X) - x, height = points.Max(p => p.Y) - y;
-                double area = 0;
-                for (int j = 0; j < 4; j++) area += (double)points[j].X * points[(j + 1) % 4].Y - (double)points[j].Y * points[(j + 1) % 4].X;
-                var line = new JArray(points.Select(p => new JArray(p.X, p.Y)));
-                line.Add(new JArray(points[0].X, points[0].Y));
-                detections.Add(new JObject {
-                    ["category_id"] = 0, ["category_name"] = code.Text, ["score"] = 1.0,
-                    ["bbox"] = new JArray(x, y, width, height), ["area"] = Math.Abs(area) / 2,
-                    ["with_bbox"] = true, ["with_angle"] = false, ["angle"] = -100, ["with_mask"] = false,
-                    ["extra_info"] = new JObject { ["barcode_format"] = code.Format.ToString(), ["polyline"] = line }
-                });
+                detections.Add(ToDetection(code.Text, code.Format.ToString(), points.Select(p => new OpenCvSharp.Point(p.X, p.Y)).ToArray()));
             }
             return detections;
+        }
+
+        private static JObject ToDetection(string text, string format, OpenCvSharp.Point[] points)
+        {
+            int x = points.Min(p => p.X), y = points.Min(p => p.Y);
+            int width = points.Max(p => p.X) - x, height = points.Max(p => p.Y) - y;
+            double area = 0;
+            for (int j = 0; j < 4; j++) area += (double)points[j].X * points[(j + 1) % 4].Y - (double)points[j].Y * points[(j + 1) % 4].X;
+            var line = new JArray(points.Select(p => new JArray(p.X, p.Y)));
+            line.Add(new JArray(points[0].X, points[0].Y));
+            return new JObject {
+                ["category_id"] = 0, ["category_name"] = text, ["score"] = 1.0,
+                ["bbox"] = new JArray(x, y, width, height), ["area"] = Math.Abs(area) / 2,
+                ["with_bbox"] = true, ["with_angle"] = false, ["angle"] = -100, ["with_mask"] = false,
+                ["extra_info"] = new JObject { ["barcode_format"] = format, ["polyline"] = line }
+            };
         }
 
         private static bool SameRegion(JToken first, JToken second)
@@ -101,56 +106,104 @@ namespace DlcvModules
                 else throw new ArgumentException("formats must be a comma-separated string");
             }
             bool rotate = Option("try_rotate"), invert = Option("try_invert");
+            bool enhance = Option("enhance", false);
             if (images.Count == 0) return new ModuleIO(images, results);
-            using (var reader = new ZXingCpp.BarcodeReader())
+            var originalGrays = new List<KeyValuePair<Mat, Mat>>();
+            try
             {
-                reader.TryRotate = rotate;
-                reader.TryInvert = invert;
-                reader.TextMode = TextMode.HRI;
-                if (!string.IsNullOrWhiteSpace(formats))
+                using (var reader = new ZXingCpp.BarcodeReader())
                 {
-                    if (!BarcodeFormats.TryParse(formats, out BarcodeFormats parsed))
-                        throw new ArgumentException("Invalid barcode formats: " + formats);
-                    reader.Formats = parsed;
-                }
-                for (int i = 0; i < images.Count; i++)
-                {
-                    var wrap = images[i];
-                    Mat image = wrap?.GetImage();
-                    if (image == null || image.Empty()) throw new ArgumentException("Barcode reader requires a non-empty image");
-                    int channels = image.Channels();
-                    if (image.Depth() != MatType.CV_8U || (channels != 1 && channels != 3 && channels != 4))
-                        throw new ArgumentException("Barcode reader requires uint8 gray, RGB or RGBA images");
-                    var format = channels == 1 ? ImageFormat.Lum : channels == 3 ? ImageFormat.RGB : ImageFormat.RGBA;
-                    var view = new ImageView(image.Data, image.Width, image.Height, format, checked((int)image.Step()));
-                    Mat gray = null, enhanced = null;
-                    try
+                    reader.TryRotate = rotate;
+                    reader.TryInvert = invert;
+                    reader.TextMode = TextMode.HRI;
+                    bool allowDataMatrix = true;
+                    if (!string.IsNullOrWhiteSpace(formats))
                     {
-                        var detections = ReadAtBothScales(reader, view);
-                        if (detections.Count == 0)
+                        if (!BarcodeFormats.TryParse(formats, out BarcodeFormats parsed))
+                            throw new ArgumentException("Invalid barcode formats: " + formats);
+                        reader.Formats = parsed;
+                        BarcodeFormat[] requested = parsed;
+                        allowDataMatrix = requested.Length == 0 || parsed.Contains(BarcodeFormat.DataMatrix) ||
+                            requested.Any(f => BarcodeFormats.List(f).Contains(BarcodeFormat.DataMatrix));
+                    }
+                    for (int i = 0; i < images.Count; i++)
+                    {
+                        var wrap = images[i];
+                        Mat image = wrap?.GetImage();
+                        if (image == null || image.Empty()) throw new ArgumentException("Barcode reader requires a non-empty image");
+                        int channels = image.Channels();
+                        if (image.Depth() != MatType.CV_8U || (channels != 1 && channels != 3 && channels != 4))
+                            throw new ArgumentException("Barcode reader requires uint8 gray, RGB or RGBA images");
+                        var format = channels == 1 ? ImageFormat.Lum : channels == 3 ? ImageFormat.RGB : ImageFormat.RGBA;
+                        var view = new ImageView(image.Data, image.Width, image.Height, format, checked((int)image.Step()));
+                        Mat gray = null, enhanced = null;
+                        try
                         {
-                            gray = new Mat();
-                            enhanced = new Mat();
-                            if (channels == 1) image.CopyTo(gray);
-                            else Cv2.CvtColor(image, gray, channels == 3 ? ColorConversionCodes.RGB2GRAY : ColorConversionCodes.RGBA2GRAY);
-                            Cv2.EqualizeHist(gray, enhanced);
-                            view = new ImageView(enhanced.Data, enhanced.Width, enhanced.Height, ImageFormat.Lum, checked((int)enhanced.Step()));
-                            detections = ReadAtBothScales(reader, view);
+                            var detections = ReadAtBothScales(reader, view);
+                            if (enhance && detections.Count == 0)
+                            {
+                                gray = new Mat();
+                                enhanced = new Mat();
+                                if (channels != 1)
+                                    Cv2.CvtColor(image, gray, channels == 3 ? ColorConversionCodes.RGB2GRAY : ColorConversionCodes.RGBA2GRAY);
+                                using (var kernel = Mat.FromArray(new[] { 1f / 3, 1f / 3, 1f / 3 }))
+                                using (var smooth = new Mat())
+                                using (var background = new Mat())
+                                {
+                                    Cv2.SepFilter2D(channels == 1 ? image : gray, smooth, MatType.CV_32F, kernel, kernel,
+                                        borderType: BorderTypes.Default | BorderTypes.Isolated);
+                                    Cv2.GaussianBlur(smooth, background, new Size(9, 9), 2);
+                                    Cv2.AddWeighted(smooth, 4.5, background, -3.5, 0, enhanced, MatType.CV_8U);
+                                }
+                                view = new ImageView(enhanced.Data, enhanced.Width, enhanced.Height, ImageFormat.Lum, checked((int)enhanced.Step()));
+                                detections = ReadAtBothScales(reader, view);
+                                if (allowDataMatrix && detections.Count == 0)
+                                {
+                                    Mat original = wrap.OriginalImage;
+                                    float[] roiToOriginal = null;
+                                    if (original != null && original != image && !original.Empty() && wrap.TransformState?.AffineMatrix2x3 != null)
+                                    {
+                                        roiToOriginal = TransformationState.Inverse2x3(wrap.TransformState.AffineMatrix2x3)
+                                            .Select(v => (float)v).ToArray();
+                                        int originalChannels = original.Channels();
+                                        if (original.Depth() != MatType.CV_8U || (originalChannels != 1 && originalChannels != 3 && originalChannels != 4))
+                                            throw new ArgumentException("Barcode reader requires uint8 gray, RGB or RGBA original images");
+                                        if (originalChannels != 1)
+                                        {
+                                            var originalGray = originalGrays.FirstOrDefault(pair => ReferenceEquals(pair.Key, original)).Value;
+                                            if (originalGray == null)
+                                            {
+                                                originalGray = new Mat();
+                                                originalGrays.Add(new KeyValuePair<Mat, Mat>(original, originalGray));
+                                                Cv2.CvtColor(original, originalGray, originalChannels == 3 ? ColorConversionCodes.RGB2GRAY : ColorConversionCodes.RGBA2GRAY);
+                                            }
+                                            original = originalGray;
+                                        }
+                                    }
+                                    else original = null;
+                                    var hit = DataMatrixRecovery.Recover(channels == 1 ? image : gray, rotate, invert, original, roiToOriginal);
+                                    if (hit != null) detections.Add(ToDetection(hit.Text, BarcodeFormat.DataMatrix.ToString(), hit.Corners));
+                                }
+                            }
+                            var entry = JObject.FromObject(wrap.ToMeta());
+                            entry["type"] = "local";
+                            entry["index"] = i;
+                            entry["sample_results"] = detections;
+                            results.Add(entry);
                         }
-                        var entry = JObject.FromObject(wrap.ToMeta());
-                        entry["type"] = "local";
-                        entry["index"] = i;
-                        entry["sample_results"] = detections;
-                        results.Add(entry);
-                    }
-                    finally
-                    {
-                        gray?.Dispose();
-                        enhanced?.Dispose();
-                        GC.KeepAlive(view);
-                        GC.KeepAlive(image);
+                        finally
+                        {
+                            gray?.Dispose();
+                            enhanced?.Dispose();
+                            GC.KeepAlive(view);
+                            GC.KeepAlive(image);
+                        }
                     }
                 }
+            }
+            finally
+            {
+                foreach (var pair in originalGrays) pair.Value.Dispose();
             }
             return new ModuleIO(images, results);
         }
