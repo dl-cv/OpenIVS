@@ -22,6 +22,7 @@ PACKAGE_OUTPUT_FILE_NAMES = (
     "DlcvCsharpApi.dll",
     "ZXingCpp.dll",
     "ZXing.dll",
+    "dlcv_datamatrix_native.dll",
     "DlcvCsharpApi.dll.config",
     "ImageViewer.dll",
     "ImageViewer.dll.config",
@@ -149,6 +150,13 @@ def copy_package_files() -> list[Path]:
         source = DEMO_OUTPUT_DIR / file_name
         require_file(source)
         shutil.copy2(source, STAGING_DIR / source.name)
+
+    native_dir = REPO_ROOT / "dlcv_infer_cpp" / "native" / "datamatrix" / "bin" / "x64" / "Release"
+    opencv_libraries = list(native_dir.glob("opencv_world*.dll"))
+    if len(opencv_libraries) != 1:
+        raise RuntimeError("读码恢复工程应输出一个 OpenCV 运行库")
+    shutil.copy2(opencv_libraries[0], STAGING_DIR / opencv_libraries[0].name)
+    shutil.copytree(native_dir / "opencv_licenses", STAGING_DIR / "opencv_licenses")
 
     require_file(RPC_EXE_SOURCE)
     shutil.copy2(RPC_EXE_SOURCE, STAGING_DIR / RPC_EXE_NAME)

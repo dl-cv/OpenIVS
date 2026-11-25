@@ -74,6 +74,8 @@
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\AlgorithmModules.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\OutputModules.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\BarcodeReaderModule.cpp" />
+    <ClCompile Include="..\..\dlcv_infer_cpp\native\datamatrix\DataMatrixLight.cpp" />
+    <ClCompile Include="..\..\dlcv_infer_cpp\native\datamatrix\DataMatrixNative.c"><CompileAs>CompileAsC</CompileAs><LanguageStandard_C>stdc17</LanguageStandard_C></ClCompile>
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\SlidingModules.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\RegionStrokeVisualizeTemplateModules.cpp" />
   </ItemGroup>

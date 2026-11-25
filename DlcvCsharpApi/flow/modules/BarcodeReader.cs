@@ -35,20 +35,25 @@ namespace DlcvModules
             {
                 var pos = code.Position;
                 var points = new[] { pos.TopLeft, pos.TopRight, pos.BottomRight, pos.BottomLeft };
-                int x = points.Min(p => p.X), y = points.Min(p => p.Y);
-                int width = points.Max(p => p.X) - x, height = points.Max(p => p.Y) - y;
-                double area = 0;
-                for (int j = 0; j < 4; j++) area += (double)points[j].X * points[(j + 1) % 4].Y - (double)points[j].Y * points[(j + 1) % 4].X;
-                var line = new JArray(points.Select(p => new JArray(p.X, p.Y)));
-                line.Add(new JArray(points[0].X, points[0].Y));
-                detections.Add(new JObject {
-                    ["category_id"] = 0, ["category_name"] = code.Text, ["score"] = 1.0,
-                    ["bbox"] = new JArray(x, y, width, height), ["area"] = Math.Abs(area) / 2,
-                    ["with_bbox"] = true, ["with_angle"] = false, ["angle"] = -100, ["with_mask"] = false,
-                    ["extra_info"] = new JObject { ["barcode_format"] = code.Format.ToString(), ["polyline"] = line }
-                });
+                detections.Add(ToDetection(code.Text, code.Format.ToString(), points.Select(p => new OpenCvSharp.Point(p.X, p.Y)).ToArray()));
             }
             return detections;
+        }
+
+        private static JObject ToDetection(string text, string format, OpenCvSharp.Point[] points)
+        {
+            int x = points.Min(p => p.X), y = points.Min(p => p.Y);
+            int width = points.Max(p => p.X) - x, height = points.Max(p => p.Y) - y;
+            double area = 0;
+            for (int j = 0; j < 4; j++) area += (double)points[j].X * points[(j + 1) % 4].Y - (double)points[j].Y * points[(j + 1) % 4].X;
+            var line = new JArray(points.Select(p => new JArray(p.X, p.Y)));
+            line.Add(new JArray(points[0].X, points[0].Y));
+            return new JObject {
+                ["category_id"] = 0, ["category_name"] = text, ["score"] = 1.0,
+                ["bbox"] = new JArray(x, y, width, height), ["area"] = Math.Abs(area) / 2,
+                ["with_bbox"] = true, ["with_angle"] = false, ["angle"] = -100, ["with_mask"] = false,
+                ["extra_info"] = new JObject { ["barcode_format"] = format, ["polyline"] = line }
+            };
         }
 
         private static bool SameRegion(JToken first, JToken second)
@@ -108,11 +113,15 @@ namespace DlcvModules
                 reader.TryRotate = rotate;
                 reader.TryInvert = invert;
                 reader.TextMode = TextMode.HRI;
+                bool allowDataMatrix = true;
                 if (!string.IsNullOrWhiteSpace(formats))
                 {
                     if (!BarcodeFormats.TryParse(formats, out BarcodeFormats parsed))
                         throw new ArgumentException("Invalid barcode formats: " + formats);
                     reader.Formats = parsed;
+                    BarcodeFormat[] requested = parsed;
+                    allowDataMatrix = requested.Length == 0 || parsed.Contains(BarcodeFormat.DataMatrix) ||
+                        requested.Any(f => BarcodeFormats.List(f).Contains(BarcodeFormat.DataMatrix));
                 }
                 for (int i = 0; i < images.Count; i++)
                 {
@@ -124,7 +133,7 @@ namespace DlcvModules
                         throw new ArgumentException("Barcode reader requires uint8 gray, RGB or RGBA images");
                     var format = channels == 1 ? ImageFormat.Lum : channels == 3 ? ImageFormat.RGB : ImageFormat.RGBA;
                     var view = new ImageView(image.Data, image.Width, image.Height, format, checked((int)image.Step()));
-                    Mat gray = null, enhanced = null;
+                    Mat gray = null, enhanced = null, originalGray = null;
                     try
                     {
                         var detections = ReadAtBothScales(reader, view);
@@ -145,6 +154,28 @@ namespace DlcvModules
                             }
                             view = new ImageView(enhanced.Data, enhanced.Width, enhanced.Height, ImageFormat.Lum, checked((int)enhanced.Step()));
                             detections = ReadAtBothScales(reader, view);
+                            if (allowDataMatrix && detections.Count == 0)
+                            {
+                                Mat original = wrap.OriginalImage;
+                                float[] roiToOriginal = null;
+                                if (original != null && original != image && !original.Empty() && wrap.TransformState?.AffineMatrix2x3 != null)
+                                {
+                                    roiToOriginal = TransformationState.Inverse2x3(wrap.TransformState.AffineMatrix2x3)
+                                        .Select(v => (float)v).ToArray();
+                                    int originalChannels = original.Channels();
+                                    if (original.Depth() != MatType.CV_8U || (originalChannels != 1 && originalChannels != 3 && originalChannels != 4))
+                                        throw new ArgumentException("Barcode reader requires uint8 gray, RGB or RGBA original images");
+                                    if (originalChannels != 1)
+                                    {
+                                        originalGray = new Mat();
+                                        Cv2.CvtColor(original, originalGray, originalChannels == 3 ? ColorConversionCodes.RGB2GRAY : ColorConversionCodes.RGBA2GRAY);
+                                        original = originalGray;
+                                    }
+                                }
+                                else original = null;
+                                var hit = DataMatrixRecovery.Recover(channels == 1 ? image : gray, rotate, invert, original, roiToOriginal);
+                                if (hit != null) detections.Add(ToDetection(hit.Text, BarcodeFormat.DataMatrix.ToString(), hit.Corners));
+                            }
                         }
                         var entry = JObject.FromObject(wrap.ToMeta());
                         entry["type"] = "local";
@@ -156,6 +187,7 @@ namespace DlcvModules
                     {
                         gray?.Dispose();
                         enhanced?.Dispose();
+                        originalGray?.Dispose();
                         GC.KeepAlive(view);
                         GC.KeepAlive(image);
                     }

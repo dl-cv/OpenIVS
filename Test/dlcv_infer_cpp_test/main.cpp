@@ -1903,11 +1903,30 @@ int RunMaskToRBoxSelfTest() {
     // SDK 将原图框 [-0.2, -0.3, 5.2, 4.7] 裁成从 (0, 0) 开始的 6×5 像素窗口。
     cv::Mat clipped = cv::Mat::zeros(5, 6, CV_8UC1);
     clipped.at<unsigned char>(1, 1) = 255;
-    // RLE 分支以像素为方格，单像素外接矩中心比行列坐标多半个像素。
-    if (!check(edge, json::array({10.75, 20.25, 4.5, 4.5}), 15.5, 22.5)
-        || !check(edge, json::array({10, 20, 6, 5}), 15.5, 22.5)
-        || !check(clipped, json::array({-0.2, -0.3, 5.4, 5.0}), 1.5, 1.5)) {
+    // 单像素旋转框以轮廓像素坐标定位。
+    if (!check(edge, json::array({10.75, 20.25, 4.5, 4.5}), 15, 22)
+        || !check(edge, json::array({10, 20, 6, 5}), 15, 22)
+        || !check(clipped, json::array({-0.2, -0.3, 5.4, 5.0}), 1, 1)) {
         PrintUtf8Line("掩码旋转框坐标错误");
+        return 1;
+    }
+    cv::Mat components = cv::Mat::zeros(80, 90, CV_8UC1);
+    components(cv::Rect(10, 15, 40, 30)).setTo(255);
+    components(cv::Rect(75, 65, 5, 5)).setTo(255);
+    // 2×2 椭圆腐蚀使主矩形左、上边各缩进一个像素，远处小区域不参与拟合。
+    if (!check(components, json::array({0, 0, 90, 80}), 30, 30)) {
+        PrintUtf8Line("掩码主区域旋转框错误");
+        return 1;
+    }
+    const json precomputed{{"type", "local"}, {"sample_results", json::array({
+        {{"bbox", json::array({10, 20, 8, 6})}, {"mask_rle", nullptr},
+         {"mask_min_area_rect", json::array({3, 2, 6, 4, 0})}}
+    })}};
+    const auto precomputedOutput = module->Process({}, json::array({precomputed}));
+    const auto& precomputedDetections = precomputedOutput.ResultList.at(0).at("sample_results");
+    if (precomputedDetections.size() != 1
+        || precomputedDetections.at(0).at("bbox") != json::array({13, 22, 6, 4, 0})) {
+        PrintUtf8Line("空掩码字段影响预计算旋转框");
         return 1;
     }
     PrintUtf8Line("掩码旋转框坐标测试通过");
@@ -5640,7 +5659,7 @@ int wmain(int argc, wchar_t* argv[]) {
             std::ifstream stream{std::filesystem::path(argv[2])};
             json manifest; stream >> manifest;
             dlcv_infer::flow::FlowGraphModel flow;
-            auto report = flow.Load(WideToUtf8(argv[3]));
+            auto report = flow.Load(std::filesystem::path(argv[3]).string());
             if (report.at("code") != 0) throw std::runtime_error(report.dump());
             auto factory = dlcv_infer::flow::ModuleRegistry::Get("features/barcode_reader");
             if (!factory) throw std::runtime_error("Barcode module not registered");
@@ -5659,13 +5678,25 @@ int wmain(int argc, wchar_t* argv[]) {
                 cv::Mat padded(image.rows, image.cols + 13, image.type(), cv::Scalar::all(255));
                 cv::Mat roi = padded(cv::Rect(0, 0, image.cols, image.rows));
                 image.copyTo(roi);
-                dlcv_infer::flow::ModuleImage wrap(roi, roi, dlcv_infer::flow::TransformationState(roi.cols, roi.rows), 7, "barcode-roi");
+                cv::Mat original = roi;
+                dlcv_infer::flow::TransformationState state(roi.cols, roi.rows);
+                if (item.contains("original_path")) {
+                    std::ifstream originalFile{std::filesystem::path(Utf8ToWide(item.at("original_path").get<std::string>())), std::ios::binary};
+                    std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(originalFile)), std::istreambuf_iterator<char>());
+                    original = cv::imdecode(bytes, cv::IMREAD_COLOR);
+                    if (original.empty()) throw std::runtime_error("Missing original image");
+                    cv::cvtColor(original, original, cv::COLOR_BGR2RGB);
+                    state.OriginalWidth = original.cols; state.OriginalHeight = original.rows;
+                    state.AffineMatrix2x3 = item.at("original_to_roi").get<std::vector<double>>();
+                    if (state.AffineMatrix2x3.size() != 6) throw std::runtime_error("Invalid original_to_roi");
+                }
+                dlcv_infer::flow::ModuleImage wrap(roi, original, state, 7, "barcode-roi");
                 auto& reader = item.value("enhance", false) ? enhancedReader : defaultReader;
                 auto local = reader->Process({wrap}, json::array()).ResultList;
                 if (local[0]["origin_index"] != 7 || local[0]["unique_id"] != "barcode-roi") throw std::runtime_error("Metadata lost");
                 auto result = flow.InferOneOutJson(roi);
                 output.push_back({{"name", item.at("name")}, {"local", local[0]["sample_results"]}, {"flow", result}});
-                for (int i = 0; i < 20; ++i) reader->Process({wrap}, json::array());
+                for (int i = 0; i < item.value("repeat", 0); ++i) reader->Process({wrap}, json::array());
                 auto filtered = factory(1, "", {{"formats", "DataMatrix"}}, nullptr)->Process({wrap}, json::array());
                 for (const auto& det : filtered.ResultList[0]["sample_results"])
                     if (det["extra_info"]["barcode_format"] != "Data Matrix") throw std::runtime_error("Format filter failed");

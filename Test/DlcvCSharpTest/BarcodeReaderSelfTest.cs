@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using DlcvModules;
 using Newtonsoft.Json.Linq;
 using OpenCvSharp;
@@ -26,19 +28,43 @@ namespace DlcvCSharpTest
                     if (raw.Channels() == 3) Cv2.CvtColor(raw, image, ColorConversionCodes.BGR2RGB);
                     else if (raw.Channels() == 4) Cv2.CvtColor(raw, image, ColorConversionCodes.BGRA2RGBA);
                     else raw.CopyTo(image);
+                    using (var originalRaw = item["original_path"] == null ? new Mat() :
+                        Cv2.ImDecode(File.ReadAllBytes((string)item["original_path"]), ImreadModes.Unchanged))
+                    using (var original = new Mat())
                     using (var padded = new Mat(image.Rows, image.Cols + 13, image.Type(), Scalar.All(255)))
                     using (var roi = new Mat(padded, new Rect(0, 0, image.Cols, image.Rows)))
                     {
                         image.CopyTo(roi);
-                        var wrap = new ModuleImage(roi, roi, new TransformationState(roi.Width, roi.Height), 7) { UniqueId = "barcode-roi" };
-                        var properties = (bool?)item["enhance"] == true
-                            ? new Dictionary<string, object> { ["enhance"] = true } : null;
+                        TransformationState transform = new TransformationState(roi.Width, roi.Height);
+                        if (item["original_path"] != null)
+                        {
+                            if (originalRaw.Empty()) throw new Exception("Missing original: " + item["original_path"]);
+                            if (originalRaw.Channels() == 3) Cv2.CvtColor(originalRaw, original, ColorConversionCodes.BGR2RGB);
+                            else if (originalRaw.Channels() == 4) Cv2.CvtColor(originalRaw, original, ColorConversionCodes.BGRA2RGBA);
+                            else originalRaw.CopyTo(original);
+                            transform = new TransformationState(original.Width, original.Height,
+                                affine2x3: item["original_to_roi"].Values<double>().ToArray());
+                        }
+                        var wrap = new ModuleImage(roi, original.Empty() ? roi : original, transform, 7) { UniqueId = "barcode-roi" };
+                        var properties = new Dictionary<string, object>();
+                        foreach (string key in new[] { "enhance", "formats", "try_rotate", "try_invert" })
+                            if (item[key] != null) properties[key] = item[key];
                         var reader = new BarcodeReader(1, properties: properties);
+                        var timer = Stopwatch.StartNew();
                         var local = reader.Process(new List<ModuleImage> { wrap }).ResultList;
+                        double localMs = timer.Elapsed.TotalMilliseconds;
                         if ((int)local[0]["origin_index"] != 7 || (string)local[0]["unique_id"] != "barcode-roi") throw new Exception("Metadata lost");
-                        JToken result = flow.InferOneOutJson(roi);
-                        output.Add(new JObject { ["name"] = item["name"], ["local"] = local[0]["sample_results"], ["flow"] = result });
-                        for (int i = 0; i < 20; ++i) reader.Process(new List<ModuleImage> { wrap });
+                        if (item["expected_texts"] is JArray expected)
+                        {
+                            var actual = local[0]["sample_results"].Select(det => (string)det["category_name"]).OrderBy(text => text, StringComparer.Ordinal);
+                            if (!actual.SequenceEqual(expected.Values<string>().OrderBy(text => text, StringComparer.Ordinal)))
+                                throw new Exception("读码结果与预期不符：" + item["name"]);
+                        }
+                        timer.Restart();
+                        JToken result = original.Empty() ? flow.InferOneOutJson(roi) : null;
+                        double flowMs = timer.Elapsed.TotalMilliseconds;
+                        output.Add(new JObject { ["name"] = item["name"], ["local"] = local[0]["sample_results"], ["flow"] = result,
+                            ["local_ms"] = localMs, ["flow_ms"] = flowMs });
                         var filtered = new BarcodeReader(1, properties: new Dictionary<string, object> { ["formats"] = "DataMatrix" }).Process(new List<ModuleImage> { wrap });
                         foreach (var det in filtered.ResultList[0]["sample_results"])
                             if ((string)det["extra_info"]["barcode_format"] != "Data Matrix") throw new Exception("Format filter failed");
