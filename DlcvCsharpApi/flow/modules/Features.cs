@@ -676,9 +676,9 @@ namespace DlcvModules
                     var bbox = d["bbox"] as JArray;
                     if (bbox == null || bbox.Count < 4) continue;
 
-                    // 模型掩码由整数像素窗口生成，浮点检测框的左上角向下取整。
-                    float bx = (float)Math.Floor(bbox[0].Value<double>());
-                    float by = (float)Math.Floor(bbox[1].Value<double>());
+                    // 模型掩码在图像内的整数像素窗口中生成。
+                    float bx = (float)Math.Max(0, Math.Floor(bbox[0].Value<double>()));
+                    float by = (float)Math.Max(0, Math.Floor(bbox[1].Value<double>()));
 
                     // 直接通过 mask 计算最小外接矩
                     RotatedRect rr;

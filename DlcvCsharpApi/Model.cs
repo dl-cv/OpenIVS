@@ -2536,8 +2536,8 @@ namespace dlcv_infer_csharp
             try
             {
                 // 解析边界框 [x, y, w, h]
-                int x = usePixelWindow ? (int)Math.Floor(bbox[0]) : (int)bbox[0];
-                int y = usePixelWindow ? (int)Math.Floor(bbox[1]) : (int)bbox[1];
+                int x = usePixelWindow ? (int)Math.Max(0, Math.Floor(bbox[0])) : (int)bbox[0];
+                int y = usePixelWindow ? (int)Math.Max(0, Math.Floor(bbox[1])) : (int)bbox[1];
                 int width = usePixelWindow ? (int)Math.Ceiling(bbox[0] + bbox[2]) - x : (int)bbox[2];
                 int height = usePixelWindow ? (int)Math.Ceiling(bbox[1] + bbox[3]) - y : (int)bbox[3];
 

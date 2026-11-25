@@ -7600,7 +7600,23 @@ namespace DlcvCSharpTest
                             }
                         }
                         AssertMaskToRBoxGeometry(edge, new[] { 15.0, 22.0 }, new JArray(10, 20, 6, 5));
-                        AssertMaskToRBoxGeometry(edge, new[] { 4.0, 2.0 }, new JArray(-0.25, 0, 5, 5));
+                    }
+                    // SDK 将原图框 [-0.2, -0.3, 5.2, 4.7] 裁成从 (0, 0) 开始的 6×5 像素窗口。
+                    var clippedBox = new JArray(-0.2, -0.3, 5.4, 5.0);
+                    using (var clipped = new Mat(5, 6, MatType.CV_8UC1, Scalar.Black))
+                    {
+                        clipped.Set(1, 1, (byte)255);
+                        AssertMaskToRBoxGeometry(clipped, new[] { 1.0, 1.0 }, clippedBox);
+                    }
+                    using (var model = new Model())
+                    {
+                        var createMask = typeof(Model).GetMethod("CreateMaskFromPolygon", BindingFlags.NonPublic | BindingFlags.Instance);
+                        var polygon = new JArray(new JArray(1, 1));
+                        using (var mask = (Mat)createMask.Invoke(model, new object[] { polygon, clippedBox.ToObject<List<double>>(), true }))
+                        {
+                            if (mask.Cols != 6 || mask.Rows != 5) throw new Exception("多边形掩码尺寸错误");
+                            AssertMaskToRBoxGeometry(mask, new[] { 1.0, 1.0 }, clippedBox);
+                        }
                     }
                     using (var empty = new Mat(20, 20, MatType.CV_8UC1, Scalar.Black))
                     {

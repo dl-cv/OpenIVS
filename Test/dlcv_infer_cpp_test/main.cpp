@@ -1882,10 +1882,10 @@ int RunMaskToRBoxSelfTest() {
     auto module = factory(1, "", json::object(), nullptr);
     cv::Mat edge = cv::Mat::zeros(5, 6, CV_8UC1);
     edge.at<unsigned char>(2, 5) = 255;
-    const auto check = [&](const json& box, double x, double y) {
+    const auto check = [&](const cv::Mat& maskImage, const json& box, double x, double y) {
         const json rawObject{{"category_id", 0}, {"category_name", "target"}, {"score", 0.9}, {"area", 1},
             {"bbox", box}, {"with_mask", true},
-            {"mask", {{"width", edge.cols}, {"height", edge.rows}, {"mask_ptr", reinterpret_cast<uintptr_t>(edge.data)}}}};
+            {"mask", {{"width", maskImage.cols}, {"height", maskImage.rows}, {"mask_ptr", reinterpret_cast<uintptr_t>(maskImage.data)}}}};
         const json rawSample{{"results", json::array({rawObject})}};
         MaskAreaParseModel model;
         const auto preserved = model.ParseToStructResultPreservingOriginalMask({{"sample_results", json::array({rawSample})}});
@@ -1900,10 +1900,13 @@ int RunMaskToRBoxSelfTest() {
         return rbox.size() == 5 && std::abs(rbox.at(0).get<double>() - x) < 0.01
             && std::abs(rbox.at(1).get<double>() - y) < 0.01;
     };
+    // SDK 将原图框 [-0.2, -0.3, 5.2, 4.7] 裁成从 (0, 0) 开始的 6×5 像素窗口。
+    cv::Mat clipped = cv::Mat::zeros(5, 6, CV_8UC1);
+    clipped.at<unsigned char>(1, 1) = 255;
     // RLE 分支以像素为方格，单像素外接矩中心比行列坐标多半个像素。
-    if (!check(json::array({10.75, 20.25, 4.5, 4.5}), 15.5, 22.5)
-        || !check(json::array({10, 20, 6, 5}), 15.5, 22.5)
-        || !check(json::array({-0.25, 0, 5, 5}), 4.5, 2.5)) {
+    if (!check(edge, json::array({10.75, 20.25, 4.5, 4.5}), 15.5, 22.5)
+        || !check(edge, json::array({10, 20, 6, 5}), 15.5, 22.5)
+        || !check(clipped, json::array({-0.2, -0.3, 5.4, 5.0}), 1.5, 1.5)) {
         PrintUtf8Line("掩码旋转框坐标错误");
         return 1;
     }
