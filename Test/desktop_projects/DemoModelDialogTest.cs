@@ -5,7 +5,7 @@ namespace DlcvDemo
 {
     public partial class MainWindow
     {
-        private void RunModelDialogTest()
+        private async void RunModelDialogTest()
         {
             string originalPath = Properties.Settings.Default.LastModelPath;
             try
@@ -14,7 +14,7 @@ namespace DlcvDemo
                 WriteUiTestResult("opening-model-dialog", null);
                 // 原生文件窗口交给隔离采集器截图，超时后结束本次测试进程。
                 Task.Delay(30000).ContinueWith(task => Environment.Exit(0));
-                button_loadmodel_Click(this, EventArgs.Empty);
+                await RunOperationAsync(SelectModelAsync, "加载模型失败");
             }
             finally
             {

@@ -185,19 +185,25 @@ namespace DLCV
         /// <summary>
         /// 停止执行压力测试
         /// </summary>
-        public void Stop()
+        public void Stop() => Stop(waitForCompletion: false);
+
+        public void RequestStop()
         {
             if (!_isRunning)
                 return;
-
-            _isRunning = false;
             _duration = DateTime.Now - _startTime;
+            _isRunning = false;
+        }
+
+        public void Stop(bool waitForCompletion)
+        {
+            RequestStop();
 
             // 等待所有线程完成
             foreach (var thread in _workerThreads)
             {
                 if (thread.IsAlive)
-                    thread.Join(1000);
+                    thread.Join(waitForCompletion ? Timeout.Infinite : 1000);
             }
 
             _workerThreads.Clear();
@@ -213,6 +219,9 @@ namespace DLCV
         }
 
         public string GetStatistics(bool target_rate, bool includeTestParameters)
+            => GetStatistics(target_rate, includeTestParameters, L);
+
+        public string GetStatistics(bool target_rate, bool includeTestParameters, Func<string, string> translate)
         {
             TimeSpan elapsed = _isRunning ? (DateTime.Now - _startTime) : _duration;
             
@@ -248,15 +257,15 @@ namespace DLCV
             }
 
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine(L("压力测试统计:"));
+            sb.AppendLine(translate("压力测试统计:"));
             if (includeTestParameters)
             {
-                sb.AppendLine(string.Format(L("线程数: {0}"), _threadCount));
-                sb.AppendLine(string.Format(L("批量大小: {0}"), _batchSize));
+                sb.AppendLine(string.Format(translate("线程数: {0}"), _threadCount));
+                sb.AppendLine(string.Format(translate("批量大小: {0}"), _batchSize));
             }
-            if (target_rate) sb.AppendLine(string.Format(L("目标速率: {0} 请求/秒"), _targetRate));
-            sb.AppendLine(string.Format(L("运行时间: {0:F2} 秒"), elapsed.TotalSeconds));
-            sb.AppendLine(string.Format(L("完成请求: {0}"), _completedRequests * _batchSize));
+            if (target_rate) sb.AppendLine(string.Format(translate("目标速率: {0} 请求/秒"), _targetRate));
+            sb.AppendLine(string.Format(translate("运行时间: {0:F2} 秒"), elapsed.TotalSeconds));
+            sb.AppendLine(string.Format(translate("完成请求: {0}"), _completedRequests * _batchSize));
             
             // 计算最近请求的平均延迟（毫秒）
             double averageLatency = 0;
@@ -306,29 +315,29 @@ namespace DLCV
             }
             if (averageLatency > 0)
             {
-                sb.AppendLine(string.Format(L("平均延迟: {0:F2}ms"), averageLatency));
+                sb.AppendLine(string.Format(translate("平均延迟: {0:F2}ms"), averageLatency));
             }
             if (averageDlcvInferLatency > 0)
             {
-                sb.AppendLine(string.Format(L("平均延迟(SDK): {0:F2}ms"), averageDlcvInferLatency));
+                sb.AppendLine(string.Format(translate("平均延迟(SDK): {0:F2}ms"), averageDlcvInferLatency));
             }
             if (maximumLatency > 0)
             {
-                sb.AppendLine(string.Format(L("最大延迟: {0:F2}ms"), maximumLatency));
+                sb.AppendLine(string.Format(translate("最大延迟: {0:F2}ms"), maximumLatency));
             }
             // if (_isFlowModelTiming && averageTotalInferLatency > 0)
             // {
             //     sb.AppendLine($"平均延迟(总时间): {averageTotalInferLatency:F2}ms");
             // }
-            sb.AppendLine(string.Format(L("实时速率: {0:F2} 请求/秒"), recentRate));
+            sb.AppendLine(string.Format(translate("实时速率: {0:F2} 请求/秒"), recentRate));
             if (_isFlowModelTiming && averageNodeTimings != null && averageNodeTimings.Count > 0)
             {
-                sb.AppendLine(L("模块平均耗时:"));
+                sb.AppendLine(translate("模块平均耗时:"));
                 foreach (var item in averageNodeTimings)
                 {
                     string title = string.IsNullOrWhiteSpace(item.NodeTitle) ? "-" : item.NodeTitle;
                     double share = averageTotalInferLatency > 0 ? item.AverageMs * 100.0 / averageTotalInferLatency : 0.0;
-                    sb.AppendLine(string.Format(L("#{0} [{1}] {2}: {3:F4}ms ({4:F1}%)"), item.NodeId, item.NodeType, title, item.AverageMs, share));
+                    sb.AppendLine(string.Format(translate("#{0} [{1}] {2}: {3:F4}ms ({4:F1}%)"), item.NodeId, item.NodeType, title, item.AverageMs, share));
                 }
             }
 
