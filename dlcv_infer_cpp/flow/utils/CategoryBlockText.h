@@ -1,9 +1,14 @@
 #pragma once
 
+#ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <Windows.h>
+#else
+#include <codecvt>
+#include <locale>
+#endif
 #include "flow/FlowTypes.h"
 #include "flow/utils/CategoryBlockUnicode.h"
 
@@ -32,6 +37,7 @@ inline bool CasedAt(const std::u32string& text, int index, int step) {
 
 inline std::string Normalize(const std::string& value) {
     if (value.empty()) return value;
+#ifdef _WIN32
     int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
     if (!length) throw std::invalid_argument("category name is not UTF-8");
     std::wstring wide(length, L'\0');
@@ -43,6 +49,18 @@ inline std::string Normalize(const std::string& value) {
             cp = 0x10000 + ((cp - 0xd800) << 10) + (wide[++i] - 0xdc00);
         text += cp;
     }
+#else
+    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> utf8;
+    std::u32string text;
+    try {
+        text = utf8.from_bytes(value);
+    } catch (const std::range_error&) {
+        throw std::invalid_argument("category name is not UTF-8");
+    }
+    if (utf8.converted() != value.size() || std::any_of(text.begin(), text.end(), [](char32_t cp) {
+        return cp >= 0xd800 && cp <= 0xdfff;
+    })) throw std::invalid_argument("category name is not UTF-8");
+#endif
     size_t start = 0, end = text.size();
     while (start < end && InRanges("space", text[start])) ++start;
     while (end > start && InRanges("space", text[end - 1])) --end;
@@ -55,6 +73,7 @@ inline std::string Normalize(const std::string& value) {
         if (found != lower.end()) for (const auto& mapped : *found) output += mapped.get<char32_t>();
         else output += cp;
     }
+#ifdef _WIN32
     wide.clear();
     for (char32_t cp : output) {
         if (cp <= 0xffff) wide += static_cast<wchar_t>(cp);
@@ -69,6 +88,9 @@ inline std::string Normalize(const std::string& value) {
     std::string result(length, '\0');
     WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), &result[0], length, nullptr, nullptr);
     return result;
+#else
+    return utf8.to_bytes(output);
+#endif
 }
 
 inline std::string PythonFloat(const Json& value) {

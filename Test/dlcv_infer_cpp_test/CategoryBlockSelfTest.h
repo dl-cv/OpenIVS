@@ -1,7 +1,16 @@
 #pragma once
 
+#include "flow/utils/CategoryBlockText.h"
+
 static int RunCategoryBlockSelfTest(int argc, wchar_t** argv) {
     using namespace dlcv_infer::flow;
+    if (category_block::Normalize(u8" 猫狗🐈A ") != u8"猫狗🐈a")
+        throw std::runtime_error("failed to normalize UTF-8 category name");
+    for (const char* value : {"\xff", "\xe4\xb8", "\xed\xa0\x80"}) {
+        try { category_block::Normalize(value); }
+        catch (const std::invalid_argument&) { continue; }
+        throw std::runtime_error("invalid UTF-8 category name was accepted");
+    }
     if (argc != 3) throw std::invalid_argument("category-block-selftest <cases.json>");
     std::ifstream stream{std::filesystem::path(argv[2])};
     Json cases;
