@@ -181,6 +181,7 @@
     <ClCompile Include="flow\modules\ForegroundBackgroundStatisticsModule.cpp" />
     <ClCompile Include="flow\modules\AlgorithmModules.cpp" />
     <ClCompile Include="flow\modules\BarcodeReaderModule.cpp" />
+    <ClCompile Include="flow\modules\BarcodeEnhancer.cpp"><FloatingPointModel>Strict</FloatingPointModel></ClCompile>
     <ClCompile Include="flow\modules\dpm\DpmEnhancer.cpp">
       <FloatingPointModel>Strict</FloatingPointModel>
       <LanguageStandard>stdcpp17</LanguageStandard>

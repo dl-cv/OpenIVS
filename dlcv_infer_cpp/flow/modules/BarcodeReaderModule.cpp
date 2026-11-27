@@ -1,6 +1,7 @@
 #include "flow/BaseModule.h"
 #include "flow/ModuleRegistry.h"
 #include "dpm/DpmEnhancer.h"
+#include "BarcodeEnhancer.h"
 #include <opencv2/imgproc.hpp>
 
 #ifndef NOMINMAX
@@ -10,6 +11,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
+#include <set>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -66,6 +69,7 @@ public:
     ZXING_FN(ReaderOptions_setTextMode, void, void*, int);
     ZXING_FN(ReaderOptions_setFormats, void, void*, const int*, int);
     ZXING_FN(BarcodeFormatsFromString, int*, const char*, int*);
+    ZXING_FN(BarcodeFormatsList, int*, int, int*);
     ZXING_FN(BarcodeFormatToString, char*, int);
     ZXING_FN(ReadBarcodes, void*, const void*, const void*);
     ZXING_FN(Barcodes_size, int, const void*);
@@ -85,6 +89,21 @@ public:
         if (!value) throw std::runtime_error("ZXing: " + Text(LastErrorMsg()));
     }
 };
+
+std::set<int> ExpandedFormats(BarcodeApi& api, const std::string& names) {
+    int count = 0;
+    BarcodeApi::Owned parsed(api.BarcodeFormatsFromString(names.c_str(), &count), api.free);
+    api.Check(parsed.get());
+    std::set<int> expanded;
+    for (int i = 0; i < count; ++i) {
+        int size = 0;
+        BarcodeApi::Owned list(api.BarcodeFormatsList(static_cast<const int*>(parsed.get())[i], &size), api.free);
+        api.Check(list.get());
+        const auto* values = static_cast<const int*>(list.get());
+        expanded.insert(values, values + size);
+    }
+    return expanded;
+}
 
 bool BarcodeOption(const Json& properties, const char* key, bool defaultValue = true) {
     if (!properties.contains(key)) return defaultValue;
@@ -147,6 +166,39 @@ Json ReadAtBothScales(BarcodeApi& api, const void* view, void* options) {
     return detections;
 }
 
+Json ReadLinear(BarcodeApi& api, void* options, const cv::Mat& gray, bool rotate, const std::set<std::string>& linearNames) {
+    const auto start = std::chrono::steady_clock::now();
+    std::vector<int> angles = !rotate ? std::vector<int>{0} : gray.rows > gray.cols ? std::vector<int>{90, 270, 0, 180} : std::vector<int>{0, 180, 90, 270};
+    const char* modes[] = {"central-p35", "central-p50", "upper-p35", "smooth-white2", "upper-white3"};
+    for (int angle : angles) {
+        cv::Mat source;
+        if (angle) cv::rotate(gray, source, angle == 90 ? cv::ROTATE_90_CLOCKWISE : angle == 180 ? cv::ROTATE_180 : cv::ROTATE_90_COUNTERCLOCKWISE);
+        else source = gray;
+        for (int attempt = 0; attempt < 5; ++attempt) {
+            auto projected = barcode::Enhance(source, attempt);
+            BarcodeApi::Owned view(api.ImageView_new(projected.data, projected.cols, projected.rows, 0x01000000,
+                static_cast<int>(projected.step), 0), api.ImageView_delete);
+            api.Check(view.get());
+            auto candidates = ReadAtBothScales(api, view.get(), options);
+            Json found = Json::array();
+            std::set<std::pair<std::string, std::string>> seen;
+            for (auto& candidate : candidates) {
+                auto format = candidate["extra_info"]["barcode_format"].get<std::string>();
+                if (!linearNames.count(format) || !seen.emplace(format, candidate["category_name"].get<std::string>()).second) continue;
+                // 合成条带不是原图位置，返回输入裁图范围。
+                candidate["bbox"] = {0, 0, gray.cols, gray.rows};
+                candidate["area"] = static_cast<double>(gray.cols) * gray.rows;
+                candidate["extra_info"]["polyline"] = {{0, 0}, {gray.cols-1, 0}, {gray.cols-1, gray.rows-1}, {0, gray.rows-1}, {0, 0}};
+                candidate["extra_info"]["barcode_enhance_mode"] = std::string(modes[attempt]) + (angle ? "-r" + std::to_string(angle) : "");
+                candidate["extra_info"]["barcode_enhance_ms"] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-start).count();
+                found.push_back(std::move(candidate));
+            }
+            if (!found.empty()) return found;
+        }
+    }
+    return Json::array();
+}
+
 class BarcodeReaderModule final : public BaseModule {
 public:
     using BaseModule::BaseModule;
@@ -158,14 +210,18 @@ public:
         }
         const bool rotate = BarcodeOption(Properties, "try_rotate"), invert = BarcodeOption(Properties, "try_invert");
         const bool enhance = BarcodeOption(Properties, "enhance", false);
-        std::string normalizedFormats = formats;
-        std::transform(normalizedFormats.begin(), normalizedFormats.end(), normalizedFormats.begin(),
-            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        const bool allowsDpm = normalizedFormats.find_first_not_of(" \t\r\n") == std::string::npos ||
-            normalizedFormats.find("datamatrix") != std::string::npos;
         Json results = Json::array();
         if (images.empty()) return ModuleIO(images, results);
         static BarcodeApi api;
+        const auto linear = ExpandedFormats(api, "AllLinear");
+        const auto allowed = ExpandedFormats(api, formats.find_first_not_of(" \t\r\n") == std::string::npos ? "All" : formats);
+        const bool allowsDpm = allowed.count(*ExpandedFormats(api, "DataMatrix").begin()) != 0;
+        bool allowsLinear = false;
+        std::set<std::string> linearNames;
+        for (int format : linear) {
+            linearNames.insert(api.Text(api.BarcodeFormatToString(format)));
+            if (allowed.count(format)) allowsLinear = true;
+        }
         BarcodeApi::Owned options(api.ReaderOptions_new(), api.ReaderOptions_delete);
         api.Check(options.get());
         api.ReaderOptions_setTryRotate(options.get(), rotate);
@@ -202,6 +258,8 @@ public:
                 api.Check(retryView.get());
                 detections = ReadAtBothScales(api, retryView.get(), options.get());
             }
+            if (detections.empty() && enhance && allowsLinear)
+                detections = ReadLinear(api, options.get(), gray, rotate, linearNames);
             if (detections.empty() && enhance && allowsDpm) {
                 const auto dpmResult = dpm::Enhance(gray, [&](const cv::Mat& source) {
                     BarcodeApi::Owned dpmOptions(api.ReaderOptions_new(), api.ReaderOptions_delete);

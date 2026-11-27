@@ -309,9 +309,22 @@ namespace DlcvDemo
                 if (Math.Abs(leftScore - rightScore) > ScoreConsistencyTolerance) return false;
                 if (!string.Equals(left.Categories[i], right.Categories[i], StringComparison.Ordinal)) return false;
                 if (left.WithMasks[i] != right.WithMasks[i]) return false;
-                if (!JToken.DeepEquals(left.ExtraInfos[i], right.ExtraInfos[i])) return false;
+                if (!JToken.DeepEquals(WithoutEnhancementTiming(left.ExtraInfos[i]), WithoutEnhancementTiming(right.ExtraInfos[i]))) return false;
             }
             return true;
+        }
+
+        private static JToken WithoutEnhancementTiming(JToken extraInfo)
+        {
+            // 两条 API 分别推理，耗时不应参与结果一致性比较；报告保留原值。
+            var copy = extraInfo.DeepClone();
+            if (copy is JObject fields)
+            {
+                fields.Remove("barcode_enhance_ms");
+                fields.Remove("dpm_enhance_ms");
+                fields.Remove("dpm_total_ms");
+            }
+            return copy;
         }
 
         private static bool IsFiniteAnomalyScoreOnly(

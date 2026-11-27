@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Newtonsoft.Json.Linq;
@@ -65,10 +66,40 @@ namespace DlcvModules
             return Cv2.IntersectConvexConvex(firstPoints, secondPoints, out Point2f[] intersection) >= area * 0.8;
         }
 
-        private static bool AllowsDataMatrix(string formats)
+        private static JArray ReadLinear(ZXingCpp.BarcodeReader reader, Mat gray, bool rotate, HashSet<string> linearNames)
         {
-            return string.IsNullOrWhiteSpace(formats) ||
-                formats.IndexOf("DataMatrix", StringComparison.OrdinalIgnoreCase) >= 0;
+            var clock = Stopwatch.StartNew();
+            int[] angles = !rotate ? new[] { 0 } : gray.Rows > gray.Cols ? new[] { 90, 270, 0, 180 } : new[] { 0, 180, 90, 270 };
+            foreach (int angle in angles)
+            using (var source = new Mat())
+            {
+                if (angle != 0) Cv2.Rotate(gray, source, angle == 90 ? RotateFlags.Rotate90Clockwise : angle == 180 ? RotateFlags.Rotate180 : RotateFlags.Rotate90Counterclockwise);
+                else gray.CopyTo(source);
+                for (int attempt = 0; attempt < BarcodeEnhancer.Modes.Length; ++attempt)
+                using (var projected = BarcodeEnhancer.Enhance(source, attempt))
+                {
+                    var view = new ImageView(projected.Data, projected.Width, projected.Height, ImageFormat.Lum, checked((int)projected.Step()));
+                    var candidates = ReadAtBothScales(reader, view);
+                    var found = new JArray();
+                    var seen = new HashSet<Tuple<string, string>>();
+                    foreach (JObject candidate in candidates)
+                    {
+                        string format = (string)candidate["extra_info"]["barcode_format"];
+                        if (!linearNames.Contains(format) || !seen.Add(Tuple.Create(format, (string)candidate["category_name"]))) continue;
+                        // 合成条带不是原图位置，返回输入裁图范围。
+                        candidate["bbox"] = new JArray(0, 0, gray.Width, gray.Height);
+                        candidate["area"] = (double)gray.Width * gray.Height;
+                        candidate["extra_info"]["polyline"] = new JArray(new JArray(0, 0), new JArray(gray.Width-1, 0),
+                            new JArray(gray.Width-1, gray.Height-1), new JArray(0, gray.Height-1), new JArray(0, 0));
+                        candidate["extra_info"]["barcode_enhance_mode"] = BarcodeEnhancer.Modes[attempt] + (angle != 0 ? "-r" + angle : "");
+                        candidate["extra_info"]["barcode_enhance_ms"] = clock.Elapsed.TotalMilliseconds;
+                        found.Add(candidate);
+                    }
+                    GC.KeepAlive(view);
+                    if (found.Count > 0) return found;
+                }
+            }
+            return new JArray();
         }
 
         private static JObject ToDpmDetection(string text, int width, int height, DpmEnhancementResult enhanced)
@@ -140,6 +171,12 @@ namespace DlcvModules
                         throw new ArgumentException("Invalid barcode formats: " + formats);
                     reader.Formats = parsed;
                 }
+                var linearNames = new HashSet<string>(BarcodeFormats.List(BarcodeFormat.AllLinear).Select(f => f.ToString()));
+                var selected = string.IsNullOrWhiteSpace(formats) ? BarcodeFormats.List(BarcodeFormat.All) :
+                    BarcodeFormats.Parse(formats);
+                var allowed = selected.SelectMany(f => BarcodeFormats.List(f)).ToArray();
+                bool allowsLinear = allowed.Any(f => linearNames.Contains(f.ToString()));
+                bool allowsDpm = allowed.Contains(BarcodeFormat.DataMatrix);
                 for (int i = 0; i < images.Count; i++)
                 {
                     var wrap = images[i];
@@ -164,7 +201,9 @@ namespace DlcvModules
                             view = new ImageView(enhanced.Data, enhanced.Width, enhanced.Height, ImageFormat.Lum, checked((int)enhanced.Step()));
                             detections = ReadAtBothScales(reader, view);
                         }
-                        if (detections.Count == 0 && enhance && AllowsDataMatrix(formats))
+                        if (detections.Count == 0 && enhance && allowsLinear)
+                            detections = ReadLinear(reader, gray, rotate, linearNames);
+                        if (detections.Count == 0 && enhance && allowsDpm)
                         {
                             byte[] grayBytes = new byte[checked(gray.Width * gray.Height)];
                             Marshal.Copy(gray.Data, grayBytes, 0, grayBytes.Length);

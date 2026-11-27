@@ -15,6 +15,8 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <future>
+#include "flow/modules/BarcodeEnhancer.h"
 #include <iomanip>
 #include <iostream>
 #include <iterator>
@@ -5613,6 +5615,7 @@ int wmain(int argc, wchar_t* argv[]) {
             if (!reader->Process({}, json::array()).ResultList.empty()) throw std::runtime_error("Empty batch failed");
             json output = json::array();
             for (const auto& item : manifest) {
+                reader = factory(1, "", item.value("properties", json::object()), nullptr);
                 std::ifstream imageFile{std::filesystem::path(Utf8ToWide(item.at("path").get<std::string>())), std::ios::binary};
                 std::vector<unsigned char> imageBytes((std::istreambuf_iterator<char>(imageFile)), std::istreambuf_iterator<char>());
                 cv::Mat raw = imageBytes.empty() ? cv::Mat() : cv::imdecode(imageBytes, cv::IMREAD_UNCHANGED), image;
@@ -5623,12 +5626,51 @@ int wmain(int argc, wchar_t* argv[]) {
                 cv::Mat padded(image.rows, image.cols + 13, image.type(), cv::Scalar::all(255));
                 cv::Mat roi = padded(cv::Rect(0, 0, image.cols, image.rows));
                 image.copyTo(roi);
+                if (item.value("properties", json::object()).value("enhance", false)) {
+                    cv::Mat gray;
+                    if (raw.channels() == 1) gray = raw;
+                    else cv::cvtColor(raw, gray, raw.channels() == 3 ? cv::COLOR_BGR2GRAY : cv::COLOR_BGRA2GRAY);
+                    for (int attempt = 0; attempt < 5; ++attempt) {
+                        auto projected = dlcv_infer::flow::barcode::Enhance(gray, attempt);
+                        std::vector<unsigned char> encoded;
+                        cv::imencode(".png", projected, encoded);
+                        auto path = std::filesystem::path(argv[4]).parent_path() /
+                            Utf8ToWide(item.at("name").get<std::string>() + "-" + std::to_string(attempt) + ".png");
+                        std::ofstream stream(path, std::ios::binary);
+                        stream.write(reinterpret_cast<const char*>(encoded.data()), encoded.size());
+                    }
+                }
                 dlcv_infer::flow::ModuleImage wrap(roi, roi, dlcv_infer::flow::TransformationState(roi.cols, roi.rows), 7, "barcode-roi");
                 auto local = reader->Process({wrap}, json::array()).ResultList;
                 if (local[0]["origin_index"] != 7 || local[0]["unique_id"] != "barcode-roi") throw std::runtime_error("Metadata lost");
                 auto result = flow.InferOneOutJson(roi);
-                output.push_back({{"name", item.at("name")}, {"local", local[0]["sample_results"]}, {"flow", result}});
+                auto start = std::chrono::steady_clock::now();
                 for (int i = 0; i < 20; ++i) reader->Process({wrap}, json::array());
+                double meanMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-start).count()/20;
+                auto withoutTiming = [](json detections) {
+                    for (auto& det : detections) det["extra_info"].erase("barcode_enhance_ms");
+                    return detections;
+                };
+                start = std::chrono::steady_clock::now();
+                std::vector<std::future<json>> concurrent;
+                for (int i = 0; i < 4; ++i) concurrent.emplace_back(std::async(std::launch::async, [&]() {
+                    return reader->Process({wrap}, json::array()).ResultList[0]["sample_results"];
+                }));
+                for (auto& task : concurrent)
+                    if (withoutTiming(task.get()) != withoutTiming(local[0]["sample_results"])) throw std::runtime_error("Concurrent result changed");
+                double fourMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-start).count();
+                if (cv::norm(image, roi, cv::NORM_INF) != 0) throw std::runtime_error("Input modified");
+                if (item.contains("expected")) {
+                    std::vector<std::string> texts;
+                    for (const auto& det : local[0]["sample_results"]) texts.push_back(det["category_name"].get<std::string>());
+                    std::sort(texts.begin(), texts.end());
+                    if (json(texts) != item["expected"]) throw std::runtime_error("Unexpected decoded text: " + item.at("name").get<std::string>());
+                }
+                output.push_back({{"name", item.at("name")}, {"local", local[0]["sample_results"]}, {"flow", result},
+                    {"mean_ms", meanMs}, {"four_concurrent_ms", fourMs}});
+                auto qrOnly = factory(1, "", {{"formats", "QRCode"}, {"enhance", true}}, nullptr)->Process({wrap}, json::array());
+                for (const auto& det : qrOnly.ResultList[0]["sample_results"])
+                    if (det["extra_info"]["barcode_format"].get<std::string>().find("QR") == std::string::npos) throw std::runtime_error("Enhanced format filter failed");
                 auto filtered = factory(1, "", {{"formats", "DataMatrix"}}, nullptr)->Process({wrap}, json::array());
                 for (const auto& det : filtered.ResultList[0]["sample_results"])
                     if (det["extra_info"]["barcode_format"] != "Data Matrix") throw std::runtime_error("Format filter failed");
