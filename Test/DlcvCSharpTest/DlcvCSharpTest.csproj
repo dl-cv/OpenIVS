@@ -116,6 +116,7 @@
     <Compile Include="FlowMaskTransformSelfTest.cs" />
     <Compile Include="ForegroundBackgroundStatisticsSelfTest.cs" />
     <Compile Include="BarcodeReaderSelfTest.cs" />
+    <Compile Include="DpmSelfTest.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

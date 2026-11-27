@@ -109,6 +109,7 @@ namespace DlcvCSharpTest
                 }
 
                 if (args != null && args.Length >= 1 && args[0] == "barcode-selftest") return BarcodeReaderSelfTest.Run(args);
+                if (args != null && args.Length >= 1 && args[0] == "dpm-selftest") return DpmSelfTest.Run(args);
 
                 if (args != null && args.Length >= 1 && args[0] == "flow-mask-transform-selftest") return FlowMaskTransformSelfTest.Run();
 

@@ -74,6 +74,10 @@
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\AlgorithmModules.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\OutputModules.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\BarcodeReaderModule.cpp" />
+    <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\BarcodeEnhancer.cpp"><FloatingPointModel>Strict</FloatingPointModel></ClCompile>
+    <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\dpm\DpmEnhancer.cpp">
+      <FloatingPointModel>Strict</FloatingPointModel>
+    </ClCompile>
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\SlidingModules.cpp" />
     <ClCompile Include="..\..\dlcv_infer_cpp\flow\modules\RegionStrokeVisualizeTemplateModules.cpp" />
   </ItemGroup>
