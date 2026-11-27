@@ -12,7 +12,9 @@
 
 #include <opencv2/core.hpp>
 
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <cctype>
 #include <cmath>
@@ -101,12 +103,14 @@ static thread_local std::string g_lastError;
 
 static void RecordNativeApiFailure(const char* apiName, const char* detail) noexcept;
 
+#ifdef _WIN32
 static std::wstring GetDlcvCapiDebugLogPath() {
     wchar_t tempDirectory[MAX_PATH + 1] = {0};
     const DWORD length = GetTempPathW(MAX_PATH + 1, tempDirectory);
     if (length == 0 || length > MAX_PATH) return {};
     return std::wstring(tempDirectory, length) + L"dlcvInfer_c_api_debug.log";
 }
+#endif
 
 
 static int CheckedCCount(size_t count) {
@@ -625,21 +629,25 @@ static void AppendCapiDebugLog(const char* format, ...) {
     vsnprintf(message, sizeof(message), format, args);
     va_end(args);
 
+#ifdef _WIN32
     const std::wstring logPath = GetDlcvCapiDebugLogPath();
     if (logPath.empty()) return;
-
     FILE* fp = nullptr;
-    if (_wfopen_s(&fp, logPath.c_str(), L"a") == 0 && fp != nullptr) {
-        fprintf(fp, "%04d-%02d-%02d %02d:%02d:%02d [dlcvInferCAPI] %s\n",
-            localTime.tm_year + 1900,
-            localTime.tm_mon + 1,
-            localTime.tm_mday,
-            localTime.tm_hour,
-            localTime.tm_min,
-            localTime.tm_sec,
-            message);
-        fclose(fp);
-    }
+    if (_wfopen_s(&fp, logPath.c_str(), L"a") != 0 || !fp) return;
+#else
+    FILE* fp = stderr;
+#endif
+    fprintf(fp, "%04d-%02d-%02d %02d:%02d:%02d [dlcvInferCAPI] %s\n",
+        localTime.tm_year + 1900,
+        localTime.tm_mon + 1,
+        localTime.tm_mday,
+        localTime.tm_hour,
+        localTime.tm_min,
+        localTime.tm_sec,
+        message);
+#ifdef _WIN32
+    fclose(fp);
+#endif
 }
 
 static std::string BytesToHex(const std::string& value) {
@@ -1311,6 +1319,9 @@ const char* DLCV_NATIVE_C_CALL dlcv_get_model_info(const char* config_str) {
     });
 }
 
+#ifndef _WIN32
+extern "C" const char* dlcv_infer_json_impl(const char*) __asm__("dlcv_infer");
+#endif
 extern "C" const char* DLCV_NATIVE_C_CALL dlcv_infer_json_impl(const char* config_str) {
     dlcv_infer::json config;
     int modelIndex = -1;

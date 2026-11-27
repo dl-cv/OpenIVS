@@ -2,10 +2,16 @@
 #include "flow/ModuleRegistry.h"
 #include <opencv2/imgproc.hpp>
 
+#ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <Windows.h>
+#define ZXING_CALL __cdecl
+#else
+#include <dlfcn.h>
+#define ZXING_CALL
+#endif
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -18,13 +24,14 @@ namespace flow {
 namespace {
 
 // C ABI declaration copyright: 2023 siiky, 2023 Axel Waggershauser.
-// Private Windows x64 C ABI subset of ZXing-C++ v3.1.1 ZXingC.h (Apache-2.0).
+// Private x64 C ABI subset of ZXing-C++ v3.1.1 ZXingC.h (Apache-2.0).
 // No STL objects cross the DLL boundary. See third_party/zxing-cpp/README.md.
 struct BarcodePoint { int x, y; };
 struct BarcodePosition { BarcodePoint topLeft, topRight, bottomRight, bottomLeft; };
 static_assert(sizeof(BarcodePosition) == 32, "ZXing C ABI position layout");
 
 class BarcodeApi final {
+#ifdef _WIN32
     struct LibraryDeleter { void operator()(HINSTANCE__* p) const { if (p) FreeLibrary(p); } };
     std::unique_ptr<HINSTANCE__, LibraryDeleter> library;
 
@@ -51,8 +58,23 @@ class BarcodeApi final {
         if (!handle) throw std::runtime_error("Cannot load ZXing.dll from module directory or C:\\dlcv\\bin, Win32=" + std::to_string(GetLastError()));
         return handle;
     }
+#else
+    struct LibraryDeleter { void operator()(void* handle) const { if (handle) dlclose(handle); } };
+    std::unique_ptr<void, LibraryDeleter> library;
+
+    static void* Load() {
+        void* handle = dlopen("libZXing.so.4", RTLD_NOW | RTLD_LOCAL);
+        if (!handle) throw std::runtime_error(dlerror());
+        return handle;
+    }
+    template<class T> T Symbol(const char* name) {
+        auto symbol = dlsym(library.get(), name);
+        if (!symbol) throw std::runtime_error(std::string("libZXing.so.4 missing export: ") + name);
+        return reinterpret_cast<T>(symbol);
+    }
+#endif
 public:
-#define ZXING_FN(name, result, ...) using name##Fn = result (__cdecl*)(__VA_ARGS__); name##Fn name = Symbol<name##Fn>("ZXing_" #name)
+#define ZXING_FN(name, result, ...) using name##Fn = result (ZXING_CALL*)(__VA_ARGS__); name##Fn name = Symbol<name##Fn>("ZXing_" #name)
     ZXING_FN(free, void, void*);
     ZXING_FN(LastErrorMsg, char*);
     ZXING_FN(ImageView_new, void*, const uint8_t*, int, int, int, int, int);
@@ -75,7 +97,7 @@ public:
     ZXING_FN(Barcode_position, BarcodePosition, const void*);
 #undef ZXING_FN
     BarcodeApi() : library(Load()) {}
-    using Owned = std::unique_ptr<void, void (__cdecl*)(void*)>;
+    using Owned = std::unique_ptr<void, void (ZXING_CALL*)(void*)>;
     std::string Text(char* value) {
         Owned owned(value, free);
         return value ? std::string(value) : std::string();
@@ -84,6 +106,8 @@ public:
         if (!value) throw std::runtime_error("ZXing: " + Text(LastErrorMsg()));
     }
 };
+
+#undef ZXING_CALL
 
 bool BarcodeOption(const Json& properties, const char* key) {
     if (!properties.contains(key)) return true;

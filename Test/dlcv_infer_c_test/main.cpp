@@ -835,10 +835,10 @@ static bool RunAllCompatibilityFlowChecks() {
     };
     const FlowCase cases[] = {
         {L"Y:\\测试模型\\AOI-元件提取_PLUS_s.dvst", L"Y:\\测试模型\\AOI-1.jpg"},
-        {L"Y:\\测试模型\\AOI-无CAD检测_PLUS_s.dvst", L"Y:\\测试模型\\OK1.png"},
-        {L"Y:\\测试模型\\模型1-元件提取_PLUS_s.dvst", L"Y:\\测试模型\\OK1.png"},
-        {L"Y:\\测试模型\\模型2-元件检测_PLUS_s.dvst", L"Y:\\测试模型\\OK1.png"},
-        {L"Y:\\测试模型\\模型3-IC检测_PLUS_s.dvst", L"Y:\\测试模型\\OK1.png"},
+        {L"Y:\\测试模型\\AOI-无CAD检测_PLUS_s.dvst", L"Y:\\测试模型\\AOI-测试.jpg"},
+        {L"Y:\\测试模型\\模型1-元件提取_PLUS_s.dvst", L"Y:\\测试模型\\AOI-测试.jpg"},
+        {L"Y:\\测试模型\\模型2-元件检测_PLUS_s.dvst", L"Y:\\测试模型\\AOI-测试.jpg"},
+        {L"Y:\\测试模型\\模型3-IC检测_PLUS_s.dvst", L"Y:\\测试模型\\AOI-测试.jpg"},
     };
 
     bool ok = true;
@@ -2489,11 +2489,12 @@ static bool RunStatisticsExtraInfoCheck() {
             jsonText = dlcv_infer_cpp_infer_json_c(index, &cImage, "{}");
             if (jsonText == nullptr) throw std::runtime_error("JSON 推理未返回结果");
             const auto jsonResult = Json::parse(jsonText);
-            if (!jsonResult.is_array() || jsonResult.size() != 1 ||
-                jsonResult[0].value("extra_info", Json(nullptr)) != expected)
+            const auto& objects = jsonResult.is_array() ? jsonResult : jsonResult.at("result_list");
+            if (!objects.is_array() || objects.size() != 1 ||
+                objects[0].value("extra_info", Json(nullptr)) != expected)
                 throw std::runtime_error("结构化与 JSON 扩展不一致");
             for (const char* key : {"with_mean", "foreground_mean", "background_mean", "with_median", "foreground_median", "background_median"})
-                if (jsonResult[0].contains(key)) throw std::runtime_error("统计仍出现在目标一级");
+                if (objects[0].contains(key)) throw std::runtime_error("统计仍出现在目标一级");
             dlcv_infer_cpp_free_string_c(jsonText);
             jsonText = nullptr;
             if (dlcv_infer_cpp_free_model_c(index) != 0) throw std::runtime_error("流程模型释放失败");
