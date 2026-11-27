@@ -1,5 +1,6 @@
 #include "flow/BaseModule.h"
 #include "flow/ModuleRegistry.h"
+#include "dpm/DpmEnhancer.h"
 #include <opencv2/imgproc.hpp>
 
 #ifndef NOMINMAX
@@ -85,8 +86,8 @@ public:
     }
 };
 
-bool BarcodeOption(const Json& properties, const char* key) {
-    if (!properties.contains(key)) return true;
+bool BarcodeOption(const Json& properties, const char* key, bool defaultValue = true) {
+    if (!properties.contains(key)) return defaultValue;
     if (!properties.at(key).is_boolean()) throw std::invalid_argument(std::string(key) + " must be a boolean");
     return properties.at(key).get<bool>();
 }
@@ -156,6 +157,12 @@ public:
             formats = Properties.at("formats").get<std::string>();
         }
         const bool rotate = BarcodeOption(Properties, "try_rotate"), invert = BarcodeOption(Properties, "try_invert");
+        const bool enhance = BarcodeOption(Properties, "enhance", false);
+        std::string normalizedFormats = formats;
+        std::transform(normalizedFormats.begin(), normalizedFormats.end(), normalizedFormats.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        const bool allowsDpm = normalizedFormats.find_first_not_of(" \t\r\n") == std::string::npos ||
+            normalizedFormats.find("datamatrix") != std::string::npos;
         Json results = Json::array();
         if (images.empty()) return ModuleIO(images, results);
         static BarcodeApi api;
@@ -184,6 +191,7 @@ public:
             cv::Mat gray, enhanced;
             if (detections.empty()) {
                 if (channels == 1) {
+                    gray = image;
                     cv::equalizeHist(image, enhanced);
                 } else {
                     cv::cvtColor(image, gray, channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
@@ -193,6 +201,39 @@ public:
                     static_cast<int>(enhanced.step), 0), api.ImageView_delete);
                 api.Check(retryView.get());
                 detections = ReadAtBothScales(api, retryView.get(), options.get());
+            }
+            if (detections.empty() && enhance && allowsDpm) {
+                const auto dpmResult = dpm::Enhance(gray, [&](const cv::Mat& source) {
+                    BarcodeApi::Owned dpmOptions(api.ReaderOptions_new(), api.ReaderOptions_delete);
+                    api.Check(dpmOptions.get());
+                    api.ReaderOptions_setTryRotate(dpmOptions.get(), false);
+                    api.ReaderOptions_setTryInvert(dpmOptions.get(), false);
+                    api.ReaderOptions_setTryDownscale(dpmOptions.get(), false);
+                    api.ReaderOptions_setTextMode(dpmOptions.get(), 2);
+                    int count = 0;
+                    BarcodeApi::Owned parsed(api.BarcodeFormatsFromString("DataMatrix", &count), api.free);
+                    api.Check(parsed.get());
+                    api.ReaderOptions_setFormats(dpmOptions.get(), static_cast<const int*>(parsed.get()), count);
+                    BarcodeApi::Owned dpmView(api.ImageView_new(source.data, source.cols, source.rows, 0x01000000,
+                        static_cast<int>(source.step), 0), api.ImageView_delete);
+                    api.Check(dpmView.get());
+                    BarcodeApi::Owned codes(api.ReadBarcodes(dpmView.get(), dpmOptions.get()), api.Barcodes_delete);
+                    api.Check(codes.get());
+                    if (!api.Barcodes_size(codes.get())) return std::string();
+                    const auto* code = api.Barcodes_at(codes.get(), 0);
+                    api.Check(code);
+                    return api.Text(api.Barcode_text(code));
+                });
+                if (!dpmResult.text.empty()) {
+                    const double width = gray.cols, height = gray.rows;
+                    Json line = {{0.0, 0.0}, {width - 1, 0.0}, {width - 1, height - 1}, {0.0, height - 1}, {0.0, 0.0}};
+                    detections.push_back(Json{{"category_id", 0}, {"category_name", dpmResult.text}, {"score", 1.0},
+                        {"bbox", {0.0, 0.0, width, height}}, {"area", width * height},
+                        {"with_bbox", true}, {"with_angle", false}, {"angle", -100}, {"with_mask", false},
+                        {"extra_info", {{"barcode_format", "Data Matrix"}, {"polyline", line},
+                            {"dpm_decode_mode", dpmResult.mode}, {"dpm_enhance_ms", dpmResult.enhanceMs},
+                            {"dpm_total_ms", dpmResult.totalMs}}}});
+                }
             }
             auto entry = images[i].ToMeta();
             entry["type"] = "local"; entry["index"] = i; entry["sample_results"] = std::move(detections);

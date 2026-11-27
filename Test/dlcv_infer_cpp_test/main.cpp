@@ -5489,7 +5489,13 @@ int RunGetModelInfoCommand(int argc, wchar_t* argv[], bool dvsInfo) {
 }
 }  // namespace
 
+#include "DpmSelfTest.h"
+
 int wmain(int argc, wchar_t* argv[]) {
+    if (argc >= 2 && std::wstring(argv[1]) == L"dpm-selftest") {
+        try { return dpm_test::Run(argc, argv); }
+        catch (const std::exception& ex) { std::cerr << ex.what() << std::endl; return 1; }
+    }
     if (argc >= 2 && std::wstring(argv[1]) == L"default-device-selftest") {
         return RunDefaultDeviceSelfTest(argc, argv);
     }
