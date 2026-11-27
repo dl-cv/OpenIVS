@@ -2215,9 +2215,9 @@ namespace dlcv_infer {
         return convertWstringToUtf8(std::wstring(buffer.data(), length));
 #else
         std::error_code ec;
-        const fs::path absolutePath = fs::absolute(fs::path(path), ec);
+        const fs::path absolutePath = fs::absolute(fs::u8path(convertWstringToUtf8(path)), ec);
         if (ec) throw std::runtime_error("无法获取流程模型绝对路径");
-        return convertWstringToUtf8(absolutePath.wstring());
+        return absolutePath.u8string();
 #endif
     }
 
