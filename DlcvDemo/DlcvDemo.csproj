@@ -136,12 +136,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="CliRunner.cs" />
-    <Compile Include="DemoExecution.cs" />
-    <Compile Include="DemoRemoteResult.cs" />
-    <Compile Include="RemoteWorker.cs" />
-    <Compile Include="..\Test\desktop_projects\RemoteWorkerSelfTest.cs">
-      <Link>Tests\RemoteWorkerSelfTest.cs</Link>
-    </Compile>
     <Compile Include="ImageFileReader.cs" />
     <Compile Include="CudaMemoryInfo.cs" />
     <Compile Include="EnvironmentInfoCollector.cs" />
@@ -256,7 +250,6 @@
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Target Name="CopyOutputArtifacts" AfterTargets="Build">
-    <WriteLinesToFile File="$(TargetDir)remote-worker-v1.txt" Lines="1" Overwrite="true" WriteOnlyWhenDifferent="true" />
     <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(TargetDir)C# 测试程序.exe" />
     <Copy SourceFiles="$(TargetPath).config" DestinationFiles="$(TargetDir)C# 测试程序.exe.config" Condition="Exists('$(TargetPath).config')" />
     <Copy SourceFiles="$(TargetDir)$(TargetName).pdb" DestinationFiles="$(TargetDir)C# 测试程序.pdb" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />

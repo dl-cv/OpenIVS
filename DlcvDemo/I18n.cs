@@ -69,14 +69,6 @@ namespace DlcvDemo
             { "{0}：{1}个", "{0}: {1}" },
             { "模型: ", "Model: " },
             { "图片: ", "Image: " },
-            { "AI模型 (*.dvt;*.dvo)", "AI models (*.dvt;*.dvo)" },
-            { "云端测试支持 .dvt 和 .dvo 模型。", "Cloud testing supports .dvt and .dvo models." },
-            { "云端测试不支持本机 RPC 模式。", "Cloud testing does not support local RPC mode." },
-            { "检查加密狗失败", "Failed to Check License Dongle" },
-            { "读取模型信息失败", "Failed to Read Model Information" },
-            { "释放模型失败", "Failed to Release Model" },
-            { "启动压力测试失败", "Failed to Start Stress Test" },
-            { "启动一致性测试失败", "Failed to Start Consistency Test" },
             { "AI模型 (*.dvt;*.dvo;*.dvst;*.dvso)", "AI Model (*.dvt;*.dvo;*.dvst;*.dvso)" },
             { "所有文件 (*.*)", "All Files (*.*)" },
             { "选择模型", "Select Model" },
@@ -243,11 +235,9 @@ namespace DlcvDemo
             }
         }
 
-        internal static string T(string zhText) => T(zhText, CurrentLanguage);
-
-        internal static string T(string zhText, string language)
+        internal static string T(string zhText)
         {
-            if (language != English || string.IsNullOrEmpty(zhText))
+            if (CurrentLanguage != English || string.IsNullOrEmpty(zhText))
             {
                 return zhText;
             }

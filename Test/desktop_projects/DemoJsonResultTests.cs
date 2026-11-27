@@ -80,7 +80,7 @@ namespace DlcvDemo
                 object originalModel = model;
                 try
                 {
-                    await LoadModelFromPath(temporaryPrefix + ".dvsp", uiTestOptions.DeviceId, false);
+                    LoadModelFromPath(temporaryPrefix + ".dvsp", uiTestOptions.DeviceId, false);
                 }
                 catch (NotSupportedException)
                 {

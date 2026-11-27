@@ -14,13 +14,11 @@ PACKAGE_NAME = "dlcvpro_infer_csharp"
 STAGING_DIR = REPO_ROOT / PACKAGE_NAME
 DEMO_OUTPUT_DIR = REPO_ROOT / "DlcvDemo" / "bin"
 DEMO_EXE_NAME = "C# 测试程序.exe"
-REMOTE_WORKER_MARKER = "remote-worker-v1.txt"
 RPC_EXE_NAME = "AIModelRPC.exe"
 RPC_EXE_SOURCE = Path(sys.prefix) / "Lib" / "site-packages" / PACKAGE_NAME / RPC_EXE_NAME
 PACKAGE_OUTPUT_FILE_NAMES = (
     DEMO_EXE_NAME,
     f"{DEMO_EXE_NAME}.config",
-    REMOTE_WORKER_MARKER,
     "DlcvCsharpApi.dll",
     "ZXingCpp.dll",
     "ZXing.dll",
@@ -144,11 +142,6 @@ def rebuild_staging_directory() -> None:
 def copy_package_files() -> list[Path]:
     if not DEMO_OUTPUT_DIR.is_dir():
         raise FileNotFoundError(f"未找到 C# 构建输出目录: {DEMO_OUTPUT_DIR}")
-
-    marker = DEMO_OUTPUT_DIR / REMOTE_WORKER_MARKER
-    require_file(marker)
-    if marker.read_text(encoding="utf-8-sig").strip() != "1":
-        raise RuntimeError(f"远程测试程序标记无效: {marker}")
 
     rebuild_staging_directory()
 

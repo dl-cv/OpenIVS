@@ -18,11 +18,6 @@ namespace DlcvDemo
     public partial class MainWindow : Form
     {
         private readonly UiTestOptions uiTestOptions;
-        private readonly IDemoExecution execution;
-        private readonly bool useRemoteExecution;
-        private bool operationRunning;
-        private bool pressurePollRunning;
-        private bool closeReady;
         private bool environmentCheckRunning;
         private const int JsonPreviewCharacterLimit = 32768;
         private bool savingJson;
@@ -52,18 +47,12 @@ namespace DlcvDemo
             return -1; // 默认使用CPU
         }
 
-        public MainWindow() : this(null, null)
+        public MainWindow() : this(null)
         {
         }
 
-        public MainWindow(IDemoExecution execution) : this(null, execution)
+        internal MainWindow(UiTestOptions options)
         {
-        }
-
-        internal MainWindow(UiTestOptions options, IDemoExecution execution)
-        {
-            this.execution = execution ?? new LocalDemoExecution();
-            useRemoteExecution = execution != null;
             uiTestOptions = options;
             UiTestExitCode = options == null ? 0 : 1;
             InitializeComponent();
@@ -236,7 +225,7 @@ namespace DlcvDemo
         {
             UpdateLanguageButton();
             UpdateResultViewButton();
-            if (pressureTest != null)
+            if (pressureTestRunner != null && pressureTestRunner.IsRunning)
             {
                 if (isConsistencyTestMode)
                 {
@@ -419,10 +408,10 @@ namespace DlcvDemo
         private void GetDeviceInfo()
         {
             Thread.Sleep(1);
-            JObject device_info = execution.GetGpuInfo();
+            JObject device_info = Utils.GetGpuInfo();
 
             // 启动时先做一次加密狗检测：都没有则只展示结果、不加载推理 DLL
-            JObject allDogInfo = execution.GetDogInfo();
+            JObject allDogInfo = QueryAllDogInfo();
             bool hasDog = HasAnyDog(allDogInfo);
 
             RunOnUiThread(delegate
@@ -474,7 +463,7 @@ namespace DlcvDemo
                 }
             });
 
-            if (!hasDog || useRemoteExecution)
+            if (!hasDog)
             {
                 return;
             }
@@ -489,6 +478,22 @@ namespace DlcvDemo
             catch (Exception ex)
             {
                 Console.WriteLine("GetDeviceInfo/keep_max_clock failed: " + ex.Message);
+            }
+        }
+
+        private static JObject QueryAllDogInfo()
+        {
+            try
+            {
+                return sntl_admin_csharp.DogUtils.GetAllDogInfo();
+            }
+            catch
+            {
+                return new JObject
+                {
+                    ["sentinel"] = new JObject { ["devices"] = new JArray(), ["features"] = new JArray() },
+                    ["virbox"] = new JObject { ["devices"] = new JArray(), ["features"] = new JArray() }
+                };
             }
         }
 
@@ -562,14 +567,14 @@ namespace DlcvDemo
         /// <summary>
         /// 「检查加密狗」按钮：查询并显示 Sentinel/Virbox 信息。
         /// </summary>
-        private async Task ShowDogInfoAsync()
+        private void ShowDogInfo()
         {
-            JObject allInfo = await ExecuteAsync(execution.GetDogInfo);
+            JObject allInfo = QueryAllDogInfo();
             bool noDog = !HasAnyDog(allInfo);
             richTextBox1.Text = FormatDogInfoText(allInfo, prependNoDogHint: noDog);
         }
 
-        private IDemoModel model;
+        private dynamic model;
         private string model_path;
         private string image_path;
         private int batch_size = 1;
@@ -578,24 +583,12 @@ namespace DlcvDemo
         private string modelInfoText;
         private string modelInfoAfterInferText;
         private bool showJsonResult;
-        private IDemoPressureTest pressureTest;
-        private int pressureThreadCount;
+        private PressureTestRunner pressureTestRunner;
         private System.Windows.Forms.Timer updateTimer;
-        private bool isConsistencyTestMode;
-
-        private Task<T> ExecuteAsync<T>(Func<T> operation)
-        {
-            return useRemoteExecution ? Task.Run(operation) : Task.FromResult(operation());
-        }
-
-        private async Task RunOperationAsync(Func<Task> operation, string errorTitle)
-        {
-            if (operationRunning) return;
-            operationRunning = true;
-            try { await operation(); }
-            catch (Exception ex) { ReportError(I18n.T(errorTitle), ex); }
-            finally { operationRunning = false; }
-        }
+        private dynamic baselineJsonResult = null;
+        private volatile bool shouldStopPressureTest = false;
+        private bool isConsistencyTestMode = false; // 控制是否进行一致性测试
+        private bool isCurrentFlowModel = false; // 当前是否为流程模型(dvst/dvso)
 
         private string WithLoadedModelPath(string infoText)
         {
@@ -608,10 +601,13 @@ namespace DlcvDemo
 
         private string BuildPressureTestText(string statistics)
         {
+            int threadCount = pressureTestRunner == null
+                ? (int)numericUpDown_num_thread.Value
+                : pressureTestRunner.ThreadCount;
             var sb = new StringBuilder();
             sb.AppendLine(I18n.T("模型: ") + model_path);
             sb.AppendLine(I18n.T("图片: ") + image_path);
-            sb.AppendLine(string.Format(I18n.T("线程数: {0}"), pressureThreadCount));
+            sb.AppendLine(string.Format(I18n.T("线程数: {0}"), threadCount));
             sb.AppendLine(string.Format(I18n.T("批量大小: {0}"), batch_size));
             sb.AppendLine();
             sb.Append(statistics);
@@ -628,7 +624,6 @@ namespace DlcvDemo
             catch (Exception ex)
             {
                 // 不要因为释放失败影响后续加载
-                if (useRemoteExecution) throw;
                 Console.WriteLine("Dispose model failed: " + ex.Message);
             }
             finally
@@ -637,60 +632,64 @@ namespace DlcvDemo
             }
         }
 
-        private async void button_loadmodel_Click(object sender, EventArgs e)
-            => await RunOperationAsync(SelectModelAsync, "加载模型失败");
-
-        private async Task SelectModelAsync()
+        private void button_loadmodel_Click(object sender, EventArgs e)
         {
-            using (var openFileDialog = new OpenFileDialog())
-            {
-                openFileDialog.RestoreDirectory = true;
+            OpenFileDialog openFileDialog = new OpenFileDialog();
+            openFileDialog.RestoreDirectory = true;
 
-                openFileDialog.Filter = useRemoteExecution
-                    ? I18n.T("AI模型 (*.dvt;*.dvo)") + "|*.dvt;*.dvo"
-                    : I18n.T("AI模型 (*.dvt;*.dvo;*.dvst;*.dvso)") + "|*.dvt;*.dvo;*.dvst;*.dvso|" + I18n.T("所有文件 (*.*)") + "|*.*";
-                openFileDialog.Title = I18n.T("选择模型");
+            openFileDialog.Filter = I18n.T("AI模型 (*.dvt;*.dvo;*.dvst;*.dvso)") + "|*.dvt;*.dvo;*.dvst;*.dvso|" + I18n.T("所有文件 (*.*)") + "|*.*";
+            openFileDialog.Title = I18n.T("选择模型");
+            try
+            {
+                openFileDialog.InitialDirectory = Path.GetDirectoryName(Properties.Settings.Default.LastModelPath);
+                openFileDialog.FileName = Path.GetFileName(Properties.Settings.Default.LastModelPath);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+
+            if (openFileDialog.ShowDialog(this) == DialogResult.OK)
+            {
                 try
                 {
-                    openFileDialog.InitialDirectory = Path.GetDirectoryName(Properties.Settings.Default.LastModelPath);
-                    openFileDialog.FileName = Path.GetFileName(Properties.Settings.Default.LastModelPath);
+                    LoadModelFromPath(openFileDialog.FileName, null, true);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine(ex.Message);
+                    ReportError(I18n.T("加载模型失败"), ex);
                 }
-
-                if (openFileDialog.ShowDialog(this) == DialogResult.OK)
-                    await LoadModelFromPath(openFileDialog.FileName, null, true);
             }
         }
 
-        private async Task LoadModelFromPath(string selectedFilePath, int? deviceOverride, bool saveLastPath)
+        private void LoadModelFromPath(string selectedFilePath, int? deviceOverride, bool saveLastPath)
         {
             string ext = Path.GetExtension(selectedFilePath) ?? "";
             if (ext.Equals(".dvsp", StringComparison.OrdinalIgnoreCase))
                 throw new NotSupportedException(I18n.T("不支持 .dvsp 模型推理"));
-            if (useRemoteExecution && !ext.Equals(".dvt", StringComparison.OrdinalIgnoreCase)
-                && !ext.Equals(".dvo", StringComparison.OrdinalIgnoreCase))
-                throw new NotSupportedException(I18n.T("云端测试支持 .dvt 和 .dvo 模型。"));
-            bool rpcMode = checkBox_rpc_mode.Checked;
-            if (useRemoteExecution && rpcMode)
-                throw new NotSupportedException(I18n.T("云端测试不支持本机 RPC 模式。"));
             ClearResultData();
             if (saveLastPath)
             {
                 Properties.Settings.Default.LastModelPath = selectedFilePath;
                 Properties.Settings.Default.Save();
             }
-            await StopPressureTest();
-            int device = deviceOverride ?? GetSelectedDeviceId();
-            model = await ExecuteAsync(() =>
+            isCurrentFlowModel =
+                ext.Equals(".dvst", StringComparison.OrdinalIgnoreCase) ||
+                ext.Equals(".dvso", StringComparison.OrdinalIgnoreCase);
+            if (model != null)
             {
                 DisposeCurrentModel();
-                return execution.LoadModel(selectedFilePath, device, rpcMode);
-            });
+            }
+            bool rpc_mode = false;
+            try
+            {
+                rpc_mode = this.checkBox_rpc_mode != null && this.checkBox_rpc_mode.Checked;
+            }
+            catch { }
+
+            model = new Model(selectedFilePath, deviceOverride ?? GetSelectedDeviceId(), rpc_mode);
             model_path = selectedFilePath;
-            await ShowModelInfoAsync();
+            button_getmodelinfo_Click(this, EventArgs.Empty);
             JObject cachedInfo = model.GetCachedModelInfo();
             JObject infoNode = cachedInfo != null ? (cachedInfo["model_info"] as JObject ?? cachedInfo) : null;
             // 加载新模型时恢复保存阈值，避免沿用上一个模型或控件的初始值。
@@ -709,10 +708,7 @@ namespace DlcvDemo
                 : ImageViewer.LabelTextMode.CategoryAndScore;
         }
 
-        private async void button_infer_json_Click(object sender, EventArgs e)
-            => await RunOperationAsync(InferJsonAsync, "推理JSON失败");
-
-		private async Task InferJsonAsync()
+		private void button_infer_json_Click(object sender, EventArgs e)
 		{
 			ClearResultData();
 			try
@@ -728,31 +724,29 @@ namespace DlcvDemo
 					return;
 				}
 
-				using (var image = ImageFileReader.Read(image_path))
+				Mat image = ImageFileReader.Read(image_path);
+				if (image.Empty())
 				{
-					if (image.Empty())
-					{
-						Console.WriteLine("图像解码失败！");
-						return;
-					}
-					JObject data = new JObject();
-					data["threshold"] = (float)numericUpDown_threshold.Value;
-					data["with_mask"] = true;
+					Console.WriteLine("图像解码失败！");
+					return;
+				}
+				JObject data = new JObject();
+				data["threshold"] = (float)numericUpDown_threshold.Value;
+				data["with_mask"] = true;
 
-					Mat inferImage = PrepareImageForModelInput(image);
-					try
+				Mat inferImage = PrepareImageForModelInput(image);
+				try
+				{
+					var json = model.InferOneOutJson(inferImage, data);
+					lastJsonText = JsonConvert.SerializeObject(json, Formatting.Indented);
+					showJsonResult = true;
+					ApplyResultView();
+				}
+				finally
+				{
+					if (!object.ReferenceEquals(inferImage, image))
 					{
-						var json = await ExecuteAsync(() => model.InferOneOutJson(inferImage, data));
-						lastJsonText = JsonConvert.SerializeObject(json, Formatting.Indented);
-						showJsonResult = true;
-						ApplyResultView();
-					}
-					finally
-					{
-						if (!object.ReferenceEquals(inferImage, image))
-						{
-							inferImage.Dispose();
-						}
+						inferImage.Dispose();
 					}
 				}
 			}
@@ -762,34 +756,29 @@ namespace DlcvDemo
 			}
 		}
 
-        private async void button_getmodelinfo_Click(object sender, EventArgs e)
-            => await RunOperationAsync(ShowModelInfoAsync, "读取模型信息失败");
-
-        private async Task ShowModelInfoAsync()
+        private void button_getmodelinfo_Click(object sender, EventArgs e)
         {
             if (model == null)
             {
                 MessageBox.Show(I18n.T("请先加载模型文件！"));
                 return;
             }
-            JObject result = await ExecuteAsync(model.GetModelInfo);
+            JObject result = model.GetModelInfo();
             string infoText = result.ContainsKey("model_info")
                 ? result["model_info"].ToString()
                 : result.ToString();
-            richTextBox1.Text = WithLoadedModelPath(await WithCudaMemoryInfo(infoText));
+            richTextBox1.Text = WithLoadedModelPath(WithCudaMemoryInfo(infoText));
         }
 
         // 模型信息前显示当前显存占用，便于确认模型加载和释放后的显存变化。
-        private async Task<string> WithCudaMemoryInfo(string infoText)
+        private string WithCudaMemoryInfo(string infoText)
         {
             int deviceId = GetSelectedDeviceId();
-            return await ExecuteAsync(() => execution.DescribeCudaMemory(deviceId)) + Environment.NewLine + infoText;
+            uint deviceIndex = deviceId >= 0 ? (uint)deviceId : 0u;
+            return CudaMemoryInfo.Describe(deviceIndex) + Environment.NewLine + infoText;
         }
 
-        private async void button_openimage_Click(object sender, EventArgs e)
-            => await RunOperationAsync(SelectImageAsync, "推理失败");
-
-        private async Task SelectImageAsync()
+        private void button_openimage_Click(object sender, EventArgs e)
         {
             if (model == null)
             {
@@ -812,20 +801,19 @@ namespace DlcvDemo
             }
             if (openFileDialog.ShowDialog(this) == DialogResult.OK)
             {
-                await OpenImageFromPath(openFileDialog.FileName, true);
+                OpenImageFromPath(openFileDialog.FileName, true);
             }
         }
 
-        private async Task OpenImageFromPath(string selectedImagePath, bool saveLastPath)
+        private void OpenImageFromPath(string selectedImagePath, bool saveLastPath)
         {
-            await StopPressureTest();
             image_path = selectedImagePath;
             if (saveLastPath)
             {
                 Properties.Settings.Default.LastImagePath = image_path;
                 Properties.Settings.Default.Save();
             }
-            await InferImageAsync();
+            button_infer_Click(this, EventArgs.Empty);
         }
 
         private async void RunUiTest()
@@ -859,11 +847,11 @@ namespace DlcvDemo
 
                 if (uiTestOptions.InteractiveDialogs)
                 {
-                    await SelectModelAsync();
+                    button_loadmodel_Click(this, EventArgs.Empty);
                 }
                 else
                 {
-                    await LoadModelFromPath(uiTestOptions.ModelPath, uiTestOptions.DeviceId, false);
+                    LoadModelFromPath(uiTestOptions.ModelPath, uiTestOptions.DeviceId, false);
                 }
                 if (model == null)
                 {
@@ -890,7 +878,7 @@ namespace DlcvDemo
                 if (string.Equals(uiTestOptions.TestMode, "model-info", StringComparison.OrdinalIgnoreCase)
                     && string.IsNullOrWhiteSpace(uiTestOptions.ImagePath))
                 {
-                    await ShowModelInfoAsync();
+                    button_getmodelinfo_Click(this, EventArgs.Empty);
                     modelInfoText = richTextBox1.Text;
                     SaveUiTestScreenshot();
                     UiTestExitCode = 0;
@@ -900,11 +888,11 @@ namespace DlcvDemo
 
                 if (uiTestOptions.InteractiveDialogs)
                 {
-                    await SelectImageAsync();
+                    button_openimage_Click(this, EventArgs.Empty);
                 }
                 else
                 {
-                    await OpenImageFromPath(uiTestOptions.ImagePath, false);
+                    OpenImageFromPath(uiTestOptions.ImagePath, false);
                 }
                 if (uiTestOptions.InteractiveDialogs
                     && !PathsEqual(image_path, uiTestOptions.ImagePath))
@@ -913,14 +901,14 @@ namespace DlcvDemo
                 }
                 if (string.Equals(uiTestOptions.TestMode, "pressure", StringComparison.OrdinalIgnoreCase))
                 {
-                    await StartPressureTest(false);
-                    if (pressureTest == null)
+                    StartPressureTest(false);
+                    if (pressureTestRunner == null || !pressureTestRunner.IsRunning)
                     {
                         throw new InvalidOperationException(I18n.T("压力测试未启动。"));
                     }
                     await Task.Delay(uiTestOptions.PressureDurationMs);
-                    await UpdatePressureStatisticsText();
-                    await StopPressureTest();
+                    StopPressureTest();
+                    UpdatePressureStatisticsText();
                     string pressureText = richTextBox1.Text ?? string.Empty;
                     string modelPrefix = I18n.T("模型: ");
                     string imagePrefix = I18n.T("图片: ");
@@ -963,7 +951,7 @@ namespace DlcvDemo
                     }
                     if (uiTestOptions.TestMode == "infer-json")
                     {
-                        await InferJsonAsync();
+                        button_infer_json_Click(this, EventArgs.Empty);
                         if (string.IsNullOrEmpty(lastJsonText))
                         {
                             throw new InvalidOperationException(richTextBox1.Text);
@@ -980,7 +968,7 @@ namespace DlcvDemo
                     }
                     if (string.Equals(uiTestOptions.TestMode, "model-info", StringComparison.OrdinalIgnoreCase))
                     {
-                        await ShowModelInfoAsync();
+                        button_getmodelinfo_Click(this, EventArgs.Empty);
                         modelInfoAfterInferText = richTextBox1.Text;
                     }
                 }
@@ -1095,7 +1083,7 @@ namespace DlcvDemo
             {
                 return;
             }
-            if (pressureTest != null)
+            if (pressureTestRunner != null && pressureTestRunner.IsRunning)
             {
                 return;
             }
@@ -1116,13 +1104,9 @@ namespace DlcvDemo
             richTextBox1.ScrollBars = wordWrapEnabled ? ScrollBars.Vertical : ScrollBars.Both;
         }
 
-        private async void button_infer_Click(object sender, EventArgs e)
-            => await RunOperationAsync(InferImageAsync, "推理失败");
-
-        private async Task InferImageAsync()
+        private void button_infer_Click(object sender, EventArgs e)
         {
             ClearResultData();
-            Mat image = null;
             try
             {
                 if (model == null)
@@ -1136,7 +1120,7 @@ namespace DlcvDemo
                     return;
                 }
 
-                image = ImageFileReader.Read(image_path);
+                Mat image = ImageFileReader.Read(image_path);
                 if (image.Empty())
                 {
                     throw new Exception(I18n.T("图像解码失败！"));
@@ -1158,7 +1142,7 @@ namespace DlcvDemo
 					{
 						inferImageList.Add(inferImage);
 					}
-					result = await ExecuteAsync(() => model.InferBatch(inferImageList, data));
+					result = model.InferBatch(inferImageList, data);
 				}
 				finally
 				{
@@ -1172,10 +1156,7 @@ namespace DlcvDemo
                 double delay_ms = stopwatch.ElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 Console.WriteLine($"推理时间: {delay_ms:F2}ms");
 
-                var oldResult = imagePanel1.currentResults;
                 imagePanel1.UpdateImageAndResult(image, result);
-                if (useRemoteExecution && oldResult.HasValue)
-                    DemoRemoteResult.DisposeMasks(oldResult.Value);
 
                 StringBuilder sb = new StringBuilder();
                 sb.AppendLine(I18n.T("模型: ") + model_path);
@@ -1226,10 +1207,6 @@ namespace DlcvDemo
             catch (Exception ex)
             {
                 ReportError(I18n.T("推理失败"), ex);
-            }
-            finally
-            {
-                image?.Dispose();
             }
         }
 
@@ -1335,72 +1312,179 @@ namespace DlcvDemo
             return image;
         }
 
-        private async void UpdateStatisticsTimer_Tick(object sender, EventArgs e)
+        /// <summary>
+        /// 执行模型推理的测试操作
+        /// </summary>
+        /// <param name="parameter">包含图像列表的参数</param>
+        private void ModelInferAction(object parameter)
         {
-            if (uiTestOptions != null || operationRunning || pressurePollRunning || pressureTest == null) return;
-            pressurePollRunning = true;
-            try { await UpdatePressureStatisticsText(); }
-            catch (Exception ex)
+            try
             {
-                if (pressureTest != null)
+                // 如果需要停止测试，立即返回，不执行后续推理
+                if (shouldStopPressureTest)
                 {
-                    try { await StopPressureTest(); }
-                    catch (Exception stopError) { Console.WriteLine(stopError); }
-                    ReportError(I18n.T("推理错误: "), ex);
+                    return;
+                }
+
+                var image_list = (List<Mat>)parameter;
+                if (image_list == null)
+                {
+                    return;
+                }
+
+                // 调用InferInternal进行推理
+
+                JObject infer_config = new JObject();
+                infer_config["with_mask"] = false;
+
+                var inferSw = Stopwatch.StartNew();
+                var resultTuple = model.InferInternal(image_list, infer_config);
+                inferSw.Stop();
+                IntPtr currentResultPtr = resultTuple.Item2;
+                double dlcvInferMs = 0.0;
+                double totalInferMs = 0.0;
+                DlcvModules.InferTiming.GetLast(out dlcvInferMs, out totalInferMs);
+                if (totalInferMs <= 0.0)
+                {
+                    totalInferMs = inferSw.Elapsed.TotalMilliseconds;
+                }
+                if (dlcvInferMs <= 0.0)
+                {
+                    dlcvInferMs = totalInferMs;
+                }
+                var flowNodeTimings = new List<PressureNodeTiming>();
+                var rawNodeTimings = DlcvModules.InferTiming.GetLastFlowNodeTimings();
+                for (int i = 0; i < rawNodeTimings.Count; i++)
+                {
+                    var timing = rawNodeTimings[i];
+                    if (timing == null) continue;
+                    flowNodeTimings.Add(new PressureNodeTiming(
+                        timing.NodeId,
+                        timing.NodeType,
+                        timing.NodeTitle,
+                        timing.ElapsedMs));
+                }
+                pressureTestRunner?.RecordLatencyBreakdown(
+                    dlcvInferMs,
+                    totalInferMs,
+                    flowNodeTimings);
+
+                try
+                {
+                    // 根据模式决定是否进行一致性检查
+                    if (isConsistencyTestMode)
+                    {
+                        String thread_id = Thread.CurrentThread.ManagedThreadId.ToString("00");
+                        // 一致性测试模式：比较推理结果
+                        // 第一次推理时获取基准结果
+                        if (baselineJsonResult == null)
+                        {
+                            Debug.WriteLine($"线程{thread_id}基准结果为空，写入基准结果……");
+                            baselineJsonResult = resultTuple.Item1;
+                            string baselineJson = JsonConvert.SerializeObject(baselineJsonResult, Formatting.None);
+                            Debug.WriteLine($"线程{thread_id}写入基准结果完成。");
+                            Debug.WriteLine($"线程{thread_id}基准结果：" + baselineJson);
+                            return; // 第一次推理，获取基准后直接返回
+                        }
+                        else
+                        {
+                            // 再次检查是否需要停止测试（可能在其他线程中被设置）
+                            if (shouldStopPressureTest)
+                            {
+                                return;
+                            }
+
+                            // 直接比较JSON字符串
+                            string baselineJson = JsonConvert.SerializeObject(baselineJsonResult, Formatting.None);
+                            string currentJson = JsonConvert.SerializeObject(resultTuple.Item1, Formatting.None);
+
+                            if (baselineJson != currentJson)
+                            {
+                                Debug.WriteLine($"线程{thread_id}基准结果与当前结果不一致");
+                                Debug.WriteLine($"线程{thread_id}基准结果：" + baselineJson);
+                                Debug.WriteLine($"线程{thread_id}当前结果：" + currentJson);
+
+                                // 立即设置停止标志，防止其他线程继续执行
+                                shouldStopPressureTest = true;
+
+                                // 发现不一致，向主线程报告
+                                RunOnUiThread(delegate
+                                {
+                                    // 立即停止测试
+                                    StopPressureTest();
+
+                                    StringBuilder sb = new StringBuilder();
+                                    sb.AppendLine(I18n.T("发现推理结果不一致！测试已停止。"));
+                                    sb.AppendLine(I18n.T("=== 基准结果 ==="));
+                                    sb.AppendLine(JsonConvert.SerializeObject(baselineJsonResult, Formatting.Indented));
+                                    sb.AppendLine(I18n.T("\n=== 当前结果 ==="));
+                                    sb.AppendLine(JsonConvert.SerializeObject(resultTuple.Item1, Formatting.Indented));
+                                    string s = sb.ToString();
+
+                                    richTextBox1.Text = s;
+                                    MessageBox.Show(this, I18n.T("检测到推理结果不一致，测试已停止！"), I18n.T("结果不一致"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+
+                                    baselineJsonResult = null;
+                                });
+                            }
+                        }
+                    }
+                    // 性能测试模式：不保存或比较结果，直接继续
+                }
+                finally
+                {
+                    if (currentResultPtr != IntPtr.Zero)
+                    {
+                        DllLoader.Instance.dlcv_free_model_result(currentResultPtr);
+                    }
                 }
             }
-            finally { pressurePollRunning = false; }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("模型推理出错: " + ex.Message);
+                // 设置停止标志
+                shouldStopPressureTest = true;
+
+                // 向主线程报告错误
+                RunOnUiThread(delegate
+                {
+                    StopPressureTest();
+                    string testType = I18n.T(isConsistencyTestMode ? "一致性测试" : "压力测试");
+                    MessageBox.Show(this, string.Format(I18n.T("{0}过程中发生错误: {1}"), testType, ex.Message), I18n.T("错误"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    richTextBox1.Text = I18n.T("推理错误: ") + ex.Message;
+                });
+            }
         }
 
-        private async Task UpdatePressureStatisticsText()
+        /// <summary>
+        /// 定时更新UI上的统计信息
+        /// </summary>
+        private void UpdateStatisticsTimer_Tick(object sender, EventArgs e)
         {
-            var current = pressureTest;
-            if (current == null) return;
-            string language = I18n.CurrentLanguage;
-            var status = await ExecuteAsync(() => current.GetStatus(language));
-            if (current != pressureTest) return;
-            if (status.Error != null)
+            if (pressureTestRunner != null && pressureTestRunner.IsRunning)
             {
-                string testType = I18n.T(isConsistencyTestMode ? "一致性测试" : "压力测试");
-                await StopPressureTest();
-                richTextBox1.Text = I18n.T("推理错误: ") + status.Error;
-                if (uiTestOptions == null)
-                    MessageBox.Show(this, string.Format(I18n.T("{0}过程中发生错误: {1}"), testType, status.Error), I18n.T("错误"), MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
+                RunOnUiThread(UpdatePressureStatisticsText);
             }
-            if (status.DifferentResult != null)
-            {
-                await StopPressureTest();
-                var text = new StringBuilder();
-                text.AppendLine(I18n.T("发现推理结果不一致！测试已停止。"));
-                text.AppendLine(I18n.T("=== 基准结果 ==="));
-                text.AppendLine(status.Baseline?.ToString(Formatting.Indented));
-                text.AppendLine(I18n.T("\n=== 当前结果 ==="));
-                text.AppendLine(status.DifferentResult.ToString(Formatting.Indented));
-                richTextBox1.Text = text.ToString();
-                if (uiTestOptions == null)
-                    MessageBox.Show(this, I18n.T("检测到推理结果不一致，测试已停止！"), I18n.T("结果不一致"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-            string statistics = BuildPressureTestText(status.Statistics);
-            if (isConsistencyTestMode && status.Baseline != null)
-                statistics += "\n\n" + I18n.T("基准结果:") + "\n" + status.Baseline.ToString(Formatting.Indented);
-            richTextBox1.Text = statistics;
         }
 
-        private async void button_threadtest_Click(object sender, EventArgs e)
-            => await RunOperationAsync(() => TogglePressureTest(false), "启动压力测试失败");
-
-        private async void button_consistency_test_Click(object sender, EventArgs e)
-            => await RunOperationAsync(() => TogglePressureTest(true), "启动一致性测试失败");
-
-        private async Task TogglePressureTest(bool checkConsistency)
+        private void UpdatePressureStatisticsText()
         {
-            if (pressureTest != null)
+            if (pressureTestRunner == null)
             {
-                await StopPressureTest();
                 return;
             }
+            string stats = BuildPressureTestText(pressureTestRunner.GetStatistics(false, false));
+            if (isConsistencyTestMode && baselineJsonResult != null)
+            {
+                stats = stats + "\n\n" +
+                        I18n.T("基准结果:") + "\n" +
+                        JsonConvert.SerializeObject(baselineJsonResult, Formatting.Indented);
+            }
+            richTextBox1.Text = stats;
+        }
+
+        private void button_threadtest_Click(object sender, EventArgs e)
+        {
             if (model == null)
             {
                 MessageBox.Show(I18n.T("请先加载模型文件！"));
@@ -1411,94 +1495,190 @@ namespace DlcvDemo
                 MessageBox.Show(I18n.T("请先选择图片文件！"));
                 return;
             }
-            await StartPressureTest(checkConsistency);
-        }
 
-        private async Task StartPressureTest(bool checkConsistency)
-        {
-            var current = model;
-            int batchSize = (int)numericUpDown_batch_size.Value;
-            int threadCount = (int)numericUpDown_num_thread.Value;
-            using (var image = ImageFileReader.Read(image_path))
+            if (pressureTestRunner != null && pressureTestRunner.IsRunning)
             {
-                var inferImage = PrepareImageForModelInput(image);
-                try
-                {
-                    pressureTest = await ExecuteAsync(() => current.StartPressureTest(inferImage, threadCount, batchSize, checkConsistency));
-                }
-                finally
-                {
-                    if (!ReferenceEquals(image, inferImage)) inferImage.Dispose();
-                }
+                StopPressureTest();
             }
-            batch_size = batchSize;
-            pressureThreadCount = threadCount;
-            isConsistencyTestMode = checkConsistency;
-            if (updateTimer == null)
-            {
-                updateTimer = new System.Windows.Forms.Timer(components) { Interval = 500 };
-                updateTimer.Tick += UpdateStatisticsTimer_Tick;
-            }
-            updateTimer.Start();
-            (checkConsistency ? button_consistency_test : button_thread_test).Text = I18n.T("停止");
-        }
-
-        private async Task StopPressureTest()
-        {
-            var current = pressureTest;
-            if (current == null) return;
-            pressureTest = null;
-            updateTimer?.Stop();
-            if (isConsistencyTestMode)
-                button_consistency_test.Text = I18n.T("一致性测试");
             else
-                button_thread_test.Text = I18n.T("多线程测试");
-            isConsistencyTestMode = false;
-            await ExecuteAsync(() => { current.Dispose(); return true; });
+            {
+                StartPressureTest(false); // 性能测试模式
+            }
         }
 
-        private async void button_freemodel_Click(object sender, EventArgs e)
-            => await RunOperationAsync(() => ReleaseModelsAsync(false), "释放模型失败");
+        /// <summary>
+        /// 启动测试
+        /// </summary>
+        private void StartPressureTest(bool consistencyTestMode)
+        {
+            try
+            {
+                // 设置测试模式
+                this.isConsistencyTestMode = consistencyTestMode;
 
-        private async Task ReleaseModelsAsync(bool all)
+                // 重置测试停止标志
+                shouldStopPressureTest = false;
+
+                // 准备测试数据
+                batch_size = (int)numericUpDown_batch_size.Value;
+                int threadCount = (int)numericUpDown_num_thread.Value;
+
+                Mat image = ImageFileReader.Read(image_path);
+                Mat inferImage = PrepareImageForModelInput(image);
+
+                var image_list = new List<Mat>();
+                for (int i = 0; i < batch_size; i++)
+                {
+                    image_list.Add(inferImage);
+                }
+
+                // 创建测试实例
+                pressureTestRunner = new PressureTestRunner(threadCount, 1000000, batch_size);
+                pressureTestRunner.SetFlowModelTiming(isCurrentFlowModel);
+                pressureTestRunner.SetTestAction(ModelInferAction, image_list);
+
+                // 创建并启动定时器更新UI
+                if (updateTimer == null)
+                {
+                    updateTimer = new System.Windows.Forms.Timer(components);
+                    updateTimer.Interval = 500;
+                    updateTimer.Tick += UpdateStatisticsTimer_Tick;
+                }
+                updateTimer.Start();
+
+                // 启动测试
+                pressureTestRunner.Start();
+
+                // 根据模式设置按钮文本
+                if (consistencyTestMode)
+                {
+                    button_consistency_test.Text = I18n.T("停止");
+                }
+                else
+                {
+                    button_thread_test.Text = I18n.T("停止");
+                }
+            }
+            catch (Exception ex)
+            {
+                string testType = I18n.T(consistencyTestMode ? "一致性测试" : "压力测试");
+                MessageBox.Show(this, string.Format(I18n.T("启动{0}失败: {1}"), testType, ex.Message), I18n.T("错误"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// 停止测试
+        /// </summary>
+        private void StopPressureTest()
+        {
+            if (pressureTestRunner != null)
+            {
+                pressureTestRunner.Stop();
+
+                // 停止定时器
+                if (updateTimer != null)
+                {
+                    updateTimer.Stop();
+                }
+
+                // 清理资源
+                shouldStopPressureTest = false; // 重置测试停止标志
+
+                // 根据模式重置按钮文本
+                if (isConsistencyTestMode)
+                {
+                    button_consistency_test.Text = I18n.T("一致性测试");
+                }
+                else
+                {
+                    button_thread_test.Text = I18n.T("多线程测试");
+                }
+
+                // 重置测试模式
+                isConsistencyTestMode = false;
+            }
+        }
+
+        /// <summary>
+        /// 一致性测试按钮点击事件
+        /// </summary>
+        private void button_consistency_test_Click(object sender, EventArgs e)
+        {
+            if (model == null)
+            {
+                MessageBox.Show(I18n.T("请先加载模型文件！"));
+                return;
+            }
+            if (image_path == null)
+            {
+                MessageBox.Show(I18n.T("请先选择图片文件！"));
+                return;
+            }
+
+            if (pressureTestRunner != null && pressureTestRunner.IsRunning)
+            {
+                StopPressureTest();
+            }
+            else
+            {
+                StartPressureTest(true); // 一致性测试模式
+            }
+        }
+
+        private void button_freemodel_Click(object sender, EventArgs e)
         {
             ClearResultData();
-            await StopPressureTest();
-            await ExecuteAsync(() =>
-            {
-                try { DisposeCurrentModel(); }
-                finally { if (all) execution.FreeAllModels(); }
-                return true;
-            });
+            // 如果存在正在运行的压力测试，先停止它
+            StopPressureTest();
+            DisposeCurrentModel();
             model_path = null;
-            richTextBox1.Text = I18n.T(all ? "所有模型已释放" : "模型已释放");
+            richTextBox1.Text = I18n.T("模型已释放");
         }
 
-        private async void Form1_FormClosing(object sender, FormClosingEventArgs e)
+        private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
-            if (closeReady) return;
-            if (savingJson || operationRunning)
+            if (savingJson)
             {
                 e.Cancel = true;
                 return;
             }
-            if (useRemoteExecution) e.Cancel = true;
-            operationRunning = true;
-            try { await ReleaseModelsAsync(true); }
-            catch (Exception ex) { Console.WriteLine("关闭窗口时释放模型失败：" + ex); }
-            finally { operationRunning = false; }
-            closeReady = true;
-            if (useRemoteExecution)
+            try
             {
-                if (imagePanel1.currentResults.HasValue)
-                    DemoRemoteResult.DisposeMasks(imagePanel1.currentResults.Value);
-                imagePanel1.ClearResults();
-                BeginInvoke(new Action(Close));
+                StopPressureTest();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("关闭窗口时停止测试失败：" + ex);
+            }
+
+            try
+            {
+                var disposable = model as IDisposable;
+                disposable?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("关闭窗口时释放当前模型失败：" + ex);
+            }
+            finally
+            {
+                model = null;
+            }
+
+            try
+            {
+                Utils.FreeAllModels();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("关闭窗口时释放全部模型失败：" + ex);
             }
         }
 
-        private async void button1_Click(object sender, EventArgs e)
-            => await RunOperationAsync(ShowDogInfoAsync, "检查加密狗失败");
+        private void button1_Click(object sender, EventArgs e)
+        {
+            ShowDogInfo();
+        }
 
         private async void button_check_environment_Click(object sender, EventArgs e)
         {
@@ -1517,13 +1697,19 @@ namespace DlcvDemo
             richTextBox1.Text = I18n.T("正在检查环境，请稍候...");
             try
             {
-                string text = await Task.Run(() => FormatEnvironmentInfoText(execution.GetEnvironmentInfo(), execution.GetDogInfo()));
-                if (!IsDisposed && !Disposing) richTextBox1.Text = text;
+                string environmentInfo = await Task.Run(() => EnvironmentInfoCollector.Collect());
+                if (IsDisposed || Disposing)
+                {
+                    return;
+                }
+                richTextBox1.Text = FormatEnvironmentInfoText(environmentInfo, QueryAllDogInfo());
             }
             catch (Exception ex)
             {
                 if (!IsDisposed && !Disposing)
-                    richTextBox1.Text = I18n.T("环境检查失败：") + "\n" + ex.Message;
+                {
+                    richTextBox1.Text = FormatEnvironmentInfoText(I18n.T("环境检查失败：") + "\n" + ex.Message, QueryAllDogInfo());
+                }
             }
             finally
             {
@@ -1548,8 +1734,23 @@ namespace DlcvDemo
                 + normalizedEnvironmentInfo;
         }
 
-        private async void button_free_all_model_Click(object sender, EventArgs e)
-            => await RunOperationAsync(() => ReleaseModelsAsync(true), "释放模型失败");
+        private void button_free_all_model_Click(object sender, EventArgs e)
+        {
+            ClearResultData();
+            // 如果存在正在运行的压力测试，先停止它
+            StopPressureTest();
+
+            // 释放模型
+            var disposable = model as IDisposable;
+            if (disposable != null)
+            {
+                disposable.Dispose();
+            }
+            model = null;
+            model_path = null;
+            Utils.FreeAllModels();
+            richTextBox1.Text = I18n.T("所有模型已释放");
+        }
 
 		/// <summary>
 		/// 统一错误输出：写入 richTextBox1 并弹窗提示

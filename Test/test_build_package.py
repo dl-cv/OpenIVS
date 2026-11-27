@@ -21,7 +21,6 @@ class CopyPackageFilesTest(unittest.TestCase):
             for file_name in build_package.PACKAGE_OUTPUT_FILE_NAMES:
                 (output_dir / file_name).write_bytes(file_name.encode("utf-8"))
 
-            (output_dir / build_package.REMOTE_WORKER_MARKER).write_text("1\n", encoding="utf-8")
             rpc_exe_source.write_bytes(b"rpc executable")
             (output_dir / "AIModelRPC.exe").write_bytes(b"old rpc executable")
             (output_dir / "DlcvDemo.exe").write_bytes(b"unexpected executable")
@@ -52,7 +51,6 @@ class CopyPackageFilesTest(unittest.TestCase):
                 b"rpc executable",
                 (staging_dir / build_package.RPC_EXE_NAME).read_bytes(),
             )
-            self.assertEqual("1", (staging_dir / "remote-worker-v1.txt").read_text(encoding="utf-8").strip())
             self.assertNotIn("DlcvDemo.exe", actual_names)
             self.assertNotIn("DlcvDemo.exe.config", actual_names)
             self.assertNotIn("old-runtime.dll", actual_names)

@@ -3,24 +3,14 @@ using System.Windows.Forms;
 
 namespace DlcvDemo
 {
-    public static class Program
+    internal static class Program
     {
         /// <summary>
         /// 应用程序的主入口点。
         /// </summary>
         [STAThread]
-        static int Main(string[] args) => Run(args, null);
-
-        public static string CurrentLanguage => I18n.CurrentLanguage;
-
-        [STAThread]
-        public static int Run(string[] args, IDemoExecution execution)
+        static int Main(string[] args)
         {
-            if (execution == null && args != null && args.Length > 0 && string.Equals(args[0], "remote-worker", StringComparison.OrdinalIgnoreCase))
-                return RemoteWorker.Run(args);
-            if (execution == null && args != null && args.Length > 0 && string.Equals(args[0], "remote-worker-selftest", StringComparison.OrdinalIgnoreCase))
-                return RemoteWorker.RunWithStreams((input, output) => RemoteWorkerSelfTest.Run(args, output));
-
             if (args != null && args.Length > 0
                 && string.Equals(args[0], "ui-test", StringComparison.OrdinalIgnoreCase))
             {
@@ -39,7 +29,7 @@ namespace DlcvDemo
 
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                using (var uiTestWindow = new MainWindow(options, execution))
+                using (var uiTestWindow = new MainWindow(options))
                 {
                     Application.Run(uiTestWindow);
                     return uiTestWindow.UiTestExitCode;
@@ -49,14 +39,12 @@ namespace DlcvDemo
             if (args != null && args.Length > 0)
             {
                 CliRunner.InitializeConsole();
-                if (execution == null) return CliRunner.Run(args);
-                Console.Error.WriteLine("云端测试程序的命令行支持 ui-test。");
-                return 2;
+                return CliRunner.Run(args);
             }
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            using (var window = new MainWindow(execution))
+            using (var window = new MainWindow())
             {
                 Application.Run(window);
             }
